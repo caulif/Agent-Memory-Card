@@ -9,6 +9,13 @@ This prototype implements the first loop:
 3. Mirror referenced Skills into target Agent skill directories.
 4. Preview or build generated Agent artifacts.
 
+v0.2 adds the trust loop:
+
+1. Mirror metadata records the source hash at sync time.
+2. `status` distinguishes `synced`, `missing`, `source updated`, `target drifted`, and combined drift.
+3. `sync` reconciles declared mirrors and generated artifacts.
+4. The Canvas API exposes status and sync endpoints for UI controls.
+
 ## Commands
 
 ```bash
@@ -18,6 +25,7 @@ cargo run -- mirror --skill superpowers:brainstorming --agent codex --project .
 cargo run -- build --preview --project .
 cargo run -- build --project .
 cargo run -- status --project .
+cargo run -- sync --project .
 ```
 
 The npm wrapper works locally after the Rust binary has been built:
@@ -46,6 +54,9 @@ cargo run -- build --project .
 
 # 6. Check mirror health.
 cargo run -- status --project .
+
+# 7. Re-sync declared mirrors and generated artifacts.
+cargo run -- sync --project .
 ```
 
 The Canvas UI exposes:
@@ -53,6 +64,7 @@ The Canvas UI exposes:
 - `/api/state` for project config, imported rules, and skill index
 - `/api/mirror` for declaring a Skill mirror
 - `/api/build/preview` for build previews
+- `/api/sync` for syncing declared mirrors and generated artifacts
 - `/api/status` for synced / missing / drifted mirror state
 
 ## Generated State

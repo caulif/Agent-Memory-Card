@@ -74,6 +74,13 @@ enum Commands {
         project: PathBuf,
     },
 
+    /// Sync mirrors and generated artifacts from declarative project config.
+    Sync {
+        /// Project root.
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
     /// Launch the local Canvas workspace UI.
     Ui {
         /// Project root.
@@ -118,6 +125,10 @@ async fn main() -> Result<()> {
         }
         Commands::Status { project } => {
             let report = build::status_project(&project)?;
+            println!("{}", report.render());
+        }
+        Commands::Sync { project } => {
+            let report = build::sync_project(&project)?;
             println!("{}", report.render());
         }
         Commands::Ui {

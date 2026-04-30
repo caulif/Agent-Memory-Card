@@ -5,6 +5,8 @@ use std::path::Path;
 use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
 
+use serde::{Deserialize, Serialize};
+
 use crate::config::{self, ArtifactState, MirrorState, ProjectLock, SkillRecord};
 use crate::fsutil;
 
@@ -27,6 +29,17 @@ struct StatusRow {
     agent: String,
     target: String,
     status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct MirrorMarker {
+    generated_by: String,
+    mode: String,
+    source: String,
+    skill: String,
+    agent: String,
+    mirrored_at: String,
+    source_hash: String,
 }
 
 impl BuildReport {
@@ -143,6 +156,7 @@ pub fn build_project(project_root: &Path, preview: bool) -> Result<BuildReport> 
                     "skill": skill.id,
                     "agent": target,
                     "mirrored_at": Utc::now().to_rfc3339(),
+                    "source_hash": skill.source_hash,
                 }))?;
                 fs::write(target_dir.join(".agent-kernel-mirror.yml"), marker)?;
                 let target_hash =
@@ -269,10 +283,19 @@ pub fn status_project(project_root: &Path) -> Result<StatusReport> {
             } else {
                 let target_hash =
                     fsutil::sha256_dir_excluding(&target_dir, &[".agent-kernel-mirror.yml"])?;
-                if target_hash == skill.source_hash {
+                let current_source_hash = fsutil::sha256_dir(Path::new(&skill.source_path))?;
+                let marker = read_marker(&target_dir)?;
+                if target_hash == current_source_hash {
                     "synced".to_string()
-                } else if target_dir.join(".agent-kernel-mirror.yml").exists() {
-                    "target drifted".to_string()
+                } else if let Some(marker) = marker {
+                    let source_changed = marker.source_hash != current_source_hash;
+                    let target_changed = marker.source_hash != target_hash;
+                    match (source_changed, target_changed) {
+                        (true, false) => "source updated".to_string(),
+                        (false, true) => "target drifted".to_string(),
+                        (true, true) => "source updated + target drifted".to_string(),
+                        (false, false) => "synced".to_string(),
+                    }
                 } else {
                     "unmanaged target exists".to_string()
                 }
@@ -300,4 +323,76 @@ pub fn mirror(project_root: &Path, skill_id: &str, agent: &str) -> Result<()> {
         return Err(anyhow!("agent `{agent}` does not support mirrored skills"));
     }
     config::add_mirror(&root, skill_id, agent)
+}
+
+pub fn sync_project(project_root: &Path) -> Result<BuildReport> {
+    build_project(project_root, false)
+}
+
+fn read_marker(target_dir: &Path) -> Result<Option<MirrorMarker>> {
+    let path = target_dir.join(".agent-kernel-mirror.yml");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let text = fs::read_to_string(path)?;
+    Ok(Some(serde_yaml::from_str(&text)?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn write_skill(path: &Path, body: &str) {
+        fs::create_dir_all(path).expect("create skill dir");
+        fs::write(
+            path.join("SKILL.md"),
+            format!("---\nname: demo\ndescription: Use when testing mirror status behavior\n---\n{body}\n"),
+        )
+        .expect("write skill");
+    }
+
+    #[test]
+    fn status_distinguishes_source_updated_and_target_drifted() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        let source = root.join("source-skill");
+        write_skill(&source, "# Demo");
+
+        let mut project = config::default_project_config(root);
+        project.skills.mirrors.push(config::MirrorDecl {
+            reference: "local:demo".to_string(),
+            targets: vec!["codex".to_string()],
+        });
+        config::save_project_config(root, &project).expect("save project");
+        config::save_skill_index(
+            root,
+            &config::SkillIndex {
+                generated_at: "test".to_string(),
+                skills: vec![SkillRecord {
+                    id: "local:demo".to_string(),
+                    name: "demo".to_string(),
+                    description: "Use when testing mirror status behavior".to_string(),
+                    source_path: fsutil::path_to_slash(&source),
+                    source_kind: "referenced".to_string(),
+                    source_hash: fsutil::sha256_dir(&source).expect("source hash"),
+                    warnings: Vec::new(),
+                }],
+            },
+        )
+        .expect("save index");
+
+        sync_project(root).expect("sync");
+        let synced = status_project(root).expect("status");
+        assert_eq!(synced.rows[0].status, "synced");
+
+        write_skill(&source, "# Demo\nUpdated");
+        let source_updated = status_project(root).expect("status");
+        assert_eq!(source_updated.rows[0].status, "source updated");
+
+        let target = root.join(".agents").join("skills").join("demo");
+        fs::write(target.join("LOCAL.md"), "local edit").expect("target edit");
+        let both = status_project(root).expect("status");
+        assert_eq!(both.rows[0].status, "source updated + target drifted");
+    }
 }

@@ -20,6 +20,7 @@
 - 对话提炼采用半自动 Draft Inbox：MCP/CLI/session log 主动发现值得沉淀的信息，但只生成草稿和推荐作用域，不自动启用。
 - 隐私策略采用 Hybrid：扫描、索引、Mirror、build、Rule CI 编排默认本地执行；LLM 提炼和冲突判断通过可选 provider 完成，用户可选择云端模型或本地模型。
 - v0.1 范围收紧：先不做半自动对话提炼，第一版只完成“扫描现有规则和 Skills -> Canvas 分配 -> Mirror/build preview”的闭环。
+- v0.2 范围：完善 Mirror 信任闭环，区分 source updated / target drifted，提供 CLI/UI sync。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 npm 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。

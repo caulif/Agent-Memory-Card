@@ -45,6 +45,7 @@ pub async fn serve(project: PathBuf, port: u16, open_browser: bool) -> Result<()
         .route("/api/state", get(api_state))
         .route("/api/mirror", post(api_mirror))
         .route("/api/build/preview", post(api_build_preview))
+        .route("/api/sync", post(api_sync))
         .route("/api/status", get(api_status))
         .layer(CorsLayer::permissive())
         .with_state(state);
@@ -107,6 +108,13 @@ async fn api_status(State(state): State<AppState>) -> Json<serde_json::Value> {
             |error| serde_json::json!({ "rows": [], "warnings": [error.to_string()] }),
         )),
         Err(error) => Json(serde_json::json!({ "rows": [], "warnings": [error.to_string()] })),
+    }
+}
+
+async fn api_sync(State(state): State<AppState>) -> Json<serde_json::Value> {
+    match build::sync_project(state.project_root.as_ref()) {
+        Ok(report) => Json(serde_json::json!({ "ok": true, "text": report.render() })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "text": error.to_string() })),
     }
 }
 
@@ -223,6 +231,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
 
     <footer>
       <button class="btn primary" id="preview">Preview Build</button>
+      <button class="btn" id="sync">Sync Mirrors</button>
       <button class="btn" id="refresh">Refresh</button>
       <pre id="build-output">Ready.</pre>
     </footer>
@@ -412,6 +421,13 @@ const INDEX_HTML: &str = r##"<!doctype html>
       document.getElementById("build-output").textContent = result.text;
     }
 
+    async function syncMirrors() {
+      const res = await fetch("/api/sync", { method: "POST" });
+      const result = await res.json();
+      document.getElementById("build-output").textContent = result.text;
+      await loadState();
+    }
+
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
     }
@@ -422,6 +438,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
 
     document.getElementById("search").addEventListener("input", renderSkills);
     document.getElementById("preview").addEventListener("click", previewBuild);
+    document.getElementById("sync").addEventListener("click", syncMirrors);
     document.getElementById("refresh").addEventListener("click", loadState);
     document.getElementById("open-store").addEventListener("click", () => document.getElementById("store").classList.add("open"));
     document.getElementById("close-store").addEventListener("click", () => document.getElementById("store").classList.remove("open"));
