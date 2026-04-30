@@ -1,5 +1,6 @@
 mod build;
 mod config;
+mod draft;
 mod fsutil;
 mod scanner;
 mod skilllet;
@@ -88,6 +89,12 @@ enum Commands {
         command: SkillletCommands,
     },
 
+    /// Manage local Draft Inbox items before they become Skilllets.
+    Draft {
+        #[command(subcommand)]
+        command: DraftCommands,
+    },
+
     /// Launch the local Canvas workspace UI.
     Ui {
         /// Project root.
@@ -140,6 +147,43 @@ enum SkillletCommands {
     /// List owned project Skilllets.
     List {
         /// Project root.
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum DraftCommands {
+    /// Add a Draft Inbox item.
+    Add {
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        title: String,
+        #[arg(long)]
+        body: String,
+        #[arg(long, default_value = "preference")]
+        kind: String,
+        #[arg(long, default_value = "project")]
+        scope: String,
+        #[arg(long = "target")]
+        targets: Vec<String>,
+        #[arg(long, default_value = "manual")]
+        evidence: String,
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
+    /// List Draft Inbox items.
+    List {
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
+    /// Approve a Draft Inbox item into an owned Skilllet.
+    Approve {
+        #[arg(long)]
+        id: String,
         #[arg(long, default_value = ".")]
         project: PathBuf,
     },
@@ -202,6 +246,46 @@ async fn main() -> Result<()> {
                         println!("- {}: {}", record.id, record.title);
                     }
                 }
+            }
+        },
+        Commands::Draft { command } => match command {
+            DraftCommands::Add {
+                id,
+                title,
+                body,
+                kind,
+                scope,
+                targets,
+                evidence,
+                project,
+            } => {
+                draft::add_draft(
+                    &project,
+                    draft::NewDraft {
+                        id: id.clone(),
+                        title,
+                        body,
+                        kind,
+                        scope,
+                        targets,
+                        evidence,
+                    },
+                )?;
+                println!("Added draft `{id}`");
+            }
+            DraftCommands::List { project } => {
+                let records = draft::load_drafts(&project)?;
+                if records.is_empty() {
+                    println!("No drafts found.");
+                } else {
+                    for record in records {
+                        println!("- {}: {} [{}]", record.id, record.title, record.status);
+                    }
+                }
+            }
+            DraftCommands::Approve { id, project } => {
+                draft::approve_draft(&project, &id)?;
+                println!("Approved draft `{id}` into owned Skilllet");
             }
         },
         Commands::Ui {

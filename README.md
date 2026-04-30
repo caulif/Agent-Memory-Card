@@ -23,6 +23,13 @@ v0.3 adds the Skilllet foundation:
 3. Build artifacts compile targeted Skilllets into the selected Agent instructions.
 4. The Canvas state API exposes owned Skilllets for UI display.
 
+v0.4 starts the Draft Inbox foundation:
+
+1. Local drafts live under `.agent-kernel/drafts`.
+2. `draft add` creates a reviewable candidate without enabling it.
+3. `draft approve` converts a draft into an owned Skilllet and updates `project.yml`.
+4. The Canvas state API exposes drafts for UI display.
+
 ## Commands
 
 ```bash
@@ -35,6 +42,8 @@ cargo run -- status --project .
 cargo run -- sync --project .
 cargo run -- skilllet add --id project:use-axios --title "Use Axios" --body "Use Axios for frontend HTTP requests." --target codex --project .
 cargo run -- skilllet list --project .
+cargo run -- draft add --id project:prefer-pnpm --title "Prefer pnpm" --body "Use pnpm for package management." --target codex --project .
+cargo run -- draft approve --id project:prefer-pnpm --project .
 ```
 
 The npm wrapper works locally after the Rust binary has been built:
@@ -69,6 +78,10 @@ cargo run -- sync --project .
 
 # 8. Add an owned Skilllet and compile it into selected Agent instructions.
 cargo run -- skilllet add --id project:use-axios --title "Use Axios" --body "Use Axios for frontend HTTP requests." --target codex --project .
+
+# 9. Add and approve a Draft Inbox item.
+cargo run -- draft add --id project:prefer-pnpm --title "Prefer pnpm" --body "Use pnpm for package management." --target codex --project .
+cargo run -- draft approve --id project:prefer-pnpm --project .
 ```
 
 The Canvas UI exposes:
@@ -83,6 +96,7 @@ The Canvas UI exposes:
 
 - `.agent-kernel/project.yml` is the declarative project config.
 - `.agent-kernel/skilllets/` contains owned lightweight Skilllet source files.
+- `.agent-kernel/drafts/` contains local Draft Inbox candidates before approval.
 - `.agent-kernel/skill-index.yml` is the imported Skill index.
 - `.agent-kernel/project.lock.yml` records generated mirror and artifact hashes.
 - `AGENTS.md`, `CLAUDE.md`, and mirrored skill folders are build artifacts.

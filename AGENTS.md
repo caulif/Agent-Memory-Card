@@ -14,3 +14,7 @@ This file is a build artifact for the current project.
 
 Use Axios for frontend HTTP requests.
 
+### Prefer pnpm
+
+Use pnpm for package management.
+

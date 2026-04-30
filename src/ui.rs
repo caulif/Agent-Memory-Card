@@ -13,6 +13,7 @@ use tower_http::cors::CorsLayer;
 
 use crate::build;
 use crate::config;
+use crate::draft::{self, DraftRecord};
 use crate::fsutil;
 use crate::skilllet::{self, SkillletRecord};
 
@@ -33,6 +34,7 @@ struct ApiState {
     project: config::ProjectConfig,
     skill_index: config::SkillIndex,
     skilllets: Vec<SkillletRecord>,
+    drafts: Vec<DraftRecord>,
     imported_rules: serde_yaml::Value,
 }
 
@@ -74,6 +76,7 @@ async fn api_state(State(state): State<AppState>) -> Json<ApiState> {
         .unwrap_or_else(|_| config::default_project_config(root));
     let skill_index = config::load_skill_index(root).unwrap_or_default();
     let skilllets = skilllet::load_skilllets(root).unwrap_or_default();
+    let drafts = draft::load_drafts(root).unwrap_or_default();
     let rules_path = config::kernel_dir(root).join("imported-rules.yml");
     let imported_rules = fs::read_to_string(rules_path)
         .ok()
@@ -85,6 +88,7 @@ async fn api_state(State(state): State<AppState>) -> Json<ApiState> {
         project,
         skill_index,
         skilllets,
+        drafts,
         imported_rules,
     })
 }
@@ -204,6 +208,8 @@ const INDEX_HTML: &str = r##"<!doctype html>
       <div id="skills"></div>
       <div class="pane-title">Skilllets <span id="skilllet-count">0</span></div>
       <div id="skilllets"></div>
+      <div class="pane-title">Draft Inbox <span id="draft-count">0</span></div>
+      <div id="drafts"></div>
     </aside>
 
     <main>
@@ -269,6 +275,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
       document.getElementById("project-path").textContent = state.project_root;
       renderSkills();
       renderSkilllets();
+      renderDrafts();
       renderCanvas();
       renderMirrors();
       await renderStatus();
@@ -308,6 +315,18 @@ const INDEX_HTML: &str = r##"<!doctype html>
           <span class="tag">${escapeHtml(item.kind)}</span>
         </div>
       `).join("") || `<div class="empty">No owned skilllets yet.</div>`;
+    }
+
+    function renderDrafts() {
+      const drafts = state.drafts || [];
+      document.getElementById("draft-count").textContent = drafts.length;
+      document.getElementById("drafts").innerHTML = drafts.map(item => `
+        <div class="skill">
+          <strong>${escapeHtml(item.id)}</strong>
+          <p>${escapeHtml(item.body)}</p>
+          <span class="tag">${escapeHtml(item.status)}</span>
+        </div>
+      `).join("") || `<div class="empty">No drafts yet.</div>`;
     }
 
     function renderCanvas() {

@@ -22,6 +22,7 @@
 - v0.1 范围收紧：先不做半自动对话提炼，第一版只完成“扫描现有规则和 Skills -> Canvas 分配 -> Mirror/build preview”的闭环。
 - v0.2 范围：完善 Mirror 信任闭环，区分 source updated / target drifted，提供 CLI/UI sync。
 - v0.3 范围：落地 Owned Skilllet 存储、CLI add/list、声明式 project.yml include、按 Agent target 编译到指令文件。
+- v0.4 范围：落地本地 Draft Inbox，不接 LLM，先支持 CLI add/list/approve 和 UI 展示。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 npm 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。
