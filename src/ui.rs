@@ -45,6 +45,7 @@ pub async fn serve(project: PathBuf, port: u16, open_browser: bool) -> Result<()
         .route("/api/state", get(api_state))
         .route("/api/mirror", post(api_mirror))
         .route("/api/build/preview", post(api_build_preview))
+        .route("/api/status", get(api_status))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -97,6 +98,15 @@ async fn api_build_preview(State(state): State<AppState>) -> Json<serde_json::Va
     match build::preview_as_json(state.project_root.as_ref()) {
         Ok(value) => Json(value),
         Err(error) => Json(serde_json::json!({ "preview": true, "text": error.to_string() })),
+    }
+}
+
+async fn api_status(State(state): State<AppState>) -> Json<serde_json::Value> {
+    match build::status_project(state.project_root.as_ref()) {
+        Ok(report) => Json(serde_json::to_value(report).unwrap_or_else(
+            |error| serde_json::json!({ "rows": [], "warnings": [error.to_string()] }),
+        )),
+        Err(error) => Json(serde_json::json!({ "rows": [], "warnings": [error.to_string()] })),
     }
 }
 
@@ -202,6 +212,10 @@ const INDEX_HTML: &str = r##"<!doctype html>
         <div id="mirrors"></div>
       </section>
       <section>
+        <h3>Mirror Status</h3>
+        <div id="mirror-status"></div>
+      </section>
+      <section>
         <h3>Imported Rules</h3>
         <div id="rules"></div>
       </section>
@@ -241,6 +255,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
       renderSkills();
       renderCanvas();
       renderMirrors();
+      await renderStatus();
       renderRules();
       renderStore();
     }
@@ -314,6 +329,15 @@ const INDEX_HTML: &str = r##"<!doctype html>
       document.getElementById("mirrors").innerHTML = mirrors.length ? `<ul>${mirrors.map(m =>
         `<li><strong>${escapeHtml(m.ref)}</strong><br>${escapeHtml(m.targets.join(", "))}</li>`
       ).join("")}</ul>` : `<p>No mirrors declared yet.</p>`;
+    }
+
+    async function renderStatus() {
+      const res = await fetch("/api/status");
+      const status = await res.json();
+      const rows = status.rows || [];
+      document.getElementById("mirror-status").innerHTML = rows.length ? `<ul>${rows.map(row =>
+        `<li><strong>${escapeHtml(row.skill)}</strong><br>${escapeHtml(row.agent)} · ${escapeHtml(row.status)}</li>`
+      ).join("")}</ul>` : `<p>No mirror status yet.</p>`;
     }
 
     function renderRules() {

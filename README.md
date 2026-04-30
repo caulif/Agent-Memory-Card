@@ -26,6 +26,35 @@ The npm wrapper works locally after the Rust binary has been built:
 node npm/agent-kernel.js scan --scan-home --project .
 ```
 
+## v0.1 Workflow
+
+```bash
+# 1. Import existing local rules and Skills.
+cargo run -- import --scan-home --project .
+
+# 2. Open the Project-centered Canvas.
+cargo run -- ui --project .
+
+# 3. Mirror a referenced Skill to an Agent target.
+cargo run -- mirror --skill superpowers:brainstorming --agent codex --project .
+
+# 4. Preview generated artifacts.
+cargo run -- build --preview --project .
+
+# 5. Write generated artifacts and mirrored skill directories.
+cargo run -- build --project .
+
+# 6. Check mirror health.
+cargo run -- status --project .
+```
+
+The Canvas UI exposes:
+
+- `/api/state` for project config, imported rules, and skill index
+- `/api/mirror` for declaring a Skill mirror
+- `/api/build/preview` for build previews
+- `/api/status` for synced / missing / drifted mirror state
+
 ## Generated State
 
 - `.agent-kernel/project.yml` is the declarative project config.

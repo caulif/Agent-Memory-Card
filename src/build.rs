@@ -15,13 +15,13 @@ pub struct BuildReport {
     warnings: Vec<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub struct StatusReport {
     rows: Vec<StatusRow>,
     warnings: Vec<String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 struct StatusRow {
     skill: String,
     agent: String,
