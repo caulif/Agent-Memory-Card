@@ -1,0 +1,14 @@
+{
+  "name": "agent-kernel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Project-centered Agent skills and rules workspace",
+  "bin": {
+    "agent-kernel": "npm/agent-kernel.js"
+  },
+  "scripts": {
+    "build": "cargo build",
+    "test": "cargo test",
+    "start": "cargo run --"
+  }
+}

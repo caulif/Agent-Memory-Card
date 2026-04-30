@@ -1,0 +1,7 @@
+/target/
+/.agent-kernel/cache/
+/.agent-kernel/canvas.state.json
+/.agent-kernel/imported-rules.yml
+/.agent-kernel/project.lock.yml
+/.agent-kernel/skill-index.yml
+/.agents/skills/
