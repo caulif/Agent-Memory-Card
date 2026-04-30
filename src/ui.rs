@@ -14,6 +14,7 @@ use tower_http::cors::CorsLayer;
 use crate::build;
 use crate::config;
 use crate::fsutil;
+use crate::skilllet::{self, SkillletRecord};
 
 #[derive(Clone)]
 struct AppState {
@@ -31,6 +32,7 @@ struct ApiState {
     project_root: String,
     project: config::ProjectConfig,
     skill_index: config::SkillIndex,
+    skilllets: Vec<SkillletRecord>,
     imported_rules: serde_yaml::Value,
 }
 
@@ -71,6 +73,7 @@ async fn api_state(State(state): State<AppState>) -> Json<ApiState> {
     let project = config::load_or_default_project_config(root)
         .unwrap_or_else(|_| config::default_project_config(root));
     let skill_index = config::load_skill_index(root).unwrap_or_default();
+    let skilllets = skilllet::load_skilllets(root).unwrap_or_default();
     let rules_path = config::kernel_dir(root).join("imported-rules.yml");
     let imported_rules = fs::read_to_string(rules_path)
         .ok()
@@ -81,6 +84,7 @@ async fn api_state(State(state): State<AppState>) -> Json<ApiState> {
         project_root: fsutil::path_to_slash(root),
         project,
         skill_index,
+        skilllets,
         imported_rules,
     })
 }
@@ -198,6 +202,8 @@ const INDEX_HTML: &str = r##"<!doctype html>
       <div class="pane-title">Skill Library <span id="skill-count">0</span></div>
       <input class="search" id="search" placeholder="Search skills" />
       <div id="skills"></div>
+      <div class="pane-title">Skilllets <span id="skilllet-count">0</span></div>
+      <div id="skilllets"></div>
     </aside>
 
     <main>
@@ -262,6 +268,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
       state = await res.json();
       document.getElementById("project-path").textContent = state.project_root;
       renderSkills();
+      renderSkilllets();
       renderCanvas();
       renderMirrors();
       await renderStatus();
@@ -289,6 +296,18 @@ const INDEX_HTML: &str = r##"<!doctype html>
           ev.dataTransfer.setData("text/plain", el.dataset.skill);
         });
       });
+    }
+
+    function renderSkilllets() {
+      const skilllets = state.skilllets || [];
+      document.getElementById("skilllet-count").textContent = skilllets.length;
+      document.getElementById("skilllets").innerHTML = skilllets.map(item => `
+        <div class="skill">
+          <strong>${escapeHtml(item.id)}</strong>
+          <p>${escapeHtml(item.body)}</p>
+          <span class="tag">${escapeHtml(item.kind)}</span>
+        </div>
+      `).join("") || `<div class="empty">No owned skilllets yet.</div>`;
     }
 
     function renderCanvas() {

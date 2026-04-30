@@ -2,6 +2,7 @@ mod build;
 mod config;
 mod fsutil;
 mod scanner;
+mod skilllet;
 mod ui;
 
 use std::path::PathBuf;
@@ -81,6 +82,12 @@ enum Commands {
         project: PathBuf,
     },
 
+    /// Manage lightweight project Skilllets.
+    Skilllet {
+        #[command(subcommand)]
+        command: SkillletCommands,
+    },
+
     /// Launch the local Canvas workspace UI.
     Ui {
         /// Project root.
@@ -94,6 +101,47 @@ enum Commands {
         /// Do not open a browser.
         #[arg(long)]
         no_open: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum SkillletCommands {
+    /// Add an owned project Skilllet and include it in project.yml.
+    Add {
+        /// Stable id, such as project:use-axios.
+        #[arg(long)]
+        id: String,
+
+        /// Human-readable title.
+        #[arg(long)]
+        title: String,
+
+        /// Skilllet body text.
+        #[arg(long)]
+        body: String,
+
+        /// Optional kind: preference, constraint, procedure, fact, episode.
+        #[arg(long, default_value = "preference")]
+        kind: String,
+
+        /// Optional scope: project, global, directory, agent-specific.
+        #[arg(long, default_value = "project")]
+        scope: String,
+
+        /// Agent target. Repeat for multiple agents. Empty means all enabled instruction agents.
+        #[arg(long = "target")]
+        targets: Vec<String>,
+
+        /// Project root.
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
+    /// List owned project Skilllets.
+    List {
+        /// Project root.
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
     },
 }
 
@@ -131,6 +179,31 @@ async fn main() -> Result<()> {
             let report = build::sync_project(&project)?;
             println!("{}", report.render());
         }
+        Commands::Skilllet { command } => match command {
+            SkillletCommands::Add {
+                id,
+                title,
+                body,
+                kind,
+                scope,
+                targets,
+                project,
+            } => {
+                skilllet::add_skilllet(&project, &id, &title, &body, &kind, &scope, targets)?;
+                println!("Added skilllet `{id}`");
+                println!("Run `agent-kernel build --preview` to inspect generated instructions.");
+            }
+            SkillletCommands::List { project } => {
+                let records = skilllet::load_skilllets(&project)?;
+                if records.is_empty() {
+                    println!("No skilllets found.");
+                } else {
+                    for record in records {
+                        println!("- {}: {}", record.id, record.title);
+                    }
+                }
+            }
+        },
         Commands::Ui {
             project,
             port,

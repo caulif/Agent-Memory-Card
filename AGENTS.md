@@ -7,3 +7,10 @@ This file is a build artifact for the current project.
 ## Enabled Skills
 
 - `superpowers:brainstorming`
+
+## Enabled Skilllets
+
+### Use Axios
+
+Use Axios for frontend HTTP requests.
+

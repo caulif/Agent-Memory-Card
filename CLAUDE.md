@@ -7,3 +7,7 @@ This file is a build artifact for the current project.
 ## Enabled Skills
 
 - No mirrored skills are declared for this agent yet.
+
+## Enabled Skilllets
+
+- No skilllets are declared for this agent yet.

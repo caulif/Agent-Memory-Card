@@ -16,6 +16,13 @@ v0.2 adds the trust loop:
 3. `sync` reconciles declared mirrors and generated artifacts.
 4. The Canvas API exposes status and sync endpoints for UI controls.
 
+v0.3 adds the Skilllet foundation:
+
+1. Owned Skilllets live under `.agent-kernel/skilllets`.
+2. `skilllet add` writes a Skilllet and updates declarative `project.yml`.
+3. Build artifacts compile targeted Skilllets into the selected Agent instructions.
+4. The Canvas state API exposes owned Skilllets for UI display.
+
 ## Commands
 
 ```bash
@@ -26,6 +33,8 @@ cargo run -- build --preview --project .
 cargo run -- build --project .
 cargo run -- status --project .
 cargo run -- sync --project .
+cargo run -- skilllet add --id project:use-axios --title "Use Axios" --body "Use Axios for frontend HTTP requests." --target codex --project .
+cargo run -- skilllet list --project .
 ```
 
 The npm wrapper works locally after the Rust binary has been built:
@@ -57,6 +66,9 @@ cargo run -- status --project .
 
 # 7. Re-sync declared mirrors and generated artifacts.
 cargo run -- sync --project .
+
+# 8. Add an owned Skilllet and compile it into selected Agent instructions.
+cargo run -- skilllet add --id project:use-axios --title "Use Axios" --body "Use Axios for frontend HTTP requests." --target codex --project .
 ```
 
 The Canvas UI exposes:
@@ -70,6 +82,7 @@ The Canvas UI exposes:
 ## Generated State
 
 - `.agent-kernel/project.yml` is the declarative project config.
+- `.agent-kernel/skilllets/` contains owned lightweight Skilllet source files.
 - `.agent-kernel/skill-index.yml` is the imported Skill index.
 - `.agent-kernel/project.lock.yml` records generated mirror and artifact hashes.
 - `AGENTS.md`, `CLAUDE.md`, and mirrored skill folders are build artifacts.
