@@ -187,6 +187,14 @@ enum DraftCommands {
         #[arg(long, default_value = ".")]
         project: PathBuf,
     },
+
+    /// Reject and remove a Draft Inbox item.
+    Reject {
+        #[arg(long)]
+        id: String,
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
 }
 
 #[tokio::main]
@@ -286,6 +294,10 @@ async fn main() -> Result<()> {
             DraftCommands::Approve { id, project } => {
                 draft::approve_draft(&project, &id)?;
                 println!("Approved draft `{id}` into owned Skilllet");
+            }
+            DraftCommands::Reject { id, project } => {
+                draft::reject_draft(&project, &id)?;
+                println!("Rejected draft `{id}`");
             }
         },
         Commands::Ui {

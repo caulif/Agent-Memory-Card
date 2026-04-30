@@ -11,7 +11,7 @@ use crate::config::{self, ArtifactState, MirrorState, ProjectLock, SkillRecord};
 use crate::fsutil;
 use crate::skilllet::{self, SkillletRecord};
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub struct BuildReport {
     preview: bool,
     actions: Vec<String>,
@@ -273,7 +273,9 @@ pub fn preview_as_json(project_root: &Path) -> Result<serde_json::Value> {
     let report = build_project(project_root, true)?;
     Ok(serde_json::json!({
         "preview": true,
-        "text": report.render()
+        "text": report.render(),
+        "actions": report.actions,
+        "warnings": report.warnings,
     }))
 }
 

@@ -99,6 +99,16 @@ pub fn approve_draft(project_root: &Path, id: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn reject_draft(project_root: &Path, id: &str) -> Result<()> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    let path = draft_path(&root, id);
+    if !path.exists() {
+        return Err(anyhow!("draft `{id}` does not exist"));
+    }
+    fs::remove_file(path)?;
+    Ok(())
+}
+
 fn draft_path(project_root: &Path, id: &str) -> PathBuf {
     let safe = id.replace(':', "/").replace(['\\', ' '], "-");
     config::kernel_dir(project_root)

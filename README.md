@@ -30,6 +30,13 @@ v0.4 starts the Draft Inbox foundation:
 3. `draft approve` converts a draft into an owned Skilllet and updates `project.yml`.
 4. The Canvas state API exposes drafts for UI display.
 
+v0.5 makes Draft Inbox actionable in the UI:
+
+1. Draft cards expose Approve and Reject actions.
+2. `/api/draft/approve` converts drafts into owned Skilllets.
+3. `/api/draft/reject` removes unwanted drafts.
+4. Build preview returns structured actions and warnings for richer UI rendering.
+
 ## Commands
 
 ```bash
@@ -44,6 +51,7 @@ cargo run -- skilllet add --id project:use-axios --title "Use Axios" --body "Use
 cargo run -- skilllet list --project .
 cargo run -- draft add --id project:prefer-pnpm --title "Prefer pnpm" --body "Use pnpm for package management." --target codex --project .
 cargo run -- draft approve --id project:prefer-pnpm --project .
+cargo run -- draft reject --id project:prefer-pnpm --project .
 ```
 
 The npm wrapper works locally after the Rust binary has been built:

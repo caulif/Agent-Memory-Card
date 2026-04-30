@@ -28,6 +28,11 @@ struct MirrorRequest {
     agent: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct DraftActionRequest {
+    id: String,
+}
+
 #[derive(Debug, Serialize)]
 struct ApiState {
     project_root: String,
@@ -48,6 +53,8 @@ pub async fn serve(project: PathBuf, port: u16, open_browser: bool) -> Result<()
         .route("/", get(index))
         .route("/api/state", get(api_state))
         .route("/api/mirror", post(api_mirror))
+        .route("/api/draft/approve", post(api_draft_approve))
+        .route("/api/draft/reject", post(api_draft_reject))
         .route("/api/build/preview", post(api_build_preview))
         .route("/api/sync", post(api_sync))
         .route("/api/status", get(api_status))
@@ -98,6 +105,26 @@ async fn api_mirror(
     Json(req): Json<MirrorRequest>,
 ) -> Json<serde_json::Value> {
     match build::mirror(state.project_root.as_ref(), &req.skill, &req.agent) {
+        Ok(_) => Json(serde_json::json!({ "ok": true })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+async fn api_draft_approve(
+    State(state): State<AppState>,
+    Json(req): Json<DraftActionRequest>,
+) -> Json<serde_json::Value> {
+    match draft::approve_draft(state.project_root.as_ref(), &req.id) {
+        Ok(_) => Json(serde_json::json!({ "ok": true })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+async fn api_draft_reject(
+    State(state): State<AppState>,
+    Json(req): Json<DraftActionRequest>,
+) -> Json<serde_json::Value> {
+    match draft::reject_draft(state.project_root.as_ref(), &req.id) {
         Ok(_) => Json(serde_json::json!({ "ok": true })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
@@ -325,6 +352,10 @@ const INDEX_HTML: &str = r##"<!doctype html>
           <strong>${escapeHtml(item.id)}</strong>
           <p>${escapeHtml(item.body)}</p>
           <span class="tag">${escapeHtml(item.status)}</span>
+          <div style="display:flex;gap:6px;margin-top:8px">
+            <button class="btn" onclick="approveDraft('${escapeAttr(item.id)}')">Approve</button>
+            <button class="btn" onclick="rejectDraft('${escapeAttr(item.id)}')">Reject</button>
+          </div>
         </div>
       `).join("") || `<div class="empty">No drafts yet.</div>`;
     }
@@ -456,7 +487,31 @@ const INDEX_HTML: &str = r##"<!doctype html>
     async function previewBuild() {
       const res = await fetch("/api/build/preview", { method: "POST" });
       const result = await res.json();
-      document.getElementById("build-output").textContent = result.text;
+      document.getElementById("build-output").textContent = (result.actions || []).length
+        ? result.actions.map(action => `- ${action}`).join("\n")
+        : result.text;
+    }
+
+    async function approveDraft(id) {
+      const res = await fetch("/api/draft/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id })
+      });
+      const result = await res.json();
+      document.getElementById("build-output").textContent = result.ok ? `Approved draft: ${id}` : result.error;
+      await loadState();
+    }
+
+    async function rejectDraft(id) {
+      const res = await fetch("/api/draft/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id })
+      });
+      const result = await res.json();
+      document.getElementById("build-output").textContent = result.ok ? `Rejected draft: ${id}` : result.error;
+      await loadState();
     }
 
     async function syncMirrors() {
