@@ -11,6 +11,8 @@ use crate::config::{self, ArtifactState, MirrorState, ProjectLock, SkillRecord};
 use crate::fsutil;
 use crate::skilllet::{self, SkillletRecord};
 
+const INSTRUCTION_ARTIFACT_BUDGET_BYTES: usize = 32 * 1024;
+
 #[derive(Debug, serde::Serialize)]
 pub struct BuildReport {
     preview: bool,
@@ -187,11 +189,20 @@ pub fn build_project(project_root: &Path, preview: bool) -> Result<BuildReport> 
                 &config.skilllets.include,
                 &skilllets,
             );
+            let content_bytes = content.len();
             actions.push(format!(
                 "{} {}",
                 if preview { "Would write" } else { "Wrote" },
                 fsutil::path_to_slash(&path)
             ));
+            if content_bytes > INSTRUCTION_ARTIFACT_BUDGET_BYTES {
+                warnings.push(format!(
+                    "{} is {} bytes and exceeds {} byte budget",
+                    fsutil::path_to_slash(&path),
+                    content_bytes,
+                    INSTRUCTION_ARTIFACT_BUDGET_BYTES
+                ));
+            }
             if !preview {
                 if let Some(parent) = path.parent() {
                     fs::create_dir_all(parent)?;
@@ -451,5 +462,26 @@ mod tests {
 
         assert!(codex.contains("Use Axios for frontend requests."));
         assert!(!claude.contains("Use Axios for frontend requests."));
+    }
+
+    #[test]
+    fn build_preview_warns_when_instruction_artifact_exceeds_budget() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let oversized_body = "Keep this instruction.\n".repeat(1800);
+        skilllet::add_skilllet(
+            temp.path(),
+            "project:large-context",
+            "Large Context",
+            &oversized_body,
+            "procedure",
+            "project",
+            vec!["codex".to_string()],
+        )
+        .expect("add skilllet");
+
+        let report = build_project(temp.path(), true).expect("build preview");
+        let rendered = report.render();
+
+        assert!(rendered.contains("exceeds 32768 byte budget"));
     }
 }

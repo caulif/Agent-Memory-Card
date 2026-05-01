@@ -131,6 +131,11 @@ v0.20 adds a local Catalog trust gate:
 2. `/api/catalog/validate` exposes the same validation report to the Canvas.
 3. The App Store shows Catalog Health before package installation.
 
+v0.21 adds instruction budget warnings:
+
+1. Build preview warns when generated Agent instruction artifacts exceed 32 KiB.
+2. The budget follows Codex-style project document constraints and helps prevent prompt bloat early.
+
 ## Commands
 
 ```bash
