@@ -66,6 +66,7 @@
 - v0.44 范围：增加 `preference init` / `preference validate`，让项目级偏好模板库可以初始化、校验，并在错误时以非零退出码接入脚本或 CI。
 - v0.45 范围：增加 `preference test --text` 命中解释器，并提供 `docs/quickstart.md`，让用户能完整体验 Preference Registry -> Draft Inbox -> Skilllet -> Agent artifact 的闭环。
 - v0.46 范围：增加全局 Project Registry 与本地原生桌面入口。`project scan/list/add` 维护 `~/.agent-kernel/projects.yml`，`agent-kernel app` 启动 Rust/egui 编译程序，展示本地项目、项目状态，并提供 Claude Code / Codex 历史对话整理到 Draft Inbox 的一键入口。
+- v0.47 范围：将 Windows / macOS / Linux 支持变成工程约束。CI 在三大系统上跑 Rust 与 Bun wrapper 测试，release 输出 `win32-x64`、`linux-x64`、`darwin-x64`、`darwin-arm64` 四类预编译包，其他架构走 Cargo fallback。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 JavaScript registry 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。

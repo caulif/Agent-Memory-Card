@@ -287,7 +287,14 @@ v0.46 starts the native local app direction:
 2. `app` launches a compiled Rust/egui desktop UI, not a browser page or localhost web app.
 3. The native app opens on a local project console, lets users select a project, review status, and run Claude Code / Codex conversation evolution into Draft Inbox.
 
+v0.47 hardens cross-platform support:
+
+1. CI runs Rust and Bun wrapper checks on Windows, Linux, and macOS.
+2. Release packaging targets Windows x64, Linux x64, macOS x64, and macOS arm64.
+3. The Bun wrapper has an explicit packaged-target matrix and falls back to local Cargo builds on unsupported architectures.
+
 See [docs/quickstart.md](docs/quickstart.md) for a hands-on walkthrough.
+See [docs/platform-support.md](docs/platform-support.md) for Windows / macOS / Linux support details.
 
 ## Commands
 
@@ -369,11 +376,18 @@ bun bun/agent-kernel.js --version
 
 For a packaged `bunx` flow, the wrapper resolves binaries in this order:
 
-1. `bin/<platform>-<arch>/agent-kernel[.exe]`
+1. supported packaged targets under `bin/<platform>-<arch>/agent-kernel[.exe]`
 2. `target/release/agent-kernel[.exe]`
 3. `target/debug/agent-kernel[.exe]`
 
 If none exist, it runs `cargo build` as a development fallback.
+
+Official packaged targets are:
+
+- `win32-x64`
+- `linux-x64`
+- `darwin-x64`
+- `darwin-arm64`
 
 ## v0.1 Workflow
 
