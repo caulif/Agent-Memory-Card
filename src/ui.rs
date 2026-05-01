@@ -155,6 +155,7 @@ async fn api_extract(
             "created": report.created,
             "skipped": report.skipped,
             "candidates": report.candidates,
+            "redacted": report.redacted,
             "text": report.render(),
         })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),

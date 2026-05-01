@@ -14,6 +14,7 @@ pub struct ExtractReport {
     pub candidates: Vec<ExtractCandidatePreview>,
     pub dry_run: bool,
     pub provider: String,
+    pub redacted: bool,
 }
 
 impl ExtractReport {
@@ -21,6 +22,9 @@ impl ExtractReport {
         let mut out = String::new();
         out.push_str("Agent-Kernel extract report\n\n");
         out.push_str(&format!("Provider: {}\n\n", self.provider));
+        if self.redacted {
+            out.push_str("Secrets: redacted\n\n");
+        }
         if self.created.is_empty() {
             if self.dry_run && !self.candidates.is_empty() {
                 out.push_str("Draft candidates:\n");
@@ -114,13 +118,21 @@ pub fn extract_text_to_drafts(
             candidates: Vec::new(),
             dry_run,
             provider: provider_name,
+            redacted: false,
         });
     }
     if provider_name != "local" {
         return Err(anyhow!("unknown provider `{provider_name}`"));
     }
 
-    let candidates = extract_candidates(input);
+    let provider_cfg = provider::load_or_default_provider_config(project_root)?;
+    let redacted_input = if provider_cfg.privacy.redact_secrets {
+        provider::redact_secrets(input)
+    } else {
+        input.to_string()
+    };
+    let redacted = redacted_input != input;
+    let candidates = extract_candidates(&redacted_input);
     let previews = candidates
         .iter()
         .map(|candidate| ExtractCandidatePreview {
@@ -139,6 +151,7 @@ pub fn extract_text_to_drafts(
             candidates: previews,
             dry_run,
             provider: provider_name,
+            redacted,
         });
     }
 
@@ -169,6 +182,7 @@ pub fn extract_text_to_drafts(
         candidates: previews,
         dry_run,
         provider: provider_name,
+        redacted,
     })
 }
 
@@ -345,5 +359,24 @@ mod tests {
 
         assert_eq!(report.candidates.len(), 1);
         assert!(draft::load_drafts(temp.path()).expect("drafts").is_empty());
+    }
+
+    #[test]
+    fn extraction_redacts_secret_evidence() {
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        extract_to_drafts(
+            temp.path(),
+            Some("Always use token=supersecret123456789 before pushing.".to_string()),
+            None,
+            vec!["codex".to_string()],
+            Some("local".to_string()),
+            false,
+        )
+        .expect("extract");
+
+        let drafts = draft::load_drafts(temp.path()).expect("drafts");
+        assert!(drafts[0].evidence.contains("[REDACTED]"));
+        assert!(!drafts[0].evidence.contains("supersecret123456789"));
     }
 }

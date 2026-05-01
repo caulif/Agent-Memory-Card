@@ -63,6 +63,12 @@ v0.9 adds extraction preview controls:
 2. `extract --dry-run` shows candidate drafts without writing Draft Inbox files.
 3. UI extraction supports selecting enabled Agent targets instead of hardcoding Codex.
 
+v0.10 adds a local privacy safety layer:
+
+1. Provider privacy config defaults to `redact_secrets: true`.
+2. Extract preview and Draft evidence redact common token/key shapes.
+3. Reports show when secrets were redacted.
+
 ## Commands
 
 ```bash
@@ -83,6 +89,7 @@ cargo run -- extract --file chat.md --target codex --project .
 cargo run -- extract --text "Always run cargo test before pushing." --target codex --provider local --dry-run --project .
 cargo run -- provider init --project .
 cargo run -- provider show --project .
+cargo run -- extract --text "Always use token=supersecret123456789 before pushing." --target codex --provider local --dry-run --project .
 ```
 
 The npm wrapper works locally after the Rust binary has been built:
@@ -129,6 +136,9 @@ cargo run -- extract --file chat.md --target codex --project .
 # 11. Initialize Hybrid provider config and preview extraction payloads locally.
 cargo run -- provider init --project .
 cargo run -- extract --text "Always run cargo test before pushing." --target codex --provider local --dry-run --project .
+
+# 12. Redaction is enabled by default for extraction previews and draft evidence.
+cargo run -- extract --text "Always use token=supersecret123456789 before pushing." --target codex --provider local --dry-run --project .
 ```
 
 The Canvas UI exposes:

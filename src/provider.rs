@@ -3,6 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::config;
@@ -90,6 +91,23 @@ pub fn provider_exists(project_root: &Path, name: &str) -> Result<bool> {
     Ok(cfg.providers.contains_key(name))
 }
 
+pub fn redact_secrets(input: &str) -> String {
+    let patterns = [
+        r"sk-[A-Za-z0-9_-]{12,}",
+        r"ghp_[A-Za-z0-9_]{12,}",
+        r"github_pat_[A-Za-z0-9_]{12,}",
+        r"AKIA[0-9A-Z]{12,}",
+        r"(?i)bearer\s+[A-Za-z0-9._~+/=-]{12,}",
+        r#"(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*['"]?[^'"\s,;]+"#,
+    ];
+    let mut redacted = input.to_string();
+    for pattern in patterns {
+        let re = Regex::new(pattern).expect("valid secret regex");
+        redacted = re.replace_all(&redacted, "[REDACTED]").to_string();
+    }
+    redacted
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,5 +124,16 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         init_provider_config(temp.path()).expect("init");
         assert!(provider_config_path(temp.path()).expect("path").exists());
+    }
+
+    #[test]
+    fn redacts_common_secret_shapes() {
+        let input =
+            "token=abc123456789xyz and bearer secretBearerToken12345 and sk-abc123456789xyz";
+        let redacted = redact_secrets(input);
+
+        assert!(!redacted.contains("abc123456789xyz"));
+        assert!(!redacted.contains("secretBearerToken12345"));
+        assert!(redacted.contains("[REDACTED]"));
     }
 }

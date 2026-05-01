@@ -28,6 +28,7 @@
 - v0.7 范围：把本地 extract 接入 Canvas UI，支持粘贴文本生成 Draft，并继续由用户 approve/reject。
 - v0.8 范围：落地 Hybrid provider 配置地基，支持 provider init/show，默认 local-first，预留 openai-compatible。
 - v0.9 范围：增强 extract 支持 `--provider local`、`--dry-run`，UI Extract 支持选择 Agent targets。
+- v0.10 范围：加入本地 secret redaction，extract preview 和 Draft evidence 默认脱敏常见 token/key/password 形态。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 npm 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。
