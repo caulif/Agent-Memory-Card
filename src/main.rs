@@ -145,6 +145,29 @@ mod tests {
             _ => panic!("expected preference validate command"),
         }
     }
+
+    #[test]
+    fn cli_accepts_preference_test_command() {
+        let cli = Cli::parse_from([
+            "agent-kernel",
+            "preference",
+            "test",
+            "--text",
+            "Use Playwright instead of Cypress.",
+            "--project",
+            ".",
+        ]);
+
+        match cli.command {
+            Commands::Preference {
+                command: PreferenceCommands::Test { text, project },
+            } => {
+                assert_eq!(text, "Use Playwright instead of Cypress.");
+                assert_eq!(project, PathBuf::from("."));
+            }
+            _ => panic!("expected preference test command"),
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -571,6 +594,14 @@ enum PreferenceCommands {
         #[arg(long, default_value = ".")]
         project: PathBuf,
     },
+
+    /// Test a text snippet against preference templates.
+    Test {
+        #[arg(long)]
+        text: String,
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -827,6 +858,10 @@ async fn main() -> Result<()> {
                 if report.errors > 0 {
                     std::process::exit(1);
                 }
+            }
+            PreferenceCommands::Test { text, project } => {
+                let report = extract::test_preference_text(&project, &text)?;
+                println!("{}", report.render());
             }
         },
         Commands::Observe { command } => match command {

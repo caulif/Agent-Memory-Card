@@ -78,6 +78,42 @@ pub struct PreferenceRegistryValidationReport {
     pub messages: Vec<String>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PreferenceTestReport {
+    pub matches: Vec<PreferenceTestMatch>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PreferenceTestMatch {
+    pub draft_id: String,
+    pub title: String,
+    pub body: String,
+    pub source: String,
+    pub required: Vec<String>,
+    pub context: Vec<String>,
+}
+
+impl PreferenceTestReport {
+    pub fn render(&self) -> String {
+        let mut out = String::new();
+        out.push_str("Agent-Kernel preference test\n\n");
+        if self.matches.is_empty() {
+            out.push_str("No preference templates matched.\n");
+            return out;
+        }
+        out.push_str("Matches:\n");
+        for item in &self.matches {
+            out.push_str(&format!(
+                "- {} [{}] {}: {}\n",
+                item.draft_id, item.source, item.title, item.body
+            ));
+            out.push_str(&format!("  required: {}\n", item.required.join(", ")));
+            out.push_str(&format!("  context: {}\n", item.context.join(", ")));
+        }
+        out
+    }
+}
+
 impl PreferenceRegistryValidationReport {
     pub fn render(&self) -> String {
         let mut out = String::new();
@@ -185,6 +221,38 @@ pub fn validate_preference_registry(
         }
     }
     Ok(report)
+}
+
+pub fn test_preference_text(project_root: &Path, text: &str) -> Result<PreferenceTestReport> {
+    let preferences = load_known_preferences(project_root)?;
+    let mut matches = Vec::new();
+    for sentence in split_sentences(text) {
+        if !looks_like_rule(sentence) {
+            continue;
+        }
+        let lower = sentence.to_lowercase();
+        for preference in &preferences {
+            if let Some(reason) = preference.match_reason(&lower) {
+                let candidate = Candidate {
+                    title: preference.title.clone(),
+                    body: preference.body.clone(),
+                    kind: "preference".to_string(),
+                    scope: "project".to_string(),
+                    evidence: sentence.to_string(),
+                };
+                matches.push(PreferenceTestMatch {
+                    draft_id: draft_id(&candidate),
+                    title: preference.title.clone(),
+                    body: preference.body.clone(),
+                    source: preference.source.clone(),
+                    required: reason.required,
+                    context: reason.context,
+                });
+                break;
+            }
+        }
+    }
+    Ok(PreferenceTestReport { matches })
 }
 
 pub fn extract_to_drafts(
@@ -367,9 +435,35 @@ struct KnownPreference {
 
 impl KnownPreference {
     fn matches(&self, lower: &str) -> bool {
-        self.required.iter().all(|marker| lower.contains(marker))
-            && (self.context.is_empty() || self.context.iter().any(|marker| lower.contains(marker)))
+        self.match_reason(lower).is_some()
     }
+
+    fn match_reason(&self, lower: &str) -> Option<KnownPreferenceMatchReason> {
+        let required = self
+            .required
+            .iter()
+            .filter(|marker| lower.contains(marker.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if required.len() != self.required.len() {
+            return None;
+        }
+        let context = self
+            .context
+            .iter()
+            .filter(|marker| lower.contains(marker.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if !self.context.is_empty() && context.is_empty() {
+            return None;
+        }
+        Some(KnownPreferenceMatchReason { required, context })
+    }
+}
+
+struct KnownPreferenceMatchReason {
+    required: Vec<String>,
+    context: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -858,6 +952,37 @@ mod tests {
                 .iter()
                 .any(|message| message.contains("duplicate title"))
         );
+    }
+
+    #[test]
+    fn test_preference_text_reports_match_reason() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let registry_dir = temp.path().join(".agent-kernel");
+        fs::create_dir_all(&registry_dir).expect("registry dir");
+        fs::write(
+            registry_dir.join("preference-registry.yml"),
+            r#"preferences:
+  - title: Use Playwright
+    body: Use Playwright for browser automation tests.
+    required:
+      - playwright
+    context:
+      - cypress
+"#,
+        )
+        .expect("write registry");
+
+        let report = test_preference_text(
+            temp.path(),
+            "以后浏览器自动化测试统一使用 Playwright，不要再用 Cypress。",
+        )
+        .expect("test preference");
+
+        assert_eq!(report.matches.len(), 1);
+        assert_eq!(report.matches[0].draft_id, "project:use-playwright");
+        assert_eq!(report.matches[0].source, "project");
+        assert_eq!(report.matches[0].required, vec!["playwright"]);
+        assert_eq!(report.matches[0].context, vec!["cypress"]);
     }
 
     #[test]

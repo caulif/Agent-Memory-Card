@@ -275,6 +275,14 @@ v0.44 makes preference registries maintainable:
 2. `preference validate` checks duplicate titles, empty title/body fields, missing required markers, and broad no-context templates.
 3. Validation exits non-zero when errors are present, so it can be used in local scripts or CI.
 
+v0.45 makes the current prototype easier to experience:
+
+1. `preference test --text <text>` explains which template a sentence matches and which Draft ID it would produce.
+2. `docs/quickstart.md` documents the end-to-end local Skilllet evolution loop.
+3. The tutorial covers preference templates, Draft approval, build artifacts, and local conversation evolution.
+
+See [docs/quickstart.md](docs/quickstart.md) for a hands-on walkthrough.
+
 ## Commands
 
 ```bash
@@ -303,6 +311,7 @@ cargo run -- extract --file chat.md --target codex --project .
 cargo run -- preference init --project .
 cargo run -- preference list --project .
 cargo run -- preference validate --project .
+cargo run -- preference test --text "以后前端请求统一使用 Axios，不要再用 Fetch。" --project .
 cargo run -- extract --text "Always run cargo test before pushing." --target codex --provider local --dry-run --project .
 cargo run -- observe import --file chat.jsonl --agent claude-code --source-kind claude-code-session --project .
 cargo run -- observe local --project .
