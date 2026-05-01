@@ -106,6 +106,13 @@ v0.16 brings review into the Canvas:
 2. The inspector shows pending Drafts, Rule CI failures, build action count, and warnings.
 3. The footer Review button refreshes the review report without leaving the Canvas.
 
+v0.17 starts the Skilllet Catalog / App Store foundation:
+
+1. `catalog list` shows built-in local Skilllet packages.
+2. `catalog init` writes `.agent-kernel/catalog.yml` so users can customize the local catalog.
+3. `catalog install --id <package>` installs a catalog package as an owned Skilllet.
+4. The Canvas App Store now separates installable Catalog Packages from mirrored Indexed Skills.
+
 ## Commands
 
 ```bash
@@ -132,6 +139,9 @@ cargo run -- review --project .
 cargo run -- review --json --project .
 cargo run -- review --approve-draft project:prefer-pnpm --project .
 cargo run -- review --reject-draft project:prefer-pnpm --project .
+cargo run -- catalog list --project .
+cargo run -- catalog init --project .
+cargo run -- catalog install --id core:rust-quality-gate --target codex --project .
 ```
 
 The npm wrapper works locally after the Rust binary has been built:
@@ -212,6 +222,7 @@ The Canvas UI exposes:
 - `/api/status` for synced / missing / drifted mirror state
 - `/api/rule-tests` for structured Rule CI results
 - `/api/review` for the unified review protocol used by the Canvas
+- `/api/catalog` and `/api/catalog/install` for local App Store packages
 
 ## Generated State
 
@@ -220,6 +231,7 @@ The Canvas UI exposes:
 - `.agent-kernel/skilllets/` contains owned lightweight Skilllet source files.
 - `.agent-kernel/drafts/` contains local Draft Inbox candidates before approval.
 - `.agent-kernel/tests/` contains local Rule CI assertion files.
+- `.agent-kernel/catalog.yml` optionally overrides the built-in local Skilllet catalog.
 - `.agent-kernel/skill-index.yml` is the imported Skill index.
 - `.agent-kernel/project.lock.yml` records generated mirror and artifact hashes.
 - `AGENTS.md`, `CLAUDE.md`, and mirrored skill folders are build artifacts.

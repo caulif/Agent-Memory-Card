@@ -1,4 +1,5 @@
 mod build;
+mod catalog;
 mod config;
 mod draft;
 mod extract;
@@ -148,6 +149,12 @@ enum Commands {
         command: ProviderCommands,
     },
 
+    /// Manage local Skilllet catalog packages.
+    Catalog {
+        #[command(subcommand)]
+        command: CatalogCommands,
+    },
+
     /// Run local Rule CI assertions against generated Agent artifacts.
     TestRules {
         /// Project root.
@@ -291,6 +298,34 @@ enum ProviderCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum CatalogCommands {
+    /// Write the default local catalog to .agent-kernel/catalog.yml.
+    Init {
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
+    /// List local catalog packages.
+    List {
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
+    /// Install a catalog package as an owned Skilllet.
+    Install {
+        #[arg(long)]
+        id: String,
+
+        /// Agent target. Repeat for multiple agents. Empty means all enabled instruction agents.
+        #[arg(long = "target")]
+        targets: Vec<String>,
+
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -414,6 +449,31 @@ async fn main() -> Result<()> {
             ProviderCommands::Show { project } => {
                 let cfg = provider::load_or_default_provider_config(&project)?;
                 println!("{}", serde_yaml::to_string(&cfg)?);
+            }
+        },
+        Commands::Catalog { command } => match command {
+            CatalogCommands::Init { project } => {
+                let catalog = catalog::init_catalog(&project)?;
+                println!("{}", serde_yaml::to_string(&catalog)?);
+            }
+            CatalogCommands::List { project } => {
+                let catalog = catalog::load_or_default_catalog(&project)?;
+                if catalog.packages.is_empty() {
+                    println!("No catalog packages found.");
+                } else {
+                    for package in catalog.packages {
+                        println!("- {}: {}", package.id, package.title);
+                    }
+                }
+            }
+            CatalogCommands::Install {
+                id,
+                targets,
+                project,
+            } => {
+                let package = catalog::install_catalog_package(&project, &id, targets)?;
+                println!("Installed catalog package `{}` as Skilllet", package.id);
+                println!("Run `agent-kernel build --preview` to inspect generated instructions.");
             }
         },
         Commands::TestRules { project } => {

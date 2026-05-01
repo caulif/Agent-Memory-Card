@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use tower_http::cors::CorsLayer;
 
 use crate::build;
+use crate::catalog;
 use crate::config;
 use crate::draft::{self, DraftRecord};
 use crate::extract;
@@ -72,6 +73,12 @@ struct ExtractRequest {
     targets: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct CatalogInstallRequest {
+    id: String,
+    targets: Vec<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct ApiState {
     project_root: String,
@@ -101,6 +108,8 @@ pub async fn serve(project: PathBuf, port: u16, open_browser: bool) -> Result<()
         .route("/api/status", get(api_status))
         .route("/api/rule-tests", get(api_rule_tests))
         .route("/api/review", get(api_review))
+        .route("/api/catalog", get(api_catalog))
+        .route("/api/catalog/install", post(api_catalog_install))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -251,6 +260,23 @@ fn review_json_value(project_root: &std::path::Path) -> Result<serde_json::Value
         "ok": true,
         "report": report,
     }))
+}
+
+async fn api_catalog(State(state): State<AppState>) -> Json<serde_json::Value> {
+    match catalog::load_or_default_catalog(state.project_root.as_ref()) {
+        Ok(catalog) => Json(serde_json::json!({ "ok": true, "catalog": catalog })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+async fn api_catalog_install(
+    State(state): State<AppState>,
+    Json(req): Json<CatalogInstallRequest>,
+) -> Json<serde_json::Value> {
+    match catalog::install_catalog_package(state.project_root.as_ref(), &req.id, req.targets) {
+        Ok(package) => Json(serde_json::json!({ "ok": true, "package": package })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
 }
 
 const INDEX_HTML: &str = r##"<!doctype html>
@@ -411,6 +437,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
     let state = null;
     let selectedSkill = null;
     let selectedAgent = null;
+    let catalogPackages = [];
 
     const agentPositions = {
       "codex": "codex",
@@ -432,7 +459,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
       await renderRuleTests(false);
       await renderReview(false);
       renderRules();
-      renderStore();
+      await renderStore();
       renderExtractTargets();
     }
 
@@ -603,15 +630,30 @@ const INDEX_HTML: &str = r##"<!doctype html>
       `).join("");
     }
 
-    function renderStore() {
-      document.getElementById("store-grid").innerHTML = state.skill_index.skills.map(skill => `
+    async function renderStore() {
+      const res = await fetch("/api/catalog");
+      const payload = await res.json();
+      catalogPackages = payload.ok ? payload.catalog.packages || [] : [];
+      const catalogCards = catalogPackages.map(item => `
+        <div class="card">
+          <h4>${escapeHtml(item.id)}</h4>
+          <p>${escapeHtml(item.description || item.body)}</p>
+          <p><strong>Kind:</strong> ${escapeHtml(item.kind)} · ${escapeHtml(item.scope)}</p>
+          <button class="btn primary" onclick="installCatalogPackage('${escapeAttr(item.id)}')">Install</button>
+        </div>
+      `).join("");
+      const indexedSkillCards = state.skill_index.skills.map(skill => `
         <div class="card">
           <h4>${escapeHtml(skill.id)}</h4>
           <p>${escapeHtml(skill.description || "No description")}</p>
           <p><strong>Source:</strong> ${escapeHtml(skill.source_kind)}</p>
           <button class="btn" onclick="selectSkill('${escapeAttr(skill.id)}')">Select</button>
         </div>
-      `).join("") || `<div class="empty">No skills available.</div>`;
+      `).join("");
+      document.getElementById("store-grid").innerHTML = `
+        ${catalogCards ? `<div class="card" style="grid-column:1/-1"><h4>Catalog Packages</h4><p>Install lightweight Skilllets into this project.</p></div>${catalogCards}` : ""}
+        ${indexedSkillCards ? `<div class="card" style="grid-column:1/-1"><h4>Indexed Skills</h4><p>Reference existing Skills through Mirror mode.</p></div>${indexedSkillCards}` : ""}
+      ` || `<div class="empty">No packages or skills available.</div>`;
     }
 
     function selectSkill(id) {
@@ -711,6 +753,18 @@ const INDEX_HTML: &str = r##"<!doctype html>
       });
       const result = await res.json();
       document.getElementById("build-output").textContent = result.ok ? result.text : result.error;
+      await loadState();
+    }
+
+    async function installCatalogPackage(id) {
+      const targets = Array.from(document.querySelectorAll(".extract-target:checked")).map(input => input.value);
+      const res = await fetch("/api/catalog/install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, targets })
+      });
+      const result = await res.json();
+      document.getElementById("build-output").textContent = result.ok ? `Installed package: ${id}` : result.error;
       await loadState();
     }
 
