@@ -39,6 +39,7 @@ const WORKSPACE_SCROLL_ID: &str = "native-project-workspace-scroll";
 const REVIEW_SCROLL_ID: &str = "native-review-center-scroll";
 const OBSERVATION_SCROLL_ID: &str = "native-observations-scroll";
 const INSPECTOR_SCROLL_ID: &str = "native-inspector-scroll";
+const AGENTS_SCROLL_ID: &str = "native-agents-scroll";
 const MAX_HEADER_MARKERS: usize = 3;
 const MERGE_SELECTED_LABEL: &str = "合并所选";
 const MERGE_CONFIRM_LABEL: &str = "创建合并候选";
@@ -86,7 +87,7 @@ impl UiPage {
             UiPage::DraftInbox => "草稿收件箱",
             UiPage::Skilllets => "Skilllets",
             UiPage::Mirrors => "镜像状态",
-            UiPage::Agents => "Agents",
+            UiPage::Agents => "Agent 分配",
             UiPage::RuleCi => "规则 CI",
             UiPage::Observations => "观察",
             UiPage::Catalog => "目录",
@@ -666,6 +667,7 @@ mod tests {
         assert_eq!(MATRIX_SCROLL_ID, "native-skilllet-matrix-scroll");
         assert_eq!(OUTPUT_SCROLL_ID, "native-output-scroll");
         assert_eq!(WORKSPACE_SCROLL_ID, "native-project-workspace-scroll");
+        assert_eq!(AGENTS_SCROLL_ID, "native-agents-scroll");
 
         let palette = ui_palette();
         assert!(palette.background.r() > 235);
@@ -815,6 +817,7 @@ mod tests {
             REVIEW_SCROLL_ID,
             OBSERVATION_SCROLL_ID,
             INSPECTOR_SCROLL_ID,
+            AGENTS_SCROLL_ID,
         ];
         let mut seen = std::collections::HashSet::new();
         for id in ids {
@@ -1518,6 +1521,46 @@ mod tests {
     }
 
     #[test]
+    fn native_agent_assignment_summaries_count_targets() {
+        let matrix = skilllet::SkillletTargetMatrix {
+            agents: vec!["claude-code".to_string(), "codex".to_string()],
+            rows: vec![
+                skilllet::SkillletTargetMatrixRow {
+                    skilllet_id: "project:prefer-bun".to_string(),
+                    title: "Prefer Bun".to_string(),
+                    targets: [
+                        ("claude-code".to_string(), true),
+                        ("codex".to_string(), true),
+                    ]
+                    .into_iter()
+                    .collect(),
+                },
+                skilllet::SkillletTargetMatrixRow {
+                    skilllet_id: "project:use-axios".to_string(),
+                    title: "Use Axios".to_string(),
+                    targets: [
+                        ("claude-code".to_string(), false),
+                        ("codex".to_string(), true),
+                    ]
+                    .into_iter()
+                    .collect(),
+                },
+            ],
+        };
+
+        let summaries = agent_assignment_summaries(Some(&matrix));
+
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(summaries[0].agent, "claude-code");
+        assert_eq!(summaries[0].assigned_skilllets, 1);
+        assert_eq!(summaries[0].total_skilllets, 2);
+        assert_eq!(summaries[1].agent, "codex");
+        assert_eq!(summaries[1].assigned_skilllets, 2);
+        assert_eq!(summaries[1].total_skilllets, 2);
+        assert_eq!(summaries[1].display_name, "Codex");
+    }
+
+    #[test]
     fn native_project_selection_loads_cache_in_background() {
         let temp = tempfile::tempdir().expect("tempdir");
         let project_root = temp.path().join("project");
@@ -1689,6 +1732,55 @@ fn toggle_native_skilllet_target(
 
     skilllet::set_skilllet_targets(project_root, skilllet_id, targets)?;
     skilllet::skilllet_target_matrix(project_root)
+}
+
+/// 单个 Agent 的分配摘要，用于 Agents 页面展示。
+#[derive(Debug, Clone)]
+struct AgentAssignmentSummary {
+    agent: String,
+    display_name: String,
+    assigned_skilllets: usize,
+    total_skilllets: usize,
+    enabled: bool,
+    skilllet_ids: Vec<String>,
+}
+
+/// 从 SkillletTargetMatrix 计算每个 Agent 的分配摘要。
+/// 返回按 agents 顺序排列的摘要列表。
+fn agent_assignment_summaries(
+    matrix: Option<&skilllet::SkillletTargetMatrix>,
+) -> Vec<AgentAssignmentSummary> {
+    let matrix = match matrix {
+        Some(m) => m,
+        None => return Vec::new(),
+    };
+    matrix
+        .agents
+        .iter()
+        .map(|agent| {
+            let skilllet_ids: Vec<String> = matrix
+                .rows
+                .iter()
+                .filter(|row| row.targets.get(agent).copied().unwrap_or(false))
+                .map(|row| row.skilllet_id.clone())
+                .collect();
+            let assigned_count = skilllet_ids.len();
+            let total = matrix.rows.len();
+            let display_name = match agent.as_str() {
+                "claude-code" => "Claude Code".to_string(),
+                "codex" => "Codex".to_string(),
+                other => other.to_string(),
+            };
+            AgentAssignmentSummary {
+                agent: agent.clone(),
+                display_name,
+                assigned_skilllets: assigned_count,
+                total_skilllets: total,
+                enabled: assigned_count > 0,
+                skilllet_ids,
+            }
+        })
+        .collect()
 }
 
 struct AgentKernelApp {
@@ -2474,9 +2566,7 @@ impl AgentKernelApp {
                 "镜像状态",
                 "查看 Claude Code / Codex 编译产物和 Mirror drift。",
             ),
-            UiPage::Agents => {
-                self.render_placeholder_page(ui, "Agents", "为不同 Agent 分配不同 Skilllet 组合。")
-            }
+            UiPage::Agents => self.render_agents_page(ui),
             UiPage::Settings => self.render_placeholder_page(
                 ui,
                 "设置",
@@ -4208,6 +4298,207 @@ impl AgentKernelApp {
                             }
                             if let Some((package_id, targets)) = install {
                                 self.install_catalog_for_selected(&package_id, targets);
+                            }
+                        });
+                    });
+            });
+    }
+
+    fn render_agents_page(&mut self, ui: &mut egui::Ui) {
+        let palette = ui_palette();
+        let summaries = agent_assignment_summaries(self.cached_skilllet_matrix.as_ref());
+
+        egui::Frame::new()
+            .fill(palette.background)
+            .inner_margin(egui::Margin::symmetric(30, 24))
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt(AGENTS_SCROLL_ID)
+                    .show(ui, |ui| {
+                        self.render_page_header(
+                            ui,
+                            "Agent 分配",
+                            "为不同 Agent 分配不同 Skilllet 组合",
+                            &[
+                                HeaderAction::new(
+                                    "刷新矩阵",
+                                    UiPage::Agents,
+                                    UiActionKind::RefreshProjectCache,
+                                ),
+                                HeaderAction::new(
+                                    "编译预览",
+                                    UiPage::RuleCi,
+                                    UiActionKind::ReviewProject,
+                                ),
+                            ],
+                        );
+                        ui.add_space(24.0);
+
+                        let num_agents = summaries.len().max(1);
+                        let kpi_cols = num_agents.min(3);
+                        if kpi_cols > 0 {
+                            ui.columns(kpi_cols, |cols| {
+                                for (idx, summary) in summaries.iter().enumerate() {
+                                    if idx >= cols.len() {
+                                        break;
+                                    }
+                                    let accent = if summary.enabled {
+                                        palette.success
+                                    } else {
+                                        palette.muted
+                                    };
+                                    let value = format!(
+                                        "{}/{}",
+                                        summary.assigned_skilllets, summary.total_skilllets
+                                    );
+                                    let status = if summary.enabled {
+                                        "已启用"
+                                    } else {
+                                        "未分配"
+                                    };
+                                    self.kpi_card(
+                                        &mut cols[idx],
+                                        if summary.enabled { "ON" } else { "--" },
+                                        &summary.display_name,
+                                        &value,
+                                        status,
+                                        accent,
+                                    );
+                                }
+                            });
+                        }
+
+                        ui.add_space(28.0);
+
+                        card_frame().show(ui, |ui| {
+                            self.card_title(ui, "分配明细", "");
+                            ui.add_space(12.0);
+
+                            if summaries.is_empty() {
+                                ui.label(
+                                    egui::RichText::new(
+                                        "暂无分配数据，请先选择项目并加载 Skilllet 矩阵。",
+                                    )
+                                    .size(13.0)
+                                    .color(palette.muted),
+                                );
+                            } else {
+                                ui.horizontal(|ui| {
+                                    ui.set_height(28.0);
+                                    ui.allocate_ui(egui::vec2(140.0, 20.0), |ui| {
+                                        ui.label(
+                                            egui::RichText::new("Agent")
+                                                .size(12.0)
+                                                .strong()
+                                                .color(palette.muted),
+                                        );
+                                    });
+                                    ui.allocate_ui(egui::vec2(80.0, 20.0), |ui| {
+                                        ui.label(
+                                            egui::RichText::new("已分配/总数")
+                                                .size(12.0)
+                                                .strong()
+                                                .color(palette.muted),
+                                        );
+                                    });
+                                    ui.allocate_ui(egui::vec2(60.0, 20.0), |ui| {
+                                        ui.label(
+                                            egui::RichText::new("状态")
+                                                .size(12.0)
+                                                .strong()
+                                                .color(palette.muted),
+                                        );
+                                    });
+                                    ui.label(
+                                        egui::RichText::new("Skilllet 列表")
+                                            .size(12.0)
+                                            .strong()
+                                            .color(palette.muted),
+                                    );
+                                });
+                                ui.add_space(4.0);
+                                ui.separator();
+                                ui.add_space(4.0);
+
+                                for summary in &summaries {
+                                    ui.horizontal(|ui| {
+                                        ui.set_height(32.0);
+                                        ui.allocate_ui(egui::vec2(140.0, 24.0), |ui| {
+                                            ui.horizontal(|ui| {
+                                                let badge = if summary.agent == "claude-code" {
+                                                    "CC"
+                                                } else if summary.agent == "codex" {
+                                                    "CX"
+                                                } else {
+                                                    "AG"
+                                                };
+                                                SelflessUi::soft_badge(
+                                                    ui,
+                                                    badge,
+                                                    palette.card_alt,
+                                                    palette.muted,
+                                                );
+                                                ui.label(
+                                                    egui::RichText::new(&summary.display_name)
+                                                        .size(13.0)
+                                                        .strong()
+                                                        .color(palette.text),
+                                                );
+                                            });
+                                        });
+                                        ui.allocate_ui(egui::vec2(80.0, 24.0), |ui| {
+                                            ui.label(
+                                                egui::RichText::new(format!(
+                                                    "{} / {}",
+                                                    summary.assigned_skilllets,
+                                                    summary.total_skilllets
+                                                ))
+                                                .size(13.0)
+                                                .color(palette.text),
+                                            );
+                                        });
+                                        ui.allocate_ui(egui::vec2(60.0, 24.0), |ui| {
+                                            if summary.enabled {
+                                                SelflessUi::soft_badge(
+                                                    ui,
+                                                    "已启用",
+                                                    palette.accent_soft,
+                                                    palette.accent,
+                                                );
+                                            } else {
+                                                SelflessUi::soft_badge(
+                                                    ui,
+                                                    "未启用",
+                                                    palette.card_alt,
+                                                    palette.muted,
+                                                );
+                                            }
+                                        });
+                                        ui.add_space(8.0);
+                                        ui.horizontal_wrapped(|ui| {
+                                            if summary.skilllet_ids.is_empty() {
+                                                ui.label(
+                                                    egui::RichText::new("暂无 Skilllet")
+                                                        .size(12.0)
+                                                        .color(palette.muted),
+                                                );
+                                            } else {
+                                                for sid in &summary.skilllet_ids {
+                                                    let short =
+                                                        sid.strip_prefix("project:").unwrap_or(sid);
+                                                    SelflessUi::soft_badge(
+                                                        ui,
+                                                        short,
+                                                        palette.accent_soft,
+                                                        palette.accent,
+                                                    );
+                                                    ui.add_space(4.0);
+                                                }
+                                            }
+                                        });
+                                    });
+                                    ui.add_space(6.0);
+                                }
                             }
                         });
                     });
