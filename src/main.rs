@@ -110,6 +110,12 @@ enum Commands {
         command: SkillletCommands,
     },
 
+    /// Manage configured Agent targets.
+    Agent {
+        #[command(subcommand)]
+        command: AgentCommands,
+    },
+
     /// Manage local Draft Inbox items before they become Skilllets.
     Draft {
         #[command(subcommand)]
@@ -233,6 +239,31 @@ enum SkillletCommands {
     /// List owned project Skilllets.
     List {
         /// Project root.
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum AgentCommands {
+    /// List configured Agent targets.
+    List {
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
+    /// Enable an Agent target.
+    Enable {
+        #[arg(long)]
+        agent: String,
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
+    /// Disable an Agent target.
+    Disable {
+        #[arg(long)]
+        agent: String,
         #[arg(long, default_value = ".")]
         project: PathBuf,
     },
@@ -389,6 +420,26 @@ async fn main() -> Result<()> {
                         println!("- {}: {}", record.id, record.title);
                     }
                 }
+            }
+        },
+        Commands::Agent { command } => match command {
+            AgentCommands::List { project } => {
+                let config = config::load_or_default_project_config(&project)?;
+                for (name, agent) in config.agents {
+                    println!(
+                        "- {} [{}]",
+                        name,
+                        if agent.enabled { "enabled" } else { "disabled" }
+                    );
+                }
+            }
+            AgentCommands::Enable { agent, project } => {
+                config::set_agent_enabled(&project, &agent, true)?;
+                println!("Enabled agent `{agent}`");
+            }
+            AgentCommands::Disable { agent, project } => {
+                config::set_agent_enabled(&project, &agent, false)?;
+                println!("Disabled agent `{agent}`");
             }
         },
         Commands::Draft { command } => match command {

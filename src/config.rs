@@ -280,6 +280,34 @@ pub fn add_mirror(project_root: &Path, skill_id: &str, agent: &str) -> Result<()
     save_project_config(&root, &config)
 }
 
+pub fn set_agent_enabled(project_root: &Path, agent: &str, enabled: bool) -> Result<()> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    let mut config = load_or_default_project_config(&root)?;
+    let Some(agent_config) = config.agents.get_mut(agent) else {
+        return Err(anyhow!("agent `{agent}` is not configured in project.yml"));
+    };
+    agent_config.enabled = enabled;
+    save_project_config(&root, &config)
+}
+
+#[cfg(test)]
+mod agent_tests {
+    use super::*;
+
+    #[test]
+    fn set_agent_enabled_updates_project_config() {
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        set_agent_enabled(temp.path(), "cline", true).expect("enable cline");
+        let enabled = load_or_default_project_config(temp.path()).expect("config");
+        assert!(enabled.agents.get("cline").expect("cline").enabled);
+
+        set_agent_enabled(temp.path(), "cline", false).expect("disable cline");
+        let disabled = load_or_default_project_config(temp.path()).expect("config");
+        assert!(!disabled.agents.get("cline").expect("cline").enabled);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

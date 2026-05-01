@@ -89,6 +89,12 @@ struct CatalogInstallRequest {
     targets: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct AgentEnabledRequest {
+    agent: String,
+    enabled: bool,
+}
+
 #[derive(Debug, Serialize)]
 struct ApiState {
     project_root: String,
@@ -110,6 +116,7 @@ pub async fn serve(project: PathBuf, port: u16, open_browser: bool) -> Result<()
         .route("/favicon.ico", get(favicon))
         .route("/api/state", get(api_state))
         .route("/api/mirror", post(api_mirror))
+        .route("/api/agent/enabled", post(api_agent_enabled))
         .route("/api/draft/approve", post(api_draft_approve))
         .route("/api/draft/reject", post(api_draft_reject))
         .route("/api/extract", post(api_extract))
@@ -172,6 +179,16 @@ async fn api_mirror(
     Json(req): Json<MirrorRequest>,
 ) -> Json<serde_json::Value> {
     match build::mirror(state.project_root.as_ref(), &req.skill, &req.agent) {
+        Ok(_) => Json(serde_json::json!({ "ok": true })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+async fn api_agent_enabled(
+    State(state): State<AppState>,
+    Json(req): Json<AgentEnabledRequest>,
+) -> Json<serde_json::Value> {
+    match config::set_agent_enabled(state.project_root.as_ref(), &req.agent, req.enabled) {
         Ok(_) => Json(serde_json::json!({ "ok": true })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
@@ -547,7 +564,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
         const node = document.createElement("div");
         node.className = `node agent ${agentPositions[name] || ""}`;
         node.dataset.agent = name;
-        node.innerHTML = `<h2>${escapeHtml(name)}</h2><p>${agent.enabled ? "Enabled" : "Disabled"}${agent.exports.skills_dir ? " · skills" : ""}</p>`;
+        node.innerHTML = `<h2>${escapeHtml(name)}</h2><p>${agent.enabled ? "Enabled" : "Disabled"}${agent.exports.skills_dir ? " · skills" : ""}</p><button class="btn" style="margin-top:8px" onclick="event.stopPropagation(); setAgentEnabled('${escapeAttr(name)}', ${agent.enabled ? "false" : "true"})">${agent.enabled ? "Disable" : "Enable"}</button>`;
         node.addEventListener("click", () => selectAgent(name));
         node.addEventListener("dragover", ev => ev.preventDefault());
         node.addEventListener("drop", async ev => {
@@ -741,6 +758,17 @@ const INDEX_HTML: &str = r##"<!doctype html>
         return;
       }
       document.getElementById("build-output").textContent = `Mirrored declaration added: ${skill} -> ${agent}`;
+      await loadState();
+    }
+
+    async function setAgentEnabled(agent, enabled) {
+      const res = await fetch("/api/agent/enabled", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent, enabled })
+      });
+      const result = await res.json();
+      document.getElementById("build-output").textContent = result.ok ? `${enabled ? "Enabled" : "Disabled"} agent: ${agent}` : result.error;
       await loadState();
     }
 

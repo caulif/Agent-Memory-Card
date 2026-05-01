@@ -142,6 +142,12 @@ v0.22 adds the Cursor rules exporter:
 2. Cursor exports write `.cursor/rules/agent-kernel.mdc` with `alwaysApply: true`.
 3. Cursor-targeted Skilllets now compile into a native Cursor Rules surface.
 
+v0.23 adds Agent target controls:
+
+1. `agent list` shows configured Agent targets and enabled state.
+2. `agent enable --agent <name>` and `agent disable --agent <name>` update `project.yml`.
+3. The Canvas Agent nodes expose Enable/Disable controls.
+
 ## Commands
 
 ```bash
@@ -172,6 +178,9 @@ cargo run -- catalog list --project .
 cargo run -- catalog init --project .
 cargo run -- catalog validate --project .
 cargo run -- catalog install --id core:rust-quality-gate --target codex --project .
+cargo run -- agent list --project .
+cargo run -- agent enable --agent cline --project .
+cargo run -- agent disable --agent cline --project .
 ```
 
 The npm wrapper works locally after the Rust binary has been built:
@@ -246,6 +255,7 @@ The Canvas UI exposes:
 
 - `/api/state` for project config, imported rules, and skill index
 - `/api/mirror` for declaring a Skill mirror
+- `/api/agent/enabled` for enabling or disabling Agent targets
 - `/api/extract` creates Draft Inbox items from pasted text
 - `/api/build/preview` for build previews
 - `/api/sync` for syncing declared mirrors and generated artifacts
