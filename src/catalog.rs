@@ -41,6 +41,43 @@ pub struct CatalogPackageStatus {
     pub installed: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogValidationReport {
+    pub errors: usize,
+    pub warnings: usize,
+    pub rows: Vec<CatalogValidationRow>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogValidationRow {
+    pub package_id: String,
+    pub level: String,
+    pub code: String,
+    pub message: String,
+}
+
+impl CatalogValidationReport {
+    pub fn render(&self) -> String {
+        let mut out = String::new();
+        out.push_str("Agent-Kernel Catalog Validation\n\n");
+        if self.rows.is_empty() {
+            out.push_str("No issues found.\n");
+        } else {
+            for row in &self.rows {
+                out.push_str(&format!(
+                    "- {} {}: {} ({})\n",
+                    row.level, row.package_id, row.message, row.code
+                ));
+            }
+        }
+        out.push_str(&format!(
+            "\nSummary: {} errors, {} warnings\n",
+            self.errors, self.warnings
+        ));
+        out
+    }
+}
+
 pub fn load_or_default_catalog(project_root: &Path) -> Result<Catalog> {
     let root = fsutil::normalize_project_root(project_root)?;
     let path = catalog_path(&root);
@@ -49,6 +86,60 @@ pub fn load_or_default_catalog(project_root: &Path) -> Result<Catalog> {
         Ok(serde_yaml::from_str(&text)?)
     } else {
         Ok(default_catalog())
+    }
+}
+
+pub fn validate_catalog(catalog: &Catalog) -> CatalogValidationReport {
+    let mut rows = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+
+    for package in &catalog.packages {
+        if !seen.insert(package.id.clone()) {
+            rows.push(validation_row(
+                &package.id,
+                "error",
+                "duplicate-id",
+                "Package id appears more than once.",
+            ));
+        }
+        if package.version.trim().is_empty() {
+            rows.push(validation_row(
+                &package.id,
+                "error",
+                "missing-version",
+                "Package version is required for provenance.",
+            ));
+        }
+        if package.source_url.trim().is_empty() {
+            rows.push(validation_row(
+                &package.id,
+                "error",
+                "missing-source",
+                "Package source_url is required for provenance.",
+            ));
+        }
+        if package.body.trim().is_empty() {
+            rows.push(validation_row(
+                &package.id,
+                "error",
+                "empty-body",
+                "Package body cannot be empty.",
+            ));
+        }
+        if package.tags.is_empty() {
+            rows.push(validation_row(
+                &package.id,
+                "warning",
+                "missing-tags",
+                "Package tags improve browsing and review.",
+            ));
+        }
+    }
+
+    CatalogValidationReport {
+        errors: rows.iter().filter(|row| row.level == "error").count(),
+        warnings: rows.iter().filter(|row| row.level == "warning").count(),
+        rows,
     }
 }
 
@@ -101,6 +192,20 @@ pub fn install_catalog_package(
     )?;
 
     Ok(package)
+}
+
+fn validation_row(
+    package_id: &str,
+    level: &str,
+    code: &str,
+    message: &str,
+) -> CatalogValidationRow {
+    CatalogValidationRow {
+        package_id: package_id.to_string(),
+        level: level.to_string(),
+        code: code.to_string(),
+        message: message.to_string(),
+    }
 }
 
 fn catalog_path(project_root: &Path) -> std::path::PathBuf {
@@ -192,5 +297,44 @@ mod tests {
         assert_eq!(first.version, "0.1.0");
         assert!(first.source_url.starts_with("builtin:"));
         assert!(first.tags.iter().any(|tag| tag == "quality"));
+    }
+
+    #[test]
+    fn validate_catalog_reports_duplicate_ids_and_missing_provenance() {
+        let catalog = Catalog {
+            packages: vec![
+                CatalogPackage {
+                    id: "demo:one".to_string(),
+                    title: "One".to_string(),
+                    description: "First package".to_string(),
+                    version: "0.1.0".to_string(),
+                    source_url: "builtin:demo/one".to_string(),
+                    tags: vec!["demo".to_string()],
+                    kind: "preference".to_string(),
+                    scope: "project".to_string(),
+                    body: "Use one.".to_string(),
+                },
+                CatalogPackage {
+                    id: "demo:one".to_string(),
+                    title: "Duplicate".to_string(),
+                    description: "Duplicate package".to_string(),
+                    version: "".to_string(),
+                    source_url: "".to_string(),
+                    tags: Vec::new(),
+                    kind: "preference".to_string(),
+                    scope: "project".to_string(),
+                    body: "".to_string(),
+                },
+            ],
+        };
+
+        let report = validate_catalog(&catalog);
+
+        assert_eq!(report.errors, 4);
+        assert!(report.rows.iter().any(|row| row.code == "duplicate-id"));
+        assert!(report.rows.iter().any(|row| row.code == "missing-version"));
+        assert!(report.rows.iter().any(|row| row.code == "missing-source"));
+        assert!(report.rows.iter().any(|row| row.code == "empty-body"));
+        assert!(report.rows.iter().any(|row| row.code == "missing-tags"));
     }
 }

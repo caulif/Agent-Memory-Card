@@ -38,6 +38,7 @@
 - v0.17 范围：实现本地 Skilllet Catalog / App Store 地基，支持内置 packages、`.agent-kernel/catalog.yml` 覆盖、CLI install，以及 Canvas App Store 安装入口。
 - v0.18 范围：增强 Catalog 安装状态反馈，CLI 和 Canvas 均显示 available/installed，避免 App Store 重复安装缺少信任提示。
 - v0.19 范围：为 Catalog package 增加 provenance 元数据（version/source_url/tags），让未来 Registry 和安全审查能基于来源、版本和类别做信任判断。
+- v0.20 范围：加入 Catalog 本地 trust gate，CLI/UI 均可验证 duplicate id、missing provenance、empty body、missing tags，安装前先建立信任反馈。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 npm 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。

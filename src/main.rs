@@ -312,6 +312,12 @@ enum CatalogCommands {
         project: PathBuf,
     },
 
+    /// Validate local catalog package metadata.
+    Validate {
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
     /// Install a catalog package as an owned Skilllet.
     Install {
         #[arg(long)]
@@ -475,6 +481,14 @@ async fn main() -> Result<()> {
                             item.package.source_url
                         );
                     }
+                }
+            }
+            CatalogCommands::Validate { project } => {
+                let catalog = catalog::load_or_default_catalog(&project)?;
+                let report = catalog::validate_catalog(&catalog);
+                println!("{}", report.render());
+                if report.errors > 0 {
+                    std::process::exit(1);
                 }
             }
             CatalogCommands::Install {

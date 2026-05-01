@@ -125,6 +125,12 @@ v0.19 adds catalog provenance:
 2. `catalog list` prints package versions and source URLs.
 3. The Canvas App Store shows package provenance before installation.
 
+v0.20 adds a local Catalog trust gate:
+
+1. `catalog validate` checks duplicate IDs, missing versions, missing sources, empty package bodies, and missing tags.
+2. `/api/catalog/validate` exposes the same validation report to the Canvas.
+3. The App Store shows Catalog Health before package installation.
+
 ## Commands
 
 ```bash
@@ -153,6 +159,7 @@ cargo run -- review --approve-draft project:prefer-pnpm --project .
 cargo run -- review --reject-draft project:prefer-pnpm --project .
 cargo run -- catalog list --project .
 cargo run -- catalog init --project .
+cargo run -- catalog validate --project .
 cargo run -- catalog install --id core:rust-quality-gate --target codex --project .
 ```
 
@@ -235,6 +242,7 @@ The Canvas UI exposes:
 - `/api/rule-tests` for structured Rule CI results
 - `/api/review` for the unified review protocol used by the Canvas
 - `/api/catalog` and `/api/catalog/install` for local App Store packages
+- `/api/catalog/validate` for local Catalog trust checks
 
 ## Generated State
 

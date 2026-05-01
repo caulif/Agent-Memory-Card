@@ -49,6 +49,16 @@ mod tests {
         assert_eq!(value["report"]["summary"]["drafts_pending"], 1);
         assert_eq!(value["report"]["drafts"][0]["id"], "project:prefer-pnpm");
     }
+
+    #[test]
+    fn catalog_validation_json_reports_clean_default_catalog() {
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        let value = catalog_validation_json_value(temp.path()).expect("catalog validation");
+
+        assert_eq!(value["ok"], true);
+        assert_eq!(value["report"]["errors"], 0);
+    }
 }
 
 #[derive(Clone)]
@@ -109,6 +119,7 @@ pub async fn serve(project: PathBuf, port: u16, open_browser: bool) -> Result<()
         .route("/api/rule-tests", get(api_rule_tests))
         .route("/api/review", get(api_review))
         .route("/api/catalog", get(api_catalog))
+        .route("/api/catalog/validate", get(api_catalog_validate))
         .route("/api/catalog/install", post(api_catalog_install))
         .layer(CorsLayer::permissive())
         .with_state(state);
@@ -267,6 +278,22 @@ async fn api_catalog(State(state): State<AppState>) -> Json<serde_json::Value> {
         Ok(catalog) => Json(serde_json::json!({ "ok": true, "catalog": catalog })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
+}
+
+async fn api_catalog_validate(State(state): State<AppState>) -> Json<serde_json::Value> {
+    match catalog_validation_json_value(state.project_root.as_ref()) {
+        Ok(value) => Json(value),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+fn catalog_validation_json_value(project_root: &std::path::Path) -> Result<serde_json::Value> {
+    let catalog = catalog::load_or_default_catalog(project_root)?;
+    let report = catalog::validate_catalog(&catalog);
+    Ok(serde_json::json!({
+        "ok": true,
+        "report": report,
+    }))
 }
 
 async fn api_catalog_install(
@@ -633,7 +660,17 @@ const INDEX_HTML: &str = r##"<!doctype html>
     async function renderStore() {
       const res = await fetch("/api/catalog");
       const payload = await res.json();
+      const validationRes = await fetch("/api/catalog/validate");
+      const validation = await validationRes.json();
       catalogPackages = payload.ok ? payload.catalog.items || [] : [];
+      const validationReport = validation.ok ? validation.report : { errors: 0, warnings: 0, rows: [] };
+      const validationCard = `
+        <div class="card" style="grid-column:1/-1">
+          <h4>Catalog Health</h4>
+          <p><strong class="${validationReport.errors ? "bad" : "ok"}">${validationReport.errors || 0}</strong> errors · ${validationReport.warnings || 0} warnings</p>
+          ${validationReport.rows && validationReport.rows.length ? `<p>${validationReport.rows.map(row => `${escapeHtml(row.level)} ${escapeHtml(row.package_id)}: ${escapeHtml(row.message)}`).join("<br>")}</p>` : `<p>Metadata is ready for local installation.</p>`}
+        </div>
+      `;
       const catalogCards = catalogPackages.map(item => `
         <div class="card">
           <h4>${escapeHtml(item.package.id)}</h4>
@@ -653,6 +690,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
         </div>
       `).join("");
       document.getElementById("store-grid").innerHTML = `
+        ${validationCard}
         ${catalogCards ? `<div class="card" style="grid-column:1/-1"><h4>Catalog Packages</h4><p>Install lightweight Skilllets into this project.</p></div>${catalogCards}` : ""}
         ${indexedSkillCards ? `<div class="card" style="grid-column:1/-1"><h4>Indexed Skills</h4><p>Reference existing Skills through Mirror mode.</p></div>${indexedSkillCards}` : ""}
       ` || `<div class="empty">No packages or skills available.</div>`;
