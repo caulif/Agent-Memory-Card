@@ -86,6 +86,13 @@ v0.13 starts review mode:
 1. `review` aggregates Draft Inbox, Mirror Status, Rule CI, and Build Preview.
 2. This is the non-interactive foundation for the future `git add -p` style reviewer.
 
+v0.14 starts the release/distribution foundation:
+
+1. `agent-kernel --version` reports the Cargo package version.
+2. The npm entrypoint first looks for packaged binaries under `bin/<platform>-<arch>/`.
+3. Local development still falls back to `cargo build` when no packaged binary exists.
+4. Tag builds assemble Windows, Linux, and macOS artifacts plus an npm tarball.
+
 ## Commands
 
 ```bash
@@ -115,7 +122,16 @@ The npm wrapper works locally after the Rust binary has been built:
 
 ```bash
 node npm/agent-kernel.js scan --scan-home --project .
+node npm/agent-kernel.js --version
 ```
+
+For a packaged `npx` flow, the wrapper resolves binaries in this order:
+
+1. `bin/<platform>-<arch>/agent-kernel[.exe]`
+2. `target/release/agent-kernel[.exe]`
+3. `target/debug/agent-kernel[.exe]`
+
+If none exist, it runs `cargo build` as a development fallback.
 
 ## v0.1 Workflow
 

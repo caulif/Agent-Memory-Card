@@ -3,14 +3,12 @@
 const { spawnSync } = require("node:child_process");
 const { existsSync } = require("node:fs");
 const { join, resolve } = require("node:path");
+const { findExistingBinary, resolveBinaryCandidates } = require("./agent-kernel-lib");
 
 const root = resolve(__dirname, "..");
-const exe = process.platform === "win32" ? "agent-kernel.exe" : "agent-kernel";
-const debugPath = join(root, "target", "debug", exe);
-const releasePath = join(root, "target", "release", exe);
-const bin = existsSync(releasePath) ? releasePath : debugPath;
+let bin = findExistingBinary({ root });
 
-if (!existsSync(bin)) {
+if (!bin) {
   const homeCargo = process.env.USERPROFILE
     ? join(process.env.USERPROFILE, ".cargo", "bin", process.platform === "win32" ? "cargo.exe" : "cargo")
     : null;
@@ -23,6 +21,16 @@ if (!existsSync(bin)) {
   if (built.status !== 0) {
     process.exit(built.status ?? 1);
   }
+  bin = findExistingBinary({ root });
+}
+
+if (!bin) {
+  console.error("agent-kernel binary was not found after build.");
+  console.error("Checked:");
+  for (const candidate of resolveBinaryCandidates({ root })) {
+    console.error(`- ${candidate}`);
+  }
+  process.exit(1);
 }
 
 const result = spawnSync(bin, process.argv.slice(2), {

@@ -18,9 +18,25 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(name = "agent-kernel")]
 #[command(about = "Project-centered Agent skills and rules workspace")]
+#[command(version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_exposes_cargo_package_version() {
+        use clap::CommandFactory;
+
+        let command = Cli::command();
+        let version = command.render_long_version().to_string().trim().to_string();
+
+        assert_eq!(version, "agent-kernel 0.1.0");
+    }
 }
 
 #[derive(Subcommand)]

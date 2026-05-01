@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win32-x64
+            artifact: agent-kernel-win32-x64
+            binary: agent-kernel.exe
+          - os: ubuntu-latest
+            target: linux-x64
+            artifact: agent-kernel-linux-x64
+            binary: agent-kernel
+          - os: macos-13
+            target: darwin-x64
+            artifact: agent-kernel-darwin-x64
+            binary: agent-kernel
+          - os: macos-latest
+            target: darwin-arm64
+            artifact: agent-kernel-darwin-arm64
+            binary: agent-kernel
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test
+      - run: cargo build --release
+      - name: Stage binary
+        shell: bash
+        run: |
+          mkdir -p "dist/${{ matrix.target }}"
+          cp "target/release/${{ matrix.binary }}" "dist/${{ matrix.target }}/${{ matrix.binary }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.target }}
+
+  npm-pack:
+    needs: build-binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: downloaded
+      - name: Assemble package binaries
+        run: |
+          mkdir -p bin
+          cp -R downloaded/agent-kernel-win32-x64 bin/win32-x64
+          cp -R downloaded/agent-kernel-linux-x64 bin/linux-x64
+          cp -R downloaded/agent-kernel-darwin-x64 bin/darwin-x64
+          cp -R downloaded/agent-kernel-darwin-arm64 bin/darwin-arm64
+          chmod +x bin/linux-x64/agent-kernel bin/darwin-x64/agent-kernel bin/darwin-arm64/agent-kernel
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - run: node --test npm/*.test.js
+      - run: npm pack
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-kernel-npm-package
+          path: agent-kernel-*.tgz
