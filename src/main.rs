@@ -157,6 +157,18 @@ enum Commands {
 
     /// Review pending drafts, mirror status, Rule CI, and build preview.
     Review {
+        /// Print machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+
+        /// Approve a Draft Inbox item before rendering the review. Repeatable.
+        #[arg(long = "approve-draft")]
+        approve_drafts: Vec<String>,
+
+        /// Reject a Draft Inbox item before rendering the review. Repeatable.
+        #[arg(long = "reject-draft")]
+        reject_drafts: Vec<String>,
+
         /// Project root.
         #[arg(long, default_value = ".")]
         project: PathBuf,
@@ -411,9 +423,37 @@ async fn main() -> Result<()> {
                 std::process::exit(1);
             }
         }
-        Commands::Review { project } => {
+        Commands::Review {
+            json,
+            approve_drafts,
+            reject_drafts,
+            project,
+        } => {
+            let decisions = approve_drafts
+                .into_iter()
+                .map(review::ReviewDecision::ApproveDraft)
+                .chain(
+                    reject_drafts
+                        .into_iter()
+                        .map(review::ReviewDecision::RejectDraft),
+                )
+                .collect::<Vec<_>>();
+            let decision_results = review::apply_review_decisions(&project, &decisions)?;
             let report = review::review_project(&project)?;
-            println!("{}", report.render());
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "decisions": decision_results,
+                        "report": report,
+                    }))?
+                );
+            } else {
+                for result in decision_results {
+                    println!("Applied {} `{}`", result.action, result.id);
+                }
+                println!("{}", report.render());
+            }
         }
         Commands::Ui {
             project,

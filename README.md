@@ -93,6 +93,13 @@ v0.14 starts the release/distribution foundation:
 3. Local development still falls back to `cargo build` when no packaged binary exists.
 4. Tag builds assemble Windows, Linux, and macOS artifacts plus an npm tarball.
 
+v0.15 starts the interactive review protocol foundation:
+
+1. `review --json` returns machine-readable Draft Inbox, Mirror Status, Rule CI, and Build Preview state.
+2. `review --approve-draft <id>` applies a Draft Inbox approval before rendering the report.
+3. `review --reject-draft <id>` removes an unwanted draft before rendering the report.
+4. These flags are the scriptable base for a later `git add -p` style CLI.
+
 ## Commands
 
 ```bash
@@ -116,6 +123,9 @@ cargo run -- provider show --project .
 cargo run -- extract --text "Always use token=supersecret123456789 before pushing." --target codex --provider local --dry-run --project .
 cargo run -- test-rules --project .
 cargo run -- review --project .
+cargo run -- review --json --project .
+cargo run -- review --approve-draft project:prefer-pnpm --project .
+cargo run -- review --reject-draft project:prefer-pnpm --project .
 ```
 
 The npm wrapper works locally after the Rust binary has been built:
@@ -180,6 +190,10 @@ cargo run -- test-rules --project .
 
 # 14. Review pending changes before sync/build.
 cargo run -- review --project .
+
+# 15. Use review as a scriptable protocol for future interactive CLI/UI decisions.
+cargo run -- review --json --project .
+cargo run -- review --approve-draft project:prefer-pnpm --project .
 ```
 
 The Canvas UI exposes:
