@@ -1,7 +1,7 @@
 # Agent-Kernel / Memory-GC 构思文档
 
 > 日期：2026-04-30  
-> 目标：把一个由 Rust 构建、通过 `npx` 分发的引擎，设计成多 Agent 通用的轻量知识整理、技能沉淀、可视化治理和规则分发系统。
+> 目标：把一个由 Rust 构建、通过 `npx` 分发的引擎，设计成面向 Claude Code / Codex 的本地 Skilllet 进化、可视化治理和规则编译系统。
 
 ## 0. 本轮增强后的关键结论
 
@@ -40,13 +40,13 @@
 - v0.19 范围：为 Catalog package 增加 provenance 元数据（version/source_url/tags），让未来 Registry 和安全审查能基于来源、版本和类别做信任判断。
 - v0.20 范围：加入 Catalog 本地 trust gate，CLI/UI 均可验证 duplicate id、missing provenance、empty body、missing tags，安装前先建立信任反馈。
 - v0.21 范围：加入 instruction artifact 预算警告，默认 32 KiB，借鉴 Codex `project_doc_max_bytes` 约束，提前发现 prompt bloat。
-- v0.22 范围：实现 Cursor Rules exporter，根据 `rules_dir` 生成 `.cursor/rules/agent-kernel.mdc`，让 multi-agent 分发从 Codex/Claude 扩展到 Cursor 原生规则面。
+- v0.22 范围：探索通用 rules exporter，为未来 Cursor adapter 打接口地基；Cursor 不进入当前默认目标。
 - v0.23 范围：加入 Agent target 启停控制，CLI 与 Canvas 都能切换 Agent enabled 状态，降低手改声明式 YAML 的门槛。
 - v0.24 范围：加入 Skilllet target assignment，CLI/UI 都能把同一 Skilllet 分配给不同 Agent，强化 Project 层 multi-agent 配置体验。
 - v0.25 范围：加入 Skilllet target matrix，CLI/UI 都能总览 Skilllet × Agent 分配关系，为后续拖拽连线和批量操作打底。
-- v0.26 范围：实现 Cline 原生规则目录 exporter，将 Cline 目标编译为 `.clinerules/agent-kernel.md`，并兼容早期 `.clinerules` 单文件配置迁移。
+- v0.26 范围：探索 Cline-style 规则目录 exporter 与旧配置迁移；v0.30 后 Cline 从核心主线移除，作为后续插件式 adapter 备选。
 - v0.27 范围：将 Canvas Inspector 中的 Skilllet target matrix 从文字摘要升级为可点击矩阵表，让用户能直接按 Skilllet × Agent 维度分配能力。
-- v0.28 范围：加入 generated artifact drift 检测，基于 `project.lock.yml` 比对 `AGENTS.md`、`CLAUDE.md`、`.cursor/rules`、`.clinerules` 等编译产物是否被手改，为后续 Reverse Parse 生成 Draft 打基础。
+- v0.28 范围：加入 generated artifact drift 检测，基于 `project.lock.yml` 比对 `AGENTS.md`、`CLAUDE.md` 等编译产物是否被手改，为后续 Reverse Parse 生成 Draft 打基础。
 - v0.29 范围：实现 Reverse Parse 的本地第一版，`import --artifacts` 通过重新渲染期望产物并提取用户新增行，把手改的 build artifact 转成 Draft Inbox 候选。
 - v0.30 范围：重置 MVP 范围，默认只支持 Claude Code / Codex；Cursor 和 Cline 从默认配置与 Canvas 目标中移除，但保留通用 exporter/adapter 接口。
 - v0.31 范围：增强 Skilllet 操作能力，支持把一个或多个 Skilllet 分配到某个项目或 Agent，合并多个 Skilllet，并把 Skilllet 作为生成补充追加进已有 mirrored Skill。
@@ -57,6 +57,94 @@
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 npm 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。
+
+### 0.1 当前 MVP 权威决策
+
+本阶段产品主线收束为：
+
+> Agent-Kernel 先只服务 Claude Code / Codex，但 Observation Layer 要能读取本地规则、生成产物、手动修改，以及所有可发现的本地对话记录，从中持续提炼 Skilllets，让个人开发环境越用越贴合自己。
+
+当前目标 Agent：
+
+- Claude Code：`CLAUDE.md`、`.claude/skills`
+- Codex：`AGENTS.md`、`.agents/skills`
+
+暂缓目标：
+
+- Cursor：架构保留 adapter/exporter 接口，MVP 不做 UI 和导出主路径。
+- Cline：从当前产品主线移除，后续如果支持也走插件式 adapter，不进入核心叙事。
+
+这会让定位更锋利：不是“所有 Agent 都支持一点”，而是先把 Claude Code / Codex 的本地记忆进化闭环做深。
+
+### 0.2 新版核心架构
+
+1. Observation Layer
+   - 读取本地规则文件：`CLAUDE.md`、`AGENTS.md`
+   - 读取本地 Skills：`.claude/skills`、`.agents/skills`
+   - 读取 build artifact drift：用户手改生成文件后通过 Reverse Parse 回流
+   - 读取本地对话记录：Claude Code / Codex 可发现的 session、transcript、logs
+   - 后续扩展 Cursor / IDE / MCP / terminal history adapter
+
+2. Observation Store
+   - Observation 不直接变成 Skilllet。
+   - 先保存为 observation record，字段包括 source、timestamp、agent、project、text span、evidence、privacy/redaction status、confidence。
+   - Observation 是证据层，Draft Skilllet 是建议层，Active Skilllet 是用户批准后的源代码。
+
+3. Skilllet Synthesis Layer
+   - 从 observations 中提炼候选 Skilllet。
+   - 识别类型：`preference`、`constraint`、`procedure`、`convention`、`correction`、`anti-pattern`。
+   - 自动判断 scope：`global`、`project`、`directory`、`agent-specific`。
+   - 输出必须包含 confidence、reason、evidence、suggested targets。
+
+4. Evolution Layer
+   - 负责去重、合并、冲突检测和版本演化。
+   - Skilllet 需要 lineage：来自哪几次 observation、被修改过几次、是否通过 Rule CI、被哪些 Agent 使用、最近是否仍然有效。
+   - Project Skilllet 如果反复出现，可建议 promotion 到 global preference。
+   - 长期未触发的 Skilllet 可进入 dormant candidate，但不能自动删除。
+
+5. Review Layer
+   - 所有自动生成内容先进 Draft Inbox。
+   - 用户 approve / reject / edit。
+   - 这是信任边界，不能跳过。
+
+6. Compiler Layer
+   - 编译到 Claude Code / Codex 的原生文件和 skills 目录。
+   - 生成 artifacts。
+   - 检测 drift。
+   - 支持 Reverse Parse 回流。
+
+### 0.3 Skilllet 操作模型
+
+用户必须能对 Skilllet 做这些操作：
+
+- 将一个或多个 Skilllet 赋予给某个 Project。
+- 将一个或多个 Skilllet 赋予给某个 Agent，例如只给 Codex 或只给 Claude Code。
+- 合并多个 Skilllet，生成新的复合 Skilllet。
+- 把 Skilllet 加入现有 mirrored Skill，作为生成补充，不直接修改第三方 Skill 源文件。
+- 后续在 UI 中用拖拽和矩阵完成这些操作，同时保留 CLI 等价命令。
+
+这些能力是 Project 层 multi-agent 配置的基础。即使当前 MVP 只支持 Claude Code / Codex，也要保持“同一项目中不同 Agent 获得不同能力”的模型。
+
+### 0.4 进化体验设计
+
+Skilllet 进化可以轻微参考游戏里的“技能树”隐喻，但命名和交互要工程化，不能喧宾夺主。
+
+建议 UI 元素：
+
+- Skilllet Tree：展示某条规则如何从多次 Observation 进化而来。
+- Confidence / Stability：可信度和稳定度，不叫等级。
+- Evolution Timeline：来自哪次对话，何时批准，何时合并，何时编译给哪个 Agent。
+- Conflict Warning：冲突 Skilllet 用红色边连接。
+- Dormant / Active：长期没触发的 Skilllet 进入休眠候选。
+- Promotion Candidate：反复出现的 project Skilllet 可以建议提升为 global preference。
+- Review Task：需要用户处理的候选、冲突或合并建议。
+
+命名原则：
+
+- 不叫 XP，叫 confidence。
+- 不叫 level up，叫 promotion candidate。
+- 不叫 rarity，叫 stability。
+- 不叫 quest，叫 review task。
 
 ## 1. 一句话定位
 
@@ -121,7 +209,7 @@ Codex 的文件化上下文也已经形成清晰结构：
 - `AGENTS.md` 的大小限制说明规则治理必须有预算意识。
 - symlink 支持很适合作为 Agent-Kernel 的跨项目注入机制。
 
-### 3.3 Cursor
+### 3.3 Cursor（Future Adapter）
 
 Cursor 当前规则系统已经从旧式 `.cursorrules` 迁移到 `.cursor/rules`：
 
@@ -136,8 +224,9 @@ Cursor 当前规则系统已经从旧式 `.cursorrules` 迁移到 `.cursor/rules
 
 - Cursor 已经具备“从对话生成规则”的入口，但缺少跨工具、跨项目的统一治理。
 - Agent-Kernel 可以把 Cursor Memories / Rules 纳入统一知识库，再导出成 Claude Skill、Codex Skill 或 AGENTS.md。
+- 但 Cursor 不进入当前 MVP 主路径。现阶段只保留 exporter/adapter 接口，等 Claude Code / Codex 的进化闭环足够稳定后再补 UI 与原生 `.cursor/rules` 导出。
 
-### 3.4 Cline
+### 3.4 Cline（Out Of Core）
 
 Cline 的 Memory Bank 是一个结构化 Markdown 文档体系：
 
@@ -151,7 +240,7 @@ Cline 的 Memory Bank 是一个结构化 Markdown 文档体系：
 
 - Cline 证明“文档化记忆”对开发流程很有效。
 - 但它更像项目持续文档，不是规则冲突解决器。
-- Agent-Kernel 可以借鉴其文件结构，但需要增加 AST 级编辑、冲突检测和多端导出。
+- Agent-Kernel 可以借鉴其文件结构，但 Cline 不进入当前产品主线。后续如果支持，应作为插件式 adapter，而不是默认 Agent、默认 Canvas 节点或核心叙事。
 
 ### 3.5 Mem0 / Letta / LangGraph / Graphiti
 
@@ -185,7 +274,8 @@ Agent-Kernel 不应该做：
 
 - 不做完整 Agent 框架。
 - 不强制用户接入数据库。
-- 不替代 Claude/Codex/Cursor/Cline 的原生机制。
+- 不替代 Claude/Codex 的原生机制。
+- 不在 MVP 中追求 Cursor/Cline 的默认导出和 UI 主路径。
 - 不把所有对话自动永久保存。
 - 不让 LLM 直接重写整份规则文件。
 
@@ -212,7 +302,7 @@ scope: project
 domains: [frontend, api]
 applies_to:
   paths: ["src/**/*.ts", "src/**/*.tsx"]
-  agents: ["cursor", "claude-code", "codex", "cline"]
+  agents: ["claude-code", "codex"]
 status: active
 confidence: 0.86
 source:
@@ -340,7 +430,7 @@ agent-kernel/
   crates/
     agent-kernel-core/      # IR、skilllet、分类、冲突、预算
     agent-kernel-parser/    # Markdown/MDC/SKILL/AGENTS 解析与反向解析
-    agent-kernel-exporters/ # Claude/Codex/Cursor/Cline exporters
+    agent-kernel-exporters/ # Claude/Codex exporters, future adapters
     agent-kernel-ci/        # Rule CI runner
     agent-kernel-mcp/       # MCP server
     agent-kernel-ui/        # Axum API + embedded web assets
@@ -376,9 +466,10 @@ Rust 适合这里的原因：
 输入来源：
 
 - CLI stdin：`cat chat.log | npx agent-kernel extract`
-- 本地文件：`CLAUDE.md`、`AGENTS.md`、`.cursor/rules/*.mdc`、`.clinerules`、`memory-bank/*.md`
+- 本地文件：`CLAUDE.md`、`AGENTS.md`
+- Future adapter 文件：`.cursor/rules/*.mdc`、`.clinerules`、`memory-bank/*.md`
 - Agent Skills：`.claude/skills/**/SKILL.md`、`.agents/skills/**/SKILL.md`
-- MCP tool：让 Claude/Cursor/Codex 调用 `remember_candidate`、`gc_rules`、`export_rules`
+- MCP tool：让 Claude Code / Codex 调用 `remember_candidate`、`gc_rules`、`export_rules`
 - Git diff：从 PR review 或近期修改中提炼项目规则
 - Session log：从 Agent 的 JSONL 或 transcript 中提炼稳定知识
 
@@ -441,7 +532,7 @@ Rust 适合这里的原因：
 
 ### 6.5 Kernel Store 内核存储与唯一事实来源
 
-核心原则：`~/.agent-kernel/skilllets` 和项目 `.agent-kernel/project.yml` 才是 Single Source of Truth。各 Agent 读取的 `CLAUDE.md`、`AGENTS.md`、`.cursor/rules/*.mdc`、`.clinerules` 是编译产物。
+核心原则：`~/.agent-kernel/skilllets` 和项目 `.agent-kernel/project.yml` 才是 Single Source of Truth。当前 MVP 中 Claude Code / Codex 读取的 `CLAUDE.md`、`AGENTS.md` 是编译产物；Cursor/Cline 类文件只作为后续 adapter 产物。
 
 MVP 建议零数据库：
 
@@ -492,8 +583,8 @@ MVP 建议零数据库：
 | --- | --- |
 | Claude Code | `CLAUDE.md`、`.claude/skills/<name>/SKILL.md`、`.claude/rules/*.md` |
 | Codex | `AGENTS.md`、`.agents/skills/<name>/SKILL.md` |
-| Cursor | `.cursor/rules/*.mdc`、项目根 `AGENTS.md`、User Rules 文本 |
-| Cline | `.clinerules`、`memory-bank/*.md` |
+| Cursor | Future adapter：`.cursor/rules/*.mdc`、项目根 `AGENTS.md`、User Rules 文本 |
+| Cline | Out of core：`.clinerules`、`memory-bank/*.md`，后续可做插件式 adapter |
 | Aider | `CONVENTIONS.md` 或 aider 可读的 repo instructions |
 | Generic | `AGENTS.md`、`SKILL.md`、纯 Markdown |
 
@@ -533,13 +624,13 @@ UI 应采用双入口：
 
 交互形态建议：
 
-- Canvas 节点：Current Project、Claude Code、Codex、Cursor、Cline、Skill、Skilllet、Rule Set、Export Artifact。
+- Canvas 节点：Current Project、Claude Code、Codex、Skill、Skilllet、Rule Set、Export Artifact。Cursor 等后续目标只通过 adapter 插件加入。
 - Canvas 连线：启用、Mirror、Compile、Depends on、Conflicts with、Supersedes。
 - 拖动连接：从 Skill 节点拖线到 Agent 节点，创建该项目下的 Agent-specific Mirror；从 Skilllet 拖到 Project，加入项目规则；从 Skilllet 拖到某个 Agent，只给该 Agent 编译；从多个 Skilllets 拖到新 Skill，组合成 Owned Skill。
 - 连线状态：synced、source updated、target drifted、conflict、test failed。
 - 冲突对比：左侧旧规则，右侧新规则，红色表示将废弃，绿色表示将保留。
 - 知识拖拽：把 skilllet 从 Global 拖到 Project，或从 Always Prompt 拖到 Skill。
-- Skill 拖拽：把 Referenced Skill 拖到 Claude/Codex/Cursor/Cline，系统默认创建 Mirror 副本。
+- Skill 拖拽：把 Referenced Skill 拖到 Claude Code / Codex，系统默认创建 Mirror 副本。后续 adapter 可加入新的 Agent 节点。
 - 预算条：像 bundle analyzer 一样展示每个 Agent 的上下文占用。
 - 反向解析提示：如果用户手动改了 `CLAUDE.md`，UI 显示“检测到编译产物被手动修改，是否导入为 Draft skilllet？”
 - Mirror 状态：显示 synced / source updated / target drifted / fork recommended。
@@ -555,8 +646,6 @@ Canvas 第一屏的信息布局建议：
   Current Project
     -> Claude Code
     -> Codex
-    -> Cursor
-    -> Cline
 
 右侧 Inspector:
   选中节点或连线的 metadata、source、target、hash、budget、tests、diff
@@ -588,13 +677,12 @@ Global Preference: "Prefer pnpm"
   -> Current Project
       -> Codex: AGENTS.md + .agents/skills/*
       -> Claude Code: CLAUDE.md + .claude/skills/*
-      -> Cursor: .cursor/rules/*
 
 Skill "superpowers/brainstorming"
   -> Codex only, Mirror
 
 Skilllet "Use Axios for frontend requests"
-  -> Project Rule, compiled to Codex + Claude + Cursor
+  -> Project Rule, compiled to Codex + Claude Code
 
 Skilllet "Use Claude subagents for refactors"
   -> Claude Code only
@@ -602,7 +690,7 @@ Skilllet "Use Claude subagents for refactors"
 
 ### 6.8 编译产物模型
 
-`CLAUDE.md`、`AGENTS.md`、`.cursor/rules/*.mdc`、`.clinerules` 默认不再是手工维护的主文件，而是 dist。
+`CLAUDE.md`、`AGENTS.md` 默认不再是手工维护的主文件，而是 dist。`.cursor/rules/*.mdc`、`.clinerules` 属于后续 adapter 产物，不进入当前 MVP 默认路径。
 
 编译流程：
 
@@ -661,11 +749,6 @@ agents:
     exports:
       instructions: "CLAUDE.md"
       skills_dir: ".claude/skills"
-  cursor:
-    enabled: true
-    exports:
-      rules_dir: ".cursor/rules"
-
 rules:
   include:
     - "global:typescript-style"
@@ -676,7 +759,7 @@ skilllets:
     - id: "global:prefer-pnpm"
       scope: "project"
     - id: "project:use-axios"
-      targets: ["codex", "claude-code", "cursor"]
+      targets: ["codex", "claude-code"]
     - id: "project:claude-subagents-for-refactors"
       targets: ["claude-code"]
 
@@ -736,7 +819,7 @@ LICENSE
 name: "@frontend/react-best-practices"
 version: "0.1.0"
 compat:
-  agents: ["claude-code", "codex", "cursor", "cline"]
+  agents: ["claude-code", "codex"]
   exporters: [">=0.1.0"]
 tags: ["react", "typescript", "frontend"]
 risk: "medium"
@@ -758,7 +841,7 @@ Agent-Kernel 的默认信任模型应该是 local-first，但产品能力允许�
 - 扫描规则文件和 Skills。
 - 建立 Skill Library 索引。
 - Mirror 复制和同步。
-- 编译 `CLAUDE.md`、`AGENTS.md`、`.cursor/rules` 等产物。
+- 编译 `CLAUDE.md`、`AGENTS.md` 等产物；其他 Agent 通过 future adapter 扩展。
 - 计算 hash、diff、预算。
 - 管理 Canvas、project.yml、lockfile。
 - 运行非 LLM 断言类 Rule CI。
@@ -843,14 +926,18 @@ npx agent-kernel ui
 
 - `CLAUDE.md`
 - `AGENTS.md`
-- `.cursor/rules/*.mdc`
-- `.cursorrules`
-- `.clinerules`
-- `memory-bank/*.md`
 - `.claude/skills/**/SKILL.md`
 - `.agents/skills/**/SKILL.md`
 - `~/.agents/skills/**/SKILL.md`
 - 用户手动添加的 Skill 路径
+- Claude Code / Codex 可发现的本地 session、transcript、logs
+
+后续 adapter 再加入：
+
+- `.cursor/rules/*.mdc`
+- `.cursorrules`
+- `.clinerules`
+- `memory-bank/*.md`
 
 导入后 UI 先不自动改文件，而是展示：
 
@@ -884,7 +971,7 @@ npx agent-kernel review
 ### 7.2 清理项目规则
 
 ```bash
-npx agent-kernel gc --targets claude,codex,cursor
+npx agent-kernel gc --targets claude,codex
 ```
 
 输出示例：
@@ -929,7 +1016,7 @@ Accept this change? [y]es / [n]o / [e]dit / [s]kip / [a]pply all / [q]uit
 ### 7.3 注入到任意项目
 
 ```bash
-npx agent-kernel attach --project . --profile frontend-saas --agents codex,claude,cursor
+npx agent-kernel attach --project . --profile frontend-saas --agents codex,claude
 ```
 
 实现方式：
@@ -998,7 +1085,7 @@ Draft Skilllet 必须包含：
 title: "Use Axios for frontend requests"
 kind: "preference"
 suggested_scope: "project"
-suggested_targets: ["codex", "claude-code", "cursor"]
+suggested_targets: ["codex", "claude-code"]
 confidence: 0.82
 evidence:
   - source: "session"
@@ -1083,7 +1170,8 @@ Use Axios for new HTTP request helpers. Do not introduce Fetch-based wrappers. E
 
 - skilllets 是源代码。
 - `project.yml` 是 build config。
-- `CLAUDE.md`、`AGENTS.md`、`.cursor/rules/*.mdc`、`.clinerules` 是编译产物。
+- `CLAUDE.md`、`AGENTS.md` 是当前 MVP 编译产物。
+- `.cursor/rules/*.mdc`、`.clinerules` 是后续 adapter 编译产物，不进入当前默认路径。
 - 每次 `build` 全量生成目标文件，并生成 diff 供用户确认。
 
 只有在团队明确要求保留手写文件时，才开启兼容模式：
@@ -1117,8 +1205,6 @@ budgets:
     hard_limit_bytes: 32768
   claude_md:
     max_tokens: 6000
-  cursor_always_rules:
-    max_lines_per_rule: 120
 ```
 
 当超预算：
@@ -1175,7 +1261,7 @@ Rule CI 的真正价值不是“模型测试 100% 准确”，而是为高价值
 
 ### MVP 0 / v0.1：Import + Canvas + Mirror + Build Preview
 
-目标：证明“扫描现有规则和 Skills -> Project-centered Canvas 分配 -> Mirror Skills -> 多 Agent 编译产物预览”可行。
+目标：证明“扫描现有 Claude Code / Codex 规则和 Skills -> Project-centered Canvas 分配 -> Mirror Skills -> Claude/Codex 编译产物预览”可行。
 
 v0.1 明确不做：
 
@@ -1187,7 +1273,7 @@ v0.1 明确不做：
 
 功能：
 
-- 读取 `AGENTS.md`、`CLAUDE.md`、`.cursor/rules/*.mdc`
+- 读取 `AGENTS.md`、`CLAUDE.md`
 - 扫描 `.claude/skills`、`.agents/skills`、`~/.agents/skills`
 - 对现有 Skills 建立引用索引，不复制、不修改
 - AST 解析 heading/list/code/frontmatter
@@ -1196,7 +1282,7 @@ v0.1 明确不做：
 - 反向解析现有规则，生成 Imported Rules 索引
 - 从 skilllets 全量编译到 Codex `AGENTS.md` 和 Claude `CLAUDE.md`
 - 生成 lockfile，记录产物 hash
-- UI 第一屏显示 Current Project、Codex、Claude Code、Cursor、Cline 和已发现 Skills
+- UI 第一屏显示 Current Project、Codex、Claude Code 和已发现 Skills
 - 支持把一个 Referenced Skill Mirror 到 Codex 或 Claude Code
 - 支持 `build --preview` 展示将生成/覆盖的文件
 
@@ -1256,7 +1342,7 @@ v0.1 明确不做：
 功能：
 
 - Canvas Workspace 作为第一屏
-- Project-centered multi-agent 分配：同一项目下可给 Claude/Codex/Cursor/Cline 分配不同 Skills/Skilllets
+- Project-centered multi-agent 分配：同一项目下可给 Claude Code / Codex 分配不同 Skills/Skilllets；Cursor/Cline 仅作为未来 adapter 扩展。
 - Inbox
 - Conflict Center
 - Knowledge Map
@@ -1277,7 +1363,7 @@ v0.1 明确不做：
 
 - `~/.agent-kernel/skilllets`
 - project profile
-- Exporters：Claude、Codex、Cursor、Cline
+- Exporters：当前 Claude Code、Codex；后续 Cursor、Cline 通过 adapter 扩展
 - full-build / managed-block 两种模式
 - `.agent-kernel/tests/*.yml`
 - `agent-kernel test`
@@ -1289,7 +1375,7 @@ v0.1 明确不做：
 功能：
 
 - 暴露 extract/search/gc/export/archive_success 工具
-- 让 Claude Code、Cursor、Codex 或 Cline 在工作中调用
+- 让 Claude Code、Codex 在工作中调用；后续 adapter 可开放给更多 Agent
 
 ### MVP 6：Skilllet Registry
 
@@ -1350,7 +1436,7 @@ npx agent-kernel import ./CLAUDE.md
 npx agent-kernel test
 npx agent-kernel export --to codex
 npx agent-kernel export --to claude
-npx agent-kernel attach --agents codex,claude,cursor
+npx agent-kernel attach --agents codex,claude
 npx agent-kernel install @frontend/react-best-practices
 npx agent-kernel ui
 npx agent-kernel mcp
@@ -1383,7 +1469,7 @@ npx agent-kernel mcp
 
 ### 12.3 多平台格式漂移
 
-Claude、Codex、Cursor 的规则格式会继续变化。
+Claude Code、Codex 的规则格式会继续变化；未来 adapter 还要面对 Cursor/Cline 等格式漂移。
 
 缓解：
 
@@ -1419,7 +1505,7 @@ Claude、Codex、Cursor 的规则格式会继续变化。
 
 最好的第一步不是做 MCP，也不是一开始接所有 Agent，而是做一个很锋利的 Rust CLI + 早期可视化预览：
 
-> 输入一份混乱的 `CLAUDE.md` / `AGENTS.md` / `.cursor/rules`，反向解析成 draft skilllets，交互式确认后编译成干净的目标产物。
+> 输入一份混乱的 `CLAUDE.md` / `AGENTS.md`，反向解析成 draft skilllets，交互式确认后编译成干净的目标产物。
 
 因为这个闭环最小，但价值最明显：
 
