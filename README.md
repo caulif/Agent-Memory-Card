@@ -293,6 +293,12 @@ v0.47 hardens cross-platform support:
 2. Release packaging targets Windows x64, Linux x64, macOS x64, and macOS arm64.
 3. The Bun wrapper has an explicit packaged-target matrix and falls back to local Cargo builds on unsupported architectures.
 
+v0.48 makes the native app a real review surface:
+
+1. The selected project view shows a Draft Inbox directly inside `agent-kernel app`.
+2. Drafts can be approved or rejected from the native UI.
+3. Draft decisions reuse the same review protocol as CLI, then refresh Review summary counts.
+
 See [docs/quickstart.md](docs/quickstart.md) for a hands-on walkthrough.
 See [docs/platform-support.md](docs/platform-support.md) for Windows / macOS / Linux support details.
 
@@ -448,6 +454,7 @@ The native desktop app is the preferred visual entrypoint. It shows:
 - registered local projects from `~/.agent-kernel/projects.yml`
 - per-project Claude Code / Codex markers
 - Review status for the selected project
+- Draft Inbox approve/reject controls
 - conversation evolution preview and Draft Inbox generation
 
 The legacy Canvas Web UI is still available for development and exposes:

@@ -24,7 +24,7 @@ cargo run -- project scan --root . --max-depth 4
 cargo run -- app --scan-root .
 ```
 
-`app` 是 Rust/egui 编译出来的本地桌面程序，不是 Web UI。它会读取 `~/.agent-kernel/projects.yml`，在第一屏展示本地项目列表；选择项目后可以查看 Review 摘要，并一键把 Claude Code / Codex 本地历史对话整理进 Draft Inbox。
+`app` 是 Rust/egui 编译出来的本地桌面程序，不是 Web UI。它会读取 `~/.agent-kernel/projects.yml`，在第一屏展示本地项目列表；选择项目后可以查看 Review 摘要、处理 Draft Inbox，并一键把 Claude Code / Codex 本地历史对话整理进 Draft Inbox。
 
 ## 1. 初始化项目状态
 
@@ -132,6 +132,8 @@ cargo run -- extract --text "以后前端请求统一使用 Axios，不要再用
 cargo run -- draft list --project .
 ```
 
+也可以打开原生 app，在选中的项目页直接查看 `Draft Inbox`，点击 `Approve` 或 `Reject`。
+
 ## 5. 批准 Draft 为 Skilllet
 
 批准候选：
@@ -203,7 +205,7 @@ cargo run -- observe evolve --target codex --target claude-code --project .
 
 这个流程仍然不会自动启用 Skilllet。所有自动提炼的内容都会先进 Draft Inbox，由你批准。
 
-同一个动作也可以在原生 app 里完成：选择项目后点击 `Preview Conversation Evolution` 先预览，再点击 `Evolve Conversations to Drafts` 写入 Draft Inbox。
+同一个动作也可以在原生 app 里完成：选择项目后点击 `Preview Conversation Evolution` 先预览，再点击 `Evolve Conversations to Drafts` 写入 Draft Inbox。生成后可以在同一页的 `Draft Inbox` 里批准或拒绝。
 
 ## 8. 推荐体验顺序
 
@@ -231,6 +233,6 @@ cargo run -- test-rules --project .
 - 不会静默启用自动提炼内容，必须先进入 Draft Inbox
 - LLM provider 仍是配置地基，本地提取器是主路径
 - Cursor / Cline 不在当前 MVP 主线
-- 原生 app 已经能浏览项目、Review 和触发对话进化；更细的 Canvas 拖拽、App Store、Preference Registry 编辑体验仍会继续补强
+- 原生 app 已经能浏览项目、Review、触发对话进化，并处理 Draft Inbox；更细的 Canvas 拖拽、App Store、Preference Registry 编辑体验仍会继续补强
 
-下一步最值得补的是 `preference test` 接入 UI，以及给 Draft 增加 `matched_template` / `confidence` / `reason` 字段，让审查体验更像一个可解释的进化系统。
+下一步最值得补的是 App Store / Catalog 接入原生 UI，以及给 Draft 增加 `matched_template` / `confidence` / `reason` 字段，让审查体验更像一个可解释的进化系统。

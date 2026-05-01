@@ -1,11 +1,77 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
 use eframe::egui;
 
+use crate::draft;
 use crate::observation;
 use crate::project_registry::{self, ProjectRegistry, RegisteredProject};
 use crate::review;
+
+const DRAFT_INBOX_TITLE: &str = "Draft Inbox";
+const APPROVE_LABEL: &str = "Approve";
+const REJECT_LABEL: &str = "Reject";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::draft;
+
+    #[test]
+    fn native_draft_decision_approves_and_refreshes_review() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        draft::add_draft(
+            temp.path(),
+            draft::NewDraft {
+                id: "project:prefer-bun".to_string(),
+                title: "Prefer Bun".to_string(),
+                body: "Use Bun for JavaScript package management and scripts.".to_string(),
+                kind: "preference".to_string(),
+                scope: "project".to_string(),
+                targets: vec!["codex".to_string()],
+                evidence: "native app test".to_string(),
+            },
+        )
+        .expect("add draft");
+
+        let report =
+            apply_native_draft_decision(temp.path(), "project:prefer-bun", true).expect("approve");
+
+        assert_eq!(report.summary.drafts_pending, 0);
+        assert!(draft::load_drafts(temp.path()).expect("drafts").is_empty());
+    }
+
+    #[test]
+    fn native_draft_decision_rejects_and_refreshes_review() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        draft::add_draft(
+            temp.path(),
+            draft::NewDraft {
+                id: "project:prefer-bun".to_string(),
+                title: "Prefer Bun".to_string(),
+                body: "Use Bun for JavaScript package management and scripts.".to_string(),
+                kind: "preference".to_string(),
+                scope: "project".to_string(),
+                targets: vec!["codex".to_string()],
+                evidence: "native app test".to_string(),
+            },
+        )
+        .expect("add draft");
+
+        let report =
+            apply_native_draft_decision(temp.path(), "project:prefer-bun", false).expect("reject");
+
+        assert_eq!(report.summary.drafts_pending, 0);
+        assert!(draft::load_drafts(temp.path()).expect("drafts").is_empty());
+    }
+
+    #[test]
+    fn native_review_inbox_labels_are_stable() {
+        assert_eq!(DRAFT_INBOX_TITLE, "Draft Inbox");
+        assert_eq!(APPROVE_LABEL, "Approve");
+        assert_eq!(REJECT_LABEL, "Reject");
+    }
+}
 
 pub fn run(home: PathBuf, scan_roots: Vec<PathBuf>, max_depth: usize) -> Result<()> {
     let cwd = std::env::current_dir()?;
@@ -28,6 +94,20 @@ pub fn run(home: PathBuf, scan_roots: Vec<PathBuf>, max_depth: usize) -> Result<
         Box::new(move |_cc| Ok(Box::new(AgentKernelApp::new(home, roots, max_depth)))),
     )
     .map_err(|err| anyhow!(err.to_string()))
+}
+
+fn apply_native_draft_decision(
+    project_root: &Path,
+    draft_id: &str,
+    approve: bool,
+) -> Result<review::ReviewReport> {
+    let decision = if approve {
+        review::ReviewDecision::ApproveDraft(draft_id.to_string())
+    } else {
+        review::ReviewDecision::RejectDraft(draft_id.to_string())
+    };
+    review::apply_review_decisions(project_root, &[decision])?;
+    review::review_project(project_root)
 }
 
 struct AgentKernelApp {
@@ -128,6 +208,28 @@ impl AgentKernelApp {
             }
         }
     }
+
+    fn decide_draft_for_selected(&mut self, draft_id: &str, approve: bool) {
+        let Some(project) = self.selected_project() else {
+            self.report = "Select a project first.".to_string();
+            return;
+        };
+        match apply_native_draft_decision(&PathBuf::from(&project.path), draft_id, approve) {
+            Ok(report) => {
+                let action = if approve { "Approved" } else { "Rejected" };
+                self.report = format!(
+                    "{action} `{draft_id}` for {}\n\nDrafts pending: {}\nRule CI failures: {}\nArtifact drifts: {}",
+                    project.name,
+                    report.summary.drafts_pending,
+                    report.summary.rule_tests_failed,
+                    report.summary.artifact_drifts
+                );
+            }
+            Err(err) => {
+                self.report = format!("Draft decision failed for `{draft_id}`: {err}");
+            }
+        }
+    }
 }
 
 impl eframe::App for AgentKernelApp {
@@ -224,6 +326,8 @@ impl AgentKernelApp {
         });
 
         ui.add_space(12.0);
+        self.render_draft_inbox(ui, &project);
+        ui.add_space(12.0);
         ui.separator();
         ui.heading("Output");
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -233,5 +337,53 @@ impl AgentKernelApp {
                 ui.monospace(&self.report);
             }
         });
+    }
+
+    fn render_draft_inbox(&mut self, ui: &mut egui::Ui, project: &RegisteredProject) {
+        ui.heading(DRAFT_INBOX_TITLE);
+        let drafts = match draft::load_drafts(&PathBuf::from(&project.path)) {
+            Ok(drafts) => drafts,
+            Err(err) => {
+                ui.label(format!("Could not load drafts: {err}"));
+                return;
+            }
+        };
+
+        if drafts.is_empty() {
+            ui.label("No pending drafts.");
+            return;
+        }
+
+        let mut decision: Option<(String, bool)> = None;
+        egui::ScrollArea::vertical()
+            .max_height(240.0)
+            .show(ui, |ui| {
+                for draft in &drafts {
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.strong(&draft.title);
+                            ui.label(format!("[{} / {}]", draft.kind, draft.scope));
+                        });
+                        ui.monospace(&draft.id);
+                        ui.label(&draft.body);
+                        if !draft.targets.is_empty() {
+                            ui.small(format!("Targets: {}", draft.targets.join(", ")));
+                        }
+                        ui.horizontal(|ui| {
+                            if ui.button(APPROVE_LABEL).clicked() {
+                                decision = Some((draft.id.clone(), true));
+                            }
+                            if ui.button(REJECT_LABEL).clicked() {
+                                decision = Some((draft.id.clone(), false));
+                            }
+                        });
+                    });
+                    ui.add_space(6.0);
+                }
+            });
+
+        if let Some((draft_id, approve)) = decision {
+            self.decide_draft_for_selected(&draft_id, approve);
+        }
     }
 }
