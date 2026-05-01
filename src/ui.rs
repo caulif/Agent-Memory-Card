@@ -638,6 +638,8 @@ const INDEX_HTML: &str = r##"<!doctype html>
         <div class="card">
           <h4>${escapeHtml(item.package.id)}</h4>
           <p>${escapeHtml(item.package.description || item.package.body)}</p>
+          <p><strong>Version:</strong> ${escapeHtml(item.package.version)}<br><strong>Source:</strong> ${escapeHtml(item.package.source_url || "local")}</p>
+          ${item.package.tags && item.package.tags.length ? `<p>${item.package.tags.map(tag => `<span class="tag">${escapeHtml(tag)}</span>`).join(" ")}</p>` : ""}
           <p><strong>Kind:</strong> ${escapeHtml(item.package.kind)} · ${escapeHtml(item.package.scope)}</p>
           <button class="btn ${item.installed ? "" : "primary"}" ${item.installed ? "disabled" : ""} onclick="installCatalogPackage('${escapeAttr(item.package.id)}')">${item.installed ? "Installed" : "Install"}</button>
         </div>

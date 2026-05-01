@@ -119,6 +119,12 @@ v0.18 improves App Store trust feedback:
 2. `catalog list` labels packages as `available` or `installed`.
 3. The Canvas disables already-installed package buttons.
 
+v0.19 adds catalog provenance:
+
+1. Catalog packages now include `version`, `source_url`, and `tags`.
+2. `catalog list` prints package versions and source URLs.
+3. The Canvas App Store shows package provenance before installation.
+
 ## Commands
 
 ```bash

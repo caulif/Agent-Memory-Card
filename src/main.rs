@@ -463,14 +463,16 @@ async fn main() -> Result<()> {
                 } else {
                     for item in status.items {
                         println!(
-                            "- {}: {} [{}]",
+                            "- {}@{}: {} [{}] {}",
                             item.package.id,
+                            item.package.version,
                             item.package.title,
                             if item.installed {
                                 "installed"
                             } else {
                                 "available"
-                            }
+                            },
+                            item.package.source_url
                         );
                     }
                 }

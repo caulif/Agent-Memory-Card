@@ -19,6 +19,12 @@ pub struct CatalogPackage {
     pub id: String,
     pub title: String,
     pub description: String,
+    #[serde(default = "default_package_version")]
+    pub version: String,
+    #[serde(default)]
+    pub source_url: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
     pub kind: String,
     pub scope: String,
     pub body: String,
@@ -101,6 +107,10 @@ fn catalog_path(project_root: &Path) -> std::path::PathBuf {
     config::kernel_dir(project_root).join("catalog.yml")
 }
 
+fn default_package_version() -> String {
+    "0.1.0".to_string()
+}
+
 fn default_catalog() -> Catalog {
     Catalog {
         packages: vec![
@@ -108,6 +118,9 @@ fn default_catalog() -> Catalog {
                 id: "core:rust-quality-gate".to_string(),
                 title: "Rust Quality Gate".to_string(),
                 description: "Require fmt, clippy, and tests before claiming Rust changes are complete.".to_string(),
+                version: "0.1.0".to_string(),
+                source_url: "builtin:agent-kernel/core/rust-quality-gate".to_string(),
+                tags: vec!["rust".to_string(), "quality".to_string(), "verification".to_string()],
                 kind: "procedure".to_string(),
                 scope: "project".to_string(),
                 body: "Before reporting Rust work complete, run cargo fmt --check, cargo clippy -- -D warnings, and cargo test. Report failures with exact command output.".to_string(),
@@ -116,6 +129,9 @@ fn default_catalog() -> Catalog {
                 id: "core:generated-artifacts".to_string(),
                 title: "Generated Artifacts".to_string(),
                 description: "Treat Agent instruction files as build artifacts instead of hand-maintained source.".to_string(),
+                version: "0.1.0".to_string(),
+                source_url: "builtin:agent-kernel/core/generated-artifacts".to_string(),
+                tags: vec!["build".to_string(), "agents".to_string(), "safety".to_string()],
                 kind: "constraint".to_string(),
                 scope: "project".to_string(),
                 body: "Treat Agent instruction files as generated artifacts. Edit Skilllets or project.yml, then rebuild generated Agent files.".to_string(),
@@ -164,5 +180,17 @@ mod tests {
             .find(|item| item.package.id == "core:rust-quality-gate")
             .expect("rust gate package");
         assert!(rust_gate.installed);
+    }
+
+    #[test]
+    fn default_catalog_packages_include_provenance() {
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        let status = catalog_status(temp.path()).expect("status");
+        let first = &status.items[0].package;
+
+        assert_eq!(first.version, "0.1.0");
+        assert!(first.source_url.starts_with("builtin:"));
+        assert!(first.tags.iter().any(|tag| tag == "quality"));
     }
 }
