@@ -208,6 +208,12 @@ v0.33 closes the first local evolution loop:
 2. Synthesis uses the same local heuristic extractor and never auto-enables a Skilllet.
 3. The Canvas Observations panel can synthesize reviewable drafts for all enabled Agents.
 
+v0.34 adds the first one-command evolution path:
+
+1. `observe evolve` scans local Claude Code / Codex sessions and synthesizes Draft Inbox items.
+2. The command still stops at Draft Inbox, so the user keeps final approval control.
+3. `--dry-run` imports Observations and previews candidate counts without writing Drafts.
+
 ## Commands
 
 ```bash
@@ -236,6 +242,8 @@ cargo run -- observe local --project .
 cargo run -- observe list --project .
 cargo run -- observe synthesize --target codex --target claude-code --project .
 cargo run -- observe synthesize --dry-run --project .
+cargo run -- observe evolve --target codex --target claude-code --project .
+cargo run -- observe evolve --dry-run --project .
 cargo run -- provider init --project .
 cargo run -- provider show --project .
 cargo run -- extract --text "Always use token=supersecret123456789 before pushing." --target codex --provider local --dry-run --project .

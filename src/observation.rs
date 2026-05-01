@@ -38,6 +38,16 @@ pub struct ObservationSynthesisReport {
     pub dry_run: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ObservationEvolveReport {
+    pub imported: usize,
+    pub import_skipped: usize,
+    pub drafts_created: usize,
+    pub draft_candidates: usize,
+    pub synthesis_skipped: usize,
+    pub dry_run: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct ConversationFile {
     pub agent: String,
@@ -68,6 +78,22 @@ impl ObservationSynthesisReport {
         out.push_str(&format!("Drafts created: {}\n", self.created));
         out.push_str(&format!("Candidate previews: {}\n", self.candidates));
         out.push_str(&format!("Skipped observations: {}\n", self.skipped));
+        if self.dry_run {
+            out.push_str("Mode: dry run\n");
+        }
+        out
+    }
+}
+
+impl ObservationEvolveReport {
+    pub fn render(&self) -> String {
+        let mut out = String::new();
+        out.push_str("Agent-Kernel local evolution\n\n");
+        out.push_str(&format!("Observations imported: {}\n", self.imported));
+        out.push_str(&format!("Import skipped: {}\n", self.import_skipped));
+        out.push_str(&format!("Drafts created: {}\n", self.drafts_created));
+        out.push_str(&format!("Draft candidates: {}\n", self.draft_candidates));
+        out.push_str(&format!("Synthesis skipped: {}\n", self.synthesis_skipped));
         if self.dry_run {
             out.push_str("Mode: dry run\n");
         }
@@ -190,6 +216,24 @@ pub fn synthesize_observations_to_drafts(
     }
 
     Ok(report)
+}
+
+pub fn evolve_local_conversations(
+    project_root: &Path,
+    home: &Path,
+    targets: Vec<String>,
+    dry_run: bool,
+) -> Result<ObservationEvolveReport> {
+    let imported = import_local_conversations(project_root, home)?;
+    let synthesized = synthesize_observations_to_drafts(project_root, targets, dry_run)?;
+    Ok(ObservationEvolveReport {
+        imported: imported.created,
+        import_skipped: imported.skipped,
+        drafts_created: synthesized.created,
+        draft_candidates: synthesized.candidates,
+        synthesis_skipped: synthesized.skipped,
+        dry_run,
+    })
 }
 
 pub fn discover_local_conversation_files(home: &Path) -> Result<Vec<ConversationFile>> {
@@ -435,5 +479,34 @@ mod tests {
         assert_eq!(report.created, 0);
         assert_eq!(report.candidates, 1);
         assert!(draft::load_drafts(temp.path()).expect("drafts").is_empty());
+    }
+
+    #[test]
+    fn evolve_local_conversations_imports_and_synthesizes_drafts() {
+        let temp = tempfile::tempdir().expect("project");
+        let home = tempfile::tempdir().expect("home");
+        let codex = home
+            .path()
+            .join(".codex")
+            .join("sessions")
+            .join("2026")
+            .join("05")
+            .join("01")
+            .join("rollout-1.jsonl");
+        fs::create_dir_all(codex.parent().expect("codex parent")).expect("codex dir");
+        fs::write(
+            &codex,
+            r#"{"type":"user","message":"Always run cargo clippy before pushing."}"#,
+        )
+        .expect("write codex session");
+
+        let report =
+            evolve_local_conversations(temp.path(), home.path(), vec!["codex".to_string()], false)
+                .expect("evolve");
+
+        assert_eq!(report.imported, 1);
+        assert_eq!(report.drafts_created, 1);
+        let drafts = draft::load_drafts(temp.path()).expect("drafts");
+        assert!(drafts[0].body.contains("cargo clippy"));
     }
 }

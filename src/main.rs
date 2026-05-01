@@ -86,6 +86,29 @@ mod tests {
             _ => panic!("expected observe synthesize command"),
         }
     }
+
+    #[test]
+    fn cli_accepts_observe_evolve_command() {
+        let cli = Cli::parse_from([
+            "agent-kernel",
+            "observe",
+            "evolve",
+            "--home",
+            ".",
+            "--target",
+            "claude-code",
+        ]);
+
+        match cli.command {
+            Commands::Observe {
+                command: ObserveCommands::Evolve { home, targets, .. },
+            } => {
+                assert_eq!(home, Some(PathBuf::from(".")));
+                assert_eq!(targets, vec!["claude-code"]);
+            }
+            _ => panic!("expected observe evolve command"),
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -471,6 +494,20 @@ enum ObserveCommands {
         #[arg(long, default_value = ".")]
         project: PathBuf,
     },
+
+    /// Import local conversations and synthesize Draft Inbox items in one reviewed step.
+    Evolve {
+        #[arg(long)]
+        home: Option<PathBuf>,
+        /// Agent target. Repeat for multiple agents. Empty means project-level candidate.
+        #[arg(long = "target")]
+        targets: Vec<String>,
+        /// Import observations and preview synthesis without writing Draft Inbox files.
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -740,6 +777,17 @@ async fn main() -> Result<()> {
             } => {
                 let report =
                     observation::synthesize_observations_to_drafts(&project, targets, dry_run)?;
+                println!("{}", report.render());
+            }
+            ObserveCommands::Evolve {
+                home,
+                targets,
+                dry_run,
+                project,
+            } => {
+                let home = home.unwrap_or_else(default_home_dir);
+                let report =
+                    observation::evolve_local_conversations(&project, &home, targets, dry_run)?;
                 println!("{}", report.render());
             }
         },
