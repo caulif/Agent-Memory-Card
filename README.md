@@ -190,6 +190,12 @@ v0.30 resets the MVP scope:
 2. Cursor and Cline are removed from the default project config and Canvas target set.
 3. The generic `rules_dir` exporter remains as an extension interface for future adapters.
 
+v0.31 adds richer Skilllet operations:
+
+1. `skilllet merge` combines multiple Skilllets into a new reviewable Skilllet asset.
+2. `skilllet attach-skill` attaches a Skilllet as a generated supplement to an existing mirrored Skill.
+3. Mirrored Skills receive `AGENT_KERNEL_SKILLLETS.md` supplements without modifying the original Skill source.
+
 ## Commands
 
 ```bash
@@ -204,6 +210,8 @@ cargo run -- sync --project .
 cargo run -- skilllet add --id project:use-axios --title "Use Axios" --body "Use Axios for frontend HTTP requests." --target codex --project .
 cargo run -- skilllet list --project .
 cargo run -- skilllet targets --id project:use-axios --target codex --target claude-code --project .
+cargo run -- skilllet merge --id project:frontend-defaults --title "Frontend Defaults" --source project:use-axios --source project:prefer-pnpm --target codex --project .
+cargo run -- skilllet attach-skill --id project:use-axios --skill superpowers:brainstorming --project .
 cargo run -- skilllet matrix --project .
 cargo run -- draft add --id project:prefer-pnpm --title "Prefer pnpm" --body "Use pnpm for package management." --target codex --project .
 cargo run -- draft approve --id project:prefer-pnpm --project .

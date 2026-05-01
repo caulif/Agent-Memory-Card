@@ -49,7 +49,7 @@
 - v0.28 范围：加入 generated artifact drift 检测，基于 `project.lock.yml` 比对 `AGENTS.md`、`CLAUDE.md`、`.cursor/rules`、`.clinerules` 等编译产物是否被手改，为后续 Reverse Parse 生成 Draft 打基础。
 - v0.29 范围：实现 Reverse Parse 的本地第一版，`import --artifacts` 通过重新渲染期望产物并提取用户新增行，把手改的 build artifact 转成 Draft Inbox 候选。
 - v0.30 范围：重置 MVP 范围，默认只支持 Claude Code / Codex；Cursor 和 Cline 从默认配置与 Canvas 目标中移除，但保留通用 exporter/adapter 接口。
-- Skilllet 操作补充：用户可以把一个或多个 Skilllet 分配到某个项目或 Agent，也可以合并多个 Skilllet，还可以把 Skilllet 作为补充追加进已有 Skill。
+- v0.31 范围：增强 Skilllet 操作能力，支持把一个或多个 Skilllet 分配到某个项目或 Agent，合并多个 Skilllet，并把 Skilllet 作为生成补充追加进已有 mirrored Skill。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 npm 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。

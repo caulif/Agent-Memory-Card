@@ -272,6 +272,44 @@ enum SkillletCommands {
         project: PathBuf,
     },
 
+    /// Merge multiple Skilllets into a new Skilllet.
+    Merge {
+        /// New merged Skilllet id.
+        #[arg(long)]
+        id: String,
+
+        /// Human-readable title.
+        #[arg(long)]
+        title: String,
+
+        /// Source Skilllet id. Repeat for multiple sources.
+        #[arg(long = "source")]
+        sources: Vec<String>,
+
+        /// Agent target. Repeat for multiple agents.
+        #[arg(long = "target")]
+        targets: Vec<String>,
+
+        /// Project root.
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
+    /// Attach a Skilllet as a generated supplement to a mirrored Skill.
+    AttachSkill {
+        /// Skilllet id.
+        #[arg(long)]
+        id: String,
+
+        /// Skill reference id from .agent-kernel/skill-index.yml.
+        #[arg(long)]
+        skill: String,
+
+        /// Project root.
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
     /// Show a Skilllet by Agent target matrix.
     Matrix {
         /// Project root.
@@ -477,6 +515,22 @@ async fn main() -> Result<()> {
             } => {
                 skilllet::set_skilllet_targets(&project, &id, targets)?;
                 println!("Updated targets for skilllet `{id}`");
+            }
+            SkillletCommands::Merge {
+                id,
+                title,
+                sources,
+                targets,
+                project,
+            } => {
+                skilllet::merge_skilllets(&project, &id, &title, sources, targets)?;
+                println!("Merged skilllet `{id}`");
+                println!("Run `agent-kernel build --preview` to inspect generated instructions.");
+            }
+            SkillletCommands::AttachSkill { id, skill, project } => {
+                config::add_skill_supplement(&project, &skill, &id)?;
+                println!("Attached skilllet `{id}` to skill `{skill}`");
+                println!("Run `agent-kernel sync` to update mirrored skill supplements.");
             }
             SkillletCommands::Matrix { project } => {
                 let matrix = skilllet::skilllet_target_matrix(&project)?;

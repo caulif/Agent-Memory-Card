@@ -67,6 +67,8 @@ pub struct SkillletRef {
 pub struct SkillSelection {
     #[serde(default)]
     pub mirrors: Vec<MirrorDecl>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub supplements: Vec<SkillSupplementDecl>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,6 +76,12 @@ pub struct MirrorDecl {
     #[serde(rename = "ref")]
     pub reference: String,
     pub targets: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillSupplementDecl {
+    pub skill: String,
+    pub skilllets: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -276,6 +284,42 @@ pub fn add_mirror(project_root: &Path, skill_id: &str, agent: &str) -> Result<()
         });
     }
 
+    save_project_config(&root, &config)
+}
+
+pub fn add_skill_supplement(project_root: &Path, skill_id: &str, skilllet_id: &str) -> Result<()> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    let index = load_skill_index(&root)?;
+    if !index.skills.iter().any(|skill| skill.id == skill_id) {
+        return Err(anyhow!(
+            "skill `{skill_id}` was not found in .agent-kernel/skill-index.yml"
+        ));
+    }
+
+    let skilllet_exists = crate::skilllet::load_skilllets(&root)?
+        .iter()
+        .any(|record| record.id == skilllet_id);
+    if !skilllet_exists {
+        return Err(anyhow!("skilllet `{skilllet_id}` does not exist"));
+    }
+
+    let mut config = load_or_default_project_config(&root)?;
+    if let Some(existing) = config
+        .skills
+        .supplements
+        .iter_mut()
+        .find(|item| item.skill == skill_id)
+    {
+        if !existing.skilllets.iter().any(|item| item == skilllet_id) {
+            existing.skilllets.push(skilllet_id.to_string());
+            existing.skilllets.sort();
+        }
+    } else {
+        config.skills.supplements.push(SkillSupplementDecl {
+            skill: skill_id.to_string(),
+            skilllets: vec![skilllet_id.to_string()],
+        });
+    }
     save_project_config(&root, &config)
 }
 

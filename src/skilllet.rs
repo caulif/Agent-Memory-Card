@@ -174,6 +174,44 @@ pub fn set_skilllet_targets(project_root: &Path, id: &str, targets: Vec<String>)
     config::save_project_config(&root, &project)
 }
 
+pub fn merge_skilllets(
+    project_root: &Path,
+    id: &str,
+    title: &str,
+    source_ids: Vec<String>,
+    targets: Vec<String>,
+) -> Result<()> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    let skilllets = skilllet_map(&root)?;
+    let mut body = String::new();
+    let mut missing = Vec::new();
+
+    for source_id in &source_ids {
+        let Some(record) = skilllets.get(source_id) else {
+            missing.push(source_id.clone());
+            continue;
+        };
+        body.push_str(&format!("## {}\n\n{}\n\n", record.title, record.body));
+    }
+
+    if !missing.is_empty() {
+        return Err(anyhow!("missing source skilllets: {}", missing.join(", ")));
+    }
+    if source_ids.is_empty() {
+        return Err(anyhow!("at least one source skilllet is required"));
+    }
+
+    add_skilllet(
+        &root,
+        id,
+        title,
+        body.trim(),
+        "procedure",
+        "project",
+        targets,
+    )
+}
+
 pub fn skilllet_map(
     project_root: &Path,
 ) -> Result<std::collections::BTreeMap<String, SkillletRecord>> {
@@ -312,5 +350,62 @@ mod tests {
             project.skilllets.include[0].targets,
             vec!["claude-code", "codex"]
         );
+    }
+
+    #[test]
+    fn merge_skilllets_creates_combined_skilllet() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        add_skilllet(
+            temp.path(),
+            "project:use-axios",
+            "Use Axios",
+            "Use Axios for frontend HTTP requests.",
+            "preference",
+            "project",
+            vec!["codex".to_string()],
+        )
+        .expect("add axios");
+        add_skilllet(
+            temp.path(),
+            "project:prefer-pnpm",
+            "Prefer pnpm",
+            "Use pnpm for package management.",
+            "preference",
+            "project",
+            vec!["codex".to_string()],
+        )
+        .expect("add pnpm");
+
+        merge_skilllets(
+            temp.path(),
+            "project:frontend-defaults",
+            "Frontend Defaults",
+            vec![
+                "project:use-axios".to_string(),
+                "project:prefer-pnpm".to_string(),
+            ],
+            vec!["claude-code".to_string(), "codex".to_string()],
+        )
+        .expect("merge");
+
+        let merged = skilllet_map(temp.path())
+            .expect("skilllets")
+            .remove("project:frontend-defaults")
+            .expect("merged");
+        assert!(
+            merged
+                .body
+                .contains("Use Axios for frontend HTTP requests.")
+        );
+        assert!(merged.body.contains("Use pnpm for package management."));
+
+        let project = config::load_or_default_project_config(temp.path()).expect("project");
+        let merged_ref = project
+            .skilllets
+            .include
+            .iter()
+            .find(|item| item.id == "project:frontend-defaults")
+            .expect("merged ref");
+        assert_eq!(merged_ref.targets, vec!["claude-code", "codex"]);
     }
 }
