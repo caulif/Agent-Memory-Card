@@ -119,25 +119,20 @@ enum UiActionKind {
     EvolveConversations,
 }
 
-impl UiActionKind {
-    fn from_label(label: &str, page: UiPage) -> Self {
-        if label.contains("同步") {
-            return UiActionKind::ScanProjects;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct HeaderAction {
+    label: &'static str,
+    target_page: UiPage,
+    kind: UiActionKind,
+}
+
+impl HeaderAction {
+    const fn new(label: &'static str, target_page: UiPage, kind: UiActionKind) -> Self {
+        Self {
+            label,
+            target_page,
+            kind,
         }
-        if label.contains("刷新") || label.contains("目录") {
-            return UiActionKind::RefreshProjectCache;
-        }
-        if label.contains("审查") || label.contains("构建") || label.contains("Rule CI") {
-            return UiActionKind::ReviewProject;
-        }
-        if page == UiPage::Observations
-            || label.contains("合成")
-            || label.contains("扫描")
-            || label.contains("导入")
-        {
-            return UiActionKind::EvolveConversations;
-        }
-        UiActionKind::Navigate
     }
 }
 
@@ -396,6 +391,16 @@ impl SelflessUi {
 fn matches_search(query: &str, text: &str) -> bool {
     let query = query.trim();
     query.is_empty() || text.to_lowercase().contains(&query.to_lowercase())
+}
+
+fn busy_indicator_frame(seconds: f64) -> &'static str {
+    match ((seconds * 5.0).floor() as usize) % 5 {
+        0 => "[=  ]",
+        1 => "[== ]",
+        2 => "[===]",
+        3 => "[ ==]",
+        _ => "[  =]",
+    }
 }
 
 fn primary_button(label: &'static str) -> egui::Button<'static> {
@@ -1476,23 +1481,22 @@ mod tests {
     }
 
     #[test]
-    fn native_header_actions_map_to_real_commands() {
-        assert_eq!(
-            UiActionKind::from_label("同步", UiPage::Overview),
-            UiActionKind::ScanProjects
+    fn native_header_actions_are_declarative_not_label_driven() {
+        let sync = HeaderAction::new("重新同步项目", UiPage::Overview, UiActionKind::ScanProjects);
+        let renamed_sync =
+            HeaderAction::new("任意中文文案", UiPage::Catalog, UiActionKind::ScanProjects);
+        let review = HeaderAction::new("检查变更", UiPage::RuleCi, UiActionKind::ReviewProject);
+        let evolve = HeaderAction::new(
+            "整理所有历史对话",
+            UiPage::Observations,
+            UiActionKind::EvolveConversations,
         );
-        assert_eq!(
-            UiActionKind::from_label("刷新目录", UiPage::Catalog),
-            UiActionKind::RefreshProjectCache
-        );
-        assert_eq!(
-            UiActionKind::from_label("构建预览", UiPage::RuleCi),
-            UiActionKind::ReviewProject
-        );
-        assert_eq!(
-            UiActionKind::from_label("批量合成", UiPage::Observations),
-            UiActionKind::EvolveConversations
-        );
+
+        assert_eq!(sync.kind, UiActionKind::ScanProjects);
+        assert_eq!(renamed_sync.kind, UiActionKind::ScanProjects);
+        assert_eq!(renamed_sync.target_page, UiPage::Catalog);
+        assert_eq!(review.kind, UiActionKind::ReviewProject);
+        assert_eq!(evolve.kind, UiActionKind::EvolveConversations);
     }
 
     #[test]
@@ -1501,6 +1505,16 @@ mod tests {
         assert!(matches_search("AXIOS", "Use Axios for HTTP"));
         assert!(matches_search("", "anything"));
         assert!(!matches_search("poetry", "Use Bun runtime"));
+    }
+
+    #[test]
+    fn native_busy_indicator_uses_ascii_cycle() {
+        assert_eq!(busy_indicator_frame(0.0), "[=  ]");
+        assert_eq!(busy_indicator_frame(0.2), "[== ]");
+        assert_eq!(busy_indicator_frame(0.4), "[===]");
+        assert_eq!(busy_indicator_frame(0.6), "[ ==]");
+        assert_eq!(busy_indicator_frame(0.8), "[  =]");
+        assert!(busy_indicator_frame(1.0).is_ascii());
     }
 
     #[test]
@@ -1777,8 +1791,8 @@ impl AgentKernelApp {
         self.refresh_project_cache_for_selected_async();
     }
 
-    fn run_ui_action(&mut self, label: &str, page: UiPage) {
-        match UiActionKind::from_label(label, page) {
+    fn run_ui_action(&mut self, kind: UiActionKind) {
+        match kind {
             UiActionKind::Navigate => {}
             UiActionKind::ScanProjects => self.start_scan(),
             UiActionKind::RefreshProjectCache => self.refresh_project_cache_for_selected_async(),
@@ -2476,7 +2490,7 @@ impl AgentKernelApp {
         ui: &mut egui::Ui,
         title: &str,
         subtitle: &str,
-        actions: &[(&'static str, UiPage)],
+        actions: &[HeaderAction],
     ) {
         let palette = ui_palette();
         ui.horizontal(|ui| {
@@ -2495,15 +2509,15 @@ impl AgentKernelApp {
                 );
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                for (idx, (label, page)) in actions.iter().enumerate() {
+                for (idx, action) in actions.iter().enumerate() {
                     let button = if idx == 0 {
-                        primary_button(label)
+                        primary_button(action.label)
                     } else {
-                        secondary_button(label)
+                        secondary_button(action.label)
                     };
                     if ui.add_enabled(!self.is_busy(), button).clicked() {
-                        self.active_page = *page;
-                        self.run_ui_action(label, *page);
+                        self.active_page = action.target_page;
+                        self.run_ui_action(action.kind);
                     }
                     ui.add_space(8.0);
                 }
@@ -2525,7 +2539,18 @@ impl AgentKernelApp {
                             ui,
                             "项目画布 / Canvas",
                             "把本地规则、观察记录、草稿、Skilllets 与 Agent 输出连接成一张可操作白板。",
-                            &[("整理历史对话", UiPage::Observations), ("打开草稿", UiPage::DraftInbox)],
+                            &[
+                                HeaderAction::new(
+                                    "整理历史对话",
+                                    UiPage::Observations,
+                                    UiActionKind::EvolveConversations,
+                                ),
+                                HeaderAction::new(
+                                    "打开草稿",
+                                    UiPage::DraftInbox,
+                                    UiActionKind::Navigate,
+                                ),
+                            ],
                         );
                         ui.add_space(24.0);
                         self.render_overview_kpis(ui);
@@ -2830,7 +2855,23 @@ impl AgentKernelApp {
                             ui,
                             "Review Center / 构建与审查",
                             "在应用前统一查看构建预览、规则校验与镜像对齐状态，确保变更安全、合规且可追溯。",
-                            &[("开始审查", UiPage::RuleCi), ("导入产物", UiPage::Observations), ("运行 Rule CI", UiPage::RuleCi)],
+                            &[
+                                HeaderAction::new(
+                                    "开始审查",
+                                    UiPage::RuleCi,
+                                    UiActionKind::ReviewProject,
+                                ),
+                                HeaderAction::new(
+                                    "导入产物",
+                                    UiPage::Observations,
+                                    UiActionKind::EvolveConversations,
+                                ),
+                                HeaderAction::new(
+                                    "运行 Rule CI",
+                                    UiPage::RuleCi,
+                                    UiActionKind::ReviewProject,
+                                ),
+                            ],
                         );
                         ui.add_space(24.0);
                         let warnings = self.cached_catalog_validation.as_ref().map(|v| v.warnings).unwrap_or(2);
@@ -3100,7 +3141,23 @@ impl AgentKernelApp {
                             ui,
                             "Observations / 观察记录",
                             "从多源导入原始观察，自动去重与清洗，提炼可复用的模式，流入 Draft Inbox。",
-                            &[("批量合成", UiPage::Observations), ("本地扫描", UiPage::Observations), ("导入文件", UiPage::Observations)],
+                            &[
+                                HeaderAction::new(
+                                    "批量合成",
+                                    UiPage::Observations,
+                                    UiActionKind::EvolveConversations,
+                                ),
+                                HeaderAction::new(
+                                    "本地扫描",
+                                    UiPage::Observations,
+                                    UiActionKind::EvolveConversations,
+                                ),
+                                HeaderAction::new(
+                                    "导入文件",
+                                    UiPage::Observations,
+                                    UiActionKind::EvolveConversations,
+                                ),
+                            ],
                         );
                         ui.add_space(24.0);
                         ui.columns(4, |cols| {
@@ -3299,7 +3356,28 @@ impl AgentKernelApp {
                             ui,
                             "Skilllets / 技能记忆库",
                             "管理您拥有的 Skilllets、导入的技能、合并建议、目标分配与编译准备状态。",
-                            &[("新建 Skilllet", UiPage::DraftInbox), ("合并", UiPage::DraftInbox), ("附加到 Skill", UiPage::Catalog), ("编译预览", UiPage::RuleCi)],
+                            &[
+                                HeaderAction::new(
+                                    "新建 Skilllet",
+                                    UiPage::DraftInbox,
+                                    UiActionKind::Navigate,
+                                ),
+                                HeaderAction::new(
+                                    "合并",
+                                    UiPage::DraftInbox,
+                                    UiActionKind::Navigate,
+                                ),
+                                HeaderAction::new(
+                                    "附加到 Skill",
+                                    UiPage::Catalog,
+                                    UiActionKind::Navigate,
+                                ),
+                                HeaderAction::new(
+                                    "编译预览",
+                                    UiPage::RuleCi,
+                                    UiActionKind::ReviewProject,
+                                ),
+                            ],
                         );
                         ui.add_space(16.0);
                         self.tabs(ui, &["我的 Skilllets", "导入技能", "目标矩阵", "合并建议"]);
@@ -3531,8 +3609,12 @@ impl AgentKernelApp {
                     "草稿收件箱 / Draft Inbox",
                     "审查并决定是否将草稿提升为规则或转为 Skilllet。",
                     &[
-                        ("批量草稿", UiPage::DraftInbox),
-                        ("转为 Skilllet", UiPage::Skilllets),
+                        HeaderAction::new("批量草稿", UiPage::DraftInbox, UiActionKind::Navigate),
+                        HeaderAction::new(
+                            "转为 Skilllet",
+                            UiPage::Skilllets,
+                            UiActionKind::Navigate,
+                        ),
                     ],
                 );
                 ui.add_space(12.0);
@@ -4011,7 +4093,18 @@ impl AgentKernelApp {
                             ui,
                             "Catalog / Skilllet App Store",
                             "安装可复用的轻量 Skilllet 包，并分配给 Claude Code 或 Codex。",
-                            &[("刷新目录", UiPage::Catalog), ("编译预览", UiPage::RuleCi)],
+                            &[
+                                HeaderAction::new(
+                                    "刷新目录",
+                                    UiPage::Catalog,
+                                    UiActionKind::RefreshProjectCache,
+                                ),
+                                HeaderAction::new(
+                                    "编译预览",
+                                    UiPage::RuleCi,
+                                    UiActionKind::ReviewProject,
+                                ),
+                            ],
                         );
                         ui.add_space(20.0);
                         let status = self.cached_catalog_status.clone();
@@ -4134,7 +4227,18 @@ impl AgentKernelApp {
                             ui,
                             title,
                             subtitle,
-                            &[("同步", UiPage::Overview), ("构建预览", UiPage::RuleCi)],
+                            &[
+                                HeaderAction::new(
+                                    "同步",
+                                    UiPage::Overview,
+                                    UiActionKind::ScanProjects,
+                                ),
+                                HeaderAction::new(
+                                    "构建预览",
+                                    UiPage::RuleCi,
+                                    UiActionKind::ReviewProject,
+                                ),
+                            ],
                         );
                         ui.add_space(24.0);
                         ui.columns(3, |cols| {
@@ -4188,16 +4292,24 @@ impl AgentKernelApp {
 
     fn render_bottom_bar(&mut self, ui: &mut egui::Ui) {
         let palette = ui_palette();
+        let busy_frame = ui.input(|input| busy_indicator_frame(input.time));
         ui.add_space(18.0);
         subtle_card_frame().show(ui, |ui| {
-            ui.set_width(205.0);
+            ui.set_width(250.0);
             ui.horizontal(|ui| {
-                self.status_dot(ui, palette.success);
+                self.status_dot(
+                    ui,
+                    if self.is_busy() {
+                        palette.accent
+                    } else {
+                        palette.success
+                    },
+                );
                 ui.label(
                     egui::RichText::new(
                         self.busy_task
                             .as_deref()
-                            .map(|task| format!("正在{}...", task))
+                            .map(|task| format!("{busy_frame} 正在{}...", task))
                             .unwrap_or_else(|| "Ready for review".to_string()),
                     )
                     .size(14.0)
