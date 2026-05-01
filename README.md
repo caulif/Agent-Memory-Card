@@ -239,6 +239,12 @@ v0.38 improves Skilllet synthesis for HTTP client preferences:
 2. Frontend request preferences normalize to `project:use-axios`.
 3. The generated Draft uses the stable title `Use Axios` and the concise body already used by project Skilllets.
 
+v0.39 starts the Known Preference Registry:
+
+1. High-confidence local extraction rules are now table-driven instead of one-off conditionals.
+2. Bun, Axios, and Vitest preferences share the same stable title/body matching path.
+3. Common frontend unit-test corrections now normalize to `project:use-vitest`.
+
 ## Commands
 
 ```bash
@@ -262,6 +268,7 @@ cargo run -- draft reject --id project:prefer-bun --project .
 cargo run -- extract --text "Always use Bun for JavaScript package management and scripts." --target codex --project .
 cargo run -- extract --text "以后把 npm 改为 Bun，所有 JS 脚本都用 bun run。" --target codex --dry-run --project .
 cargo run -- extract --text "以后前端请求统一使用 Axios，不要再用 Fetch。" --target codex --dry-run --project .
+cargo run -- extract --text "以后前端单元测试默认使用 Vitest，不要再写 Jest 配置。" --target codex --dry-run --project .
 cargo run -- extract --file chat.md --target codex --project .
 cargo run -- extract --text "Always run cargo test before pushing." --target codex --provider local --dry-run --project .
 cargo run -- observe import --file chat.jsonl --agent claude-code --source-kind claude-code-session --project .

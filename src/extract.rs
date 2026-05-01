@@ -214,59 +214,81 @@ fn extract_candidates(input: &str) -> Vec<Candidate> {
 
 fn normalize_known_preference(sentence: &str) -> Option<Candidate> {
     let lower = sentence.to_lowercase();
-    if mentions_bun_package_management(&lower) {
-        return Some(Candidate {
-            title: "Prefer Bun".to_string(),
-            body: "Use Bun for JavaScript package management and scripts.".to_string(),
+    known_preferences()
+        .iter()
+        .find(|preference| preference.matches(&lower))
+        .map(|preference| Candidate {
+            title: preference.title.to_string(),
+            body: preference.body.to_string(),
             kind: "preference".to_string(),
             scope: "project".to_string(),
             evidence: sentence.to_string(),
-        });
-    }
-    if mentions_axios_http_preference(&lower) {
-        return Some(Candidate {
-            title: "Use Axios".to_string(),
-            body: "Use Axios for frontend HTTP requests.".to_string(),
-            kind: "preference".to_string(),
-            scope: "project".to_string(),
-            evidence: sentence.to_string(),
-        });
-    }
-    None
+        })
 }
 
-fn mentions_bun_package_management(lower: &str) -> bool {
-    lower.contains("bun")
-        && [
-            "npm",
-            "pnpm",
-            "yarn",
-            "bun run",
-            "bunx",
-            "包管理",
-            "package manager",
-            "package management",
-            "javascript package",
-            "js 脚本",
-        ]
-        .iter()
-        .any(|marker| lower.contains(marker))
+struct KnownPreference {
+    title: &'static str,
+    body: &'static str,
+    required: &'static [&'static str],
+    context: &'static [&'static str],
 }
 
-fn mentions_axios_http_preference(lower: &str) -> bool {
-    lower.contains("axios")
-        && [
-            "fetch",
-            "http",
-            "request",
-            "requests",
-            "api",
-            "前端请求",
-            "请求",
-            "接口",
-        ]
-        .iter()
-        .any(|marker| lower.contains(marker))
+impl KnownPreference {
+    fn matches(&self, lower: &str) -> bool {
+        self.required.iter().all(|marker| lower.contains(marker))
+            && self.context.iter().any(|marker| lower.contains(marker))
+    }
+}
+
+fn known_preferences() -> &'static [KnownPreference] {
+    &[
+        KnownPreference {
+            title: "Prefer Bun",
+            body: "Use Bun for JavaScript package management and scripts.",
+            required: &["bun"],
+            context: &[
+                "npm",
+                "pnpm",
+                "yarn",
+                "bun run",
+                "bunx",
+                "包管理",
+                "package manager",
+                "package management",
+                "javascript package",
+                "js 脚本",
+            ],
+        },
+        KnownPreference {
+            title: "Use Axios",
+            body: "Use Axios for frontend HTTP requests.",
+            required: &["axios"],
+            context: &[
+                "fetch",
+                "http",
+                "request",
+                "requests",
+                "api",
+                "前端请求",
+                "请求",
+                "接口",
+            ],
+        },
+        KnownPreference {
+            title: "Use Vitest",
+            body: "Use Vitest for frontend unit tests.",
+            required: &["vitest"],
+            context: &[
+                "jest",
+                "unit test",
+                "unit tests",
+                "frontend test",
+                "frontend tests",
+                "单元测试",
+                "测试",
+            ],
+        },
+    ]
 }
 
 fn split_sentences(input: &str) -> Vec<&str> {
@@ -444,6 +466,29 @@ mod tests {
         assert_eq!(
             report.candidates[0].body,
             "Use Bun for JavaScript package management and scripts."
+        );
+    }
+
+    #[test]
+    fn normalizes_vitest_unit_test_preference() {
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        let report = extract_to_drafts(
+            temp.path(),
+            Some("以后前端单元测试默认使用 Vitest，不要再写 Jest 配置。".to_string()),
+            None,
+            vec!["codex".to_string()],
+            Some("local".to_string()),
+            true,
+        )
+        .expect("extract");
+
+        assert_eq!(report.candidates.len(), 1);
+        assert_eq!(report.candidates[0].id, "project:use-vitest");
+        assert_eq!(report.candidates[0].title, "Use Vitest");
+        assert_eq!(
+            report.candidates[0].body,
+            "Use Vitest for frontend unit tests."
         );
     }
 
