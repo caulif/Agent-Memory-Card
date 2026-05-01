@@ -223,6 +223,15 @@ fn normalize_known_preference(sentence: &str) -> Option<Candidate> {
             evidence: sentence.to_string(),
         });
     }
+    if mentions_axios_http_preference(&lower) {
+        return Some(Candidate {
+            title: "Use Axios".to_string(),
+            body: "Use Axios for frontend HTTP requests.".to_string(),
+            kind: "preference".to_string(),
+            scope: "project".to_string(),
+            evidence: sentence.to_string(),
+        });
+    }
     None
 }
 
@@ -239,6 +248,22 @@ fn mentions_bun_package_management(lower: &str) -> bool {
             "package management",
             "javascript package",
             "js 脚本",
+        ]
+        .iter()
+        .any(|marker| lower.contains(marker))
+}
+
+fn mentions_axios_http_preference(lower: &str) -> bool {
+    lower.contains("axios")
+        && [
+            "fetch",
+            "http",
+            "request",
+            "requests",
+            "api",
+            "前端请求",
+            "请求",
+            "接口",
         ]
         .iter()
         .any(|marker| lower.contains(marker))
@@ -357,7 +382,9 @@ mod tests {
         let candidates = extract_candidates("以后前端请求统一使用 Axios，不要再用 Fetch。");
 
         assert_eq!(candidates.len(), 1);
-        assert!(candidates[0].body.contains("Axios"));
+        assert_eq!(draft_id(&candidates[0]), "project:use-axios");
+        assert_eq!(candidates[0].title, "Use Axios");
+        assert_eq!(candidates[0].body, "Use Axios for frontend HTTP requests.");
     }
 
     #[test]

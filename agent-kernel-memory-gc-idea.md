@@ -56,6 +56,7 @@
 - v0.35 范围：Observation 导入增加 ID 去重，同一会话重复导入会计入 skipped，避免每天重复 evolve 时制造虚假的新增数量。
 - v0.36 范围：将 JavaScript 包装层从 Node/npm 叙事切到 Bun，目录改为 `bun/`，本地脚本使用 `bun` / `bun test`，发布打包使用 `bun pm pack`。
 - v0.37 范围：本地提取器识别高置信 Bun 包管理偏好，把“从 npm/pnpm/yarn 改为 Bun”这类对话归一化为稳定 `project:prefer-bun` Draft，而不是生成口语化长标题。
+- v0.38 范围：本地提取器识别 Fetch -> Axios 这类高频 HTTP 客户端偏好纠正，归一化为稳定 `project:use-axios` Draft。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 JavaScript registry 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。
