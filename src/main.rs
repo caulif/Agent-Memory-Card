@@ -61,6 +61,31 @@ mod tests {
             _ => panic!("expected observe local command"),
         }
     }
+
+    #[test]
+    fn cli_accepts_observe_synthesize_command() {
+        let cli = Cli::parse_from([
+            "agent-kernel",
+            "observe",
+            "synthesize",
+            "--target",
+            "codex",
+            "--dry-run",
+        ]);
+
+        match cli.command {
+            Commands::Observe {
+                command:
+                    ObserveCommands::Synthesize {
+                        targets, dry_run, ..
+                    },
+            } => {
+                assert_eq!(targets, vec!["codex"]);
+                assert!(dry_run);
+            }
+            _ => panic!("expected observe synthesize command"),
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -434,6 +459,18 @@ enum ObserveCommands {
         #[arg(long, default_value = ".")]
         project: PathBuf,
     },
+
+    /// Synthesize reviewable Draft Inbox items from imported Observations.
+    Synthesize {
+        /// Agent target. Repeat for multiple agents. Empty means project-level candidate.
+        #[arg(long = "target")]
+        targets: Vec<String>,
+        /// Show candidate count without writing Draft Inbox files.
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -695,6 +732,15 @@ async fn main() -> Result<()> {
                         );
                     }
                 }
+            }
+            ObserveCommands::Synthesize {
+                targets,
+                dry_run,
+                project,
+            } => {
+                let report =
+                    observation::synthesize_observations_to_drafts(&project, targets, dry_run)?;
+                println!("{}", report.render());
             }
         },
         Commands::Provider { command } => match command {

@@ -31,14 +31,33 @@ Agent-Kernel should avoid rebuilding mature pieces from nearby ecosystems. The v
 ## Letta Code / MemFS
 
 - Source: https://docs.letta.com/letta-code/memory/
+- Source: https://www.letta.com/blog/context-repositories
 - Borrowed idea: memory as a git-backed filesystem of markdown files, curated over time by reflection subagents.
 - Product impact: Agent-Kernel should keep source-of-truth memory files reviewable, versioned, and editable as plain text. Letta's compaction-triggered reflection suggests a future "post-compaction Draft Inbox" trigger.
+- 2026-05-01 update: Letta's context repository framing reinforces Agent-Kernel's choice to keep Observation, Draft, and Skilllet state as local reviewable files instead of hiding learned preferences inside a runtime service.
 
 ## Mem0
 
 - Source: https://docs.mem0.ai/platform/overview
+- Source: https://docs.mem0.ai/platform/cli
 - Borrowed idea: user, agent, and session memory separation; production memory layers provide graph/rerank infrastructure when an app truly needs retrieval.
 - Product impact: Agent-Kernel should remain the lightweight file-governance layer and integrate with heavy memory systems later through import/export rather than reimplementing vector/graph memory in the MVP.
+- 2026-05-01 update: Mem0's CLI memory import flow validates a terminal-first ingestion path, while Agent-Kernel keeps the output as reviewable Draft Skilllets rather than immediate runtime memory.
+
+## OpenCode And Goose Skills
+
+- Source: https://opencode.ai/docs/skills/
+- Source: https://goose-docs.ai/docs/guides/context-engineering/using-skills
+- Borrowed idea: more coding agents are converging on `SKILL.md` directories plus supporting files, which makes portable Skilllet and Skill management more valuable than yet another proprietary prompt file.
+- Product impact: OpenCode and Goose stay outside the MVP target set, but their native Skill support argues for an adapter registry later: one Skilllet source, multiple Agent-native renderers.
+
+## 2026 Skill Optimization Research
+
+- Source: https://arxiv.org/abs/2602.12430
+- Source: https://arxiv.org/abs/2603.29919
+- Source: https://arxiv.org/abs/2604.04853
+- Borrowed idea: current research is moving toward portable skills, token-efficient skill reduction, and ground-truth-preserving memory systems.
+- Product impact: Agent-Kernel should treat local transcript Observations as ground truth, synthesize only reviewable Drafts, and add future Rule CI before aggressive Skilllet compression.
 
 ## Cursor Rules
 

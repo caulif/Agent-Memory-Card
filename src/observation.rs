@@ -4,8 +4,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::config;
+use crate::extract;
 use crate::fsutil;
 use crate::provider;
 
@@ -26,6 +28,14 @@ pub struct ObservationImportReport {
     pub created: usize,
     pub skipped: usize,
     pub observations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ObservationSynthesisReport {
+    pub created: usize,
+    pub skipped: usize,
+    pub candidates: usize,
+    pub dry_run: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +61,20 @@ impl ObservationImportReport {
     }
 }
 
+impl ObservationSynthesisReport {
+    pub fn render(&self) -> String {
+        let mut out = String::new();
+        out.push_str("Agent-Kernel observation synthesis\n\n");
+        out.push_str(&format!("Drafts created: {}\n", self.created));
+        out.push_str(&format!("Candidate previews: {}\n", self.candidates));
+        out.push_str(&format!("Skipped observations: {}\n", self.skipped));
+        if self.dry_run {
+            out.push_str("Mode: dry run\n");
+        }
+        out
+    }
+}
+
 pub fn import_observation_file(
     project_root: &Path,
     file: &Path,
@@ -59,7 +83,8 @@ pub fn import_observation_file(
 ) -> Result<ObservationImportReport> {
     let root = fsutil::normalize_project_root(project_root)?;
     let text = fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?;
-    if text.trim().is_empty() {
+    let body = normalize_observation_body(&text, file, source_kind);
+    if body.trim().is_empty() {
         return Ok(ObservationImportReport {
             created: 0,
             skipped: 1,
@@ -67,7 +92,7 @@ pub fn import_observation_file(
         });
     }
 
-    let redacted = provider::redact_secrets(&text);
+    let redacted = provider::redact_secrets(&body);
     let id = observation_id(agent, source_kind, &file.display().to_string(), &redacted);
     let record = ObservationRecord {
         id: id.clone(),
@@ -134,6 +159,39 @@ pub fn load_observations(project_root: &Path) -> Result<Vec<ObservationRecord>> 
     Ok(records)
 }
 
+pub fn synthesize_observations_to_drafts(
+    project_root: &Path,
+    targets: Vec<String>,
+    dry_run: bool,
+) -> Result<ObservationSynthesisReport> {
+    let observations = load_observations(project_root)?;
+    let mut report = ObservationSynthesisReport {
+        created: 0,
+        skipped: 0,
+        candidates: 0,
+        dry_run,
+    };
+
+    for observation in observations {
+        let extracted = extract::extract_text_to_drafts(
+            project_root,
+            &observation.body,
+            targets.clone(),
+            &format!("observation:{}", observation.id),
+            Some("local".to_string()),
+            dry_run,
+        )?;
+        report.created += extracted.created.len();
+        report.skipped += extracted.skipped.len();
+        report.candidates += extracted.candidates.len();
+        if extracted.created.is_empty() && extracted.candidates.is_empty() {
+            report.skipped += 1;
+        }
+    }
+
+    Ok(report)
+}
+
 pub fn discover_local_conversation_files(home: &Path) -> Result<Vec<ConversationFile>> {
     let mut files = Vec::new();
     collect_jsonl(
@@ -192,6 +250,51 @@ fn observation_id(agent: Option<&str>, source_kind: &str, source: &str, body: &s
     format!("obs:{agent}:{}", &hash[..12])
 }
 
+fn normalize_observation_body(input: &str, file: &Path, source_kind: &str) -> String {
+    let is_jsonl = file.extension().and_then(|value| value.to_str()) == Some("jsonl")
+        || source_kind.contains("session");
+    if !is_jsonl {
+        return input.trim().to_string();
+    }
+    extract_jsonl_messages(input).unwrap_or_else(|| input.trim().to_string())
+}
+
+fn extract_jsonl_messages(input: &str) -> Option<String> {
+    let mut parts = Vec::new();
+    for line in input.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        collect_known_text_fields(&value, &mut parts);
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n").trim().to_string())
+    }
+}
+
+fn collect_known_text_fields(value: &Value, parts: &mut Vec<String>) {
+    match value {
+        Value::String(text) if !text.trim().is_empty() => {
+            parts.push(text.trim().to_string());
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_known_text_fields(item, parts);
+            }
+        }
+        Value::Object(map) => {
+            for key in ["message", "content", "text"] {
+                if let Some(child) = map.get(key) {
+                    collect_known_text_fields(child, parts);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 fn observation_path(project_root: &Path, id: &str) -> PathBuf {
     let safe = id.replace(':', "/").replace(['\\', ' '], "-");
     observations_dir(project_root).join(format!("{safe}.yml"))
@@ -204,6 +307,7 @@ fn observations_dir(project_root: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::draft;
     use std::fs;
 
     #[test]
@@ -233,6 +337,26 @@ mod tests {
     }
 
     #[test]
+    fn import_jsonl_extracts_message_text_without_wrappers() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let transcript = temp.path().join("session.jsonl");
+        fs::write(
+            &transcript,
+            r#"{"type":"user","message":"Always use Vitest for frontend unit tests."}"#,
+        )
+        .expect("write transcript");
+
+        import_observation_file(temp.path(), &transcript, "codex-session", Some("codex"))
+            .expect("import");
+        let observations = load_observations(temp.path()).expect("observations");
+
+        assert_eq!(
+            observations[0].body,
+            "Always use Vitest for frontend unit tests."
+        );
+    }
+
+    #[test]
     fn discover_local_conversation_files_finds_claude_and_codex_jsonl() {
         let home = tempfile::tempdir().expect("home");
         let claude = home
@@ -258,5 +382,58 @@ mod tests {
 
         assert!(files.iter().any(|item| item.agent == "claude-code"));
         assert!(files.iter().any(|item| item.agent == "codex"));
+    }
+
+    #[test]
+    fn synthesize_observations_creates_reviewable_drafts() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let transcript = temp.path().join("session.jsonl");
+        fs::write(
+            &transcript,
+            r#"{"type":"user","message":"以后所有 Rust 项目必须先运行 cargo test 再提交。"}"#,
+        )
+        .expect("write transcript");
+        import_observation_file(temp.path(), &transcript, "codex-session", Some("codex"))
+            .expect("import");
+
+        let report = synthesize_observations_to_drafts(
+            temp.path(),
+            vec!["codex".to_string(), "claude-code".to_string()],
+            false,
+        )
+        .expect("synthesize");
+
+        assert_eq!(report.created, 1);
+        let drafts = draft::load_drafts(temp.path()).expect("drafts");
+        assert_eq!(drafts.len(), 1);
+        assert_eq!(drafts[0].targets, vec!["codex", "claude-code"]);
+        assert!(drafts[0].body.contains("cargo test"));
+        assert!(drafts[0].evidence.contains("observation:obs:codex"));
+    }
+
+    #[test]
+    fn synthesize_dry_run_does_not_write_drafts() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let transcript = temp.path().join("session.jsonl");
+        fs::write(
+            &transcript,
+            r#"{"type":"user","message":"Always use Vitest for frontend unit tests."}"#,
+        )
+        .expect("write transcript");
+        import_observation_file(
+            temp.path(),
+            &transcript,
+            "claude-code-session",
+            Some("claude-code"),
+        )
+        .expect("import");
+
+        let report =
+            synthesize_observations_to_drafts(temp.path(), vec!["codex".to_string()], true)
+                .expect("synthesize");
+
+        assert_eq!(report.created, 0);
+        assert_eq!(report.candidates, 1);
+        assert!(draft::load_drafts(temp.path()).expect("drafts").is_empty());
     }
 }

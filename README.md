@@ -202,6 +202,12 @@ v0.32 starts the Observation Layer:
 2. `observe import --file <path>` imports a local transcript or note file with secret redaction.
 3. `observe local` scans common Claude Code and Codex local JSONL conversation folders and stores observations for later Skilllet synthesis.
 
+v0.33 closes the first local evolution loop:
+
+1. `observe synthesize` turns imported Observations into Draft Inbox candidates.
+2. Synthesis uses the same local heuristic extractor and never auto-enables a Skilllet.
+3. The Canvas Observations panel can synthesize reviewable drafts for all enabled Agents.
+
 ## Commands
 
 ```bash
@@ -228,6 +234,8 @@ cargo run -- extract --text "Always run cargo test before pushing." --target cod
 cargo run -- observe import --file chat.jsonl --agent claude-code --source-kind claude-code-session --project .
 cargo run -- observe local --project .
 cargo run -- observe list --project .
+cargo run -- observe synthesize --target codex --target claude-code --project .
+cargo run -- observe synthesize --dry-run --project .
 cargo run -- provider init --project .
 cargo run -- provider show --project .
 cargo run -- extract --text "Always use token=supersecret123456789 before pushing." --target codex --provider local --dry-run --project .
@@ -321,6 +329,7 @@ The Canvas UI exposes:
 - `/api/skilllet/targets` for assigning Skilllets to Agent targets
 - `/api/skilllet/matrix` for the Skilllet by Agent target matrix
 - `/api/extract` creates Draft Inbox items from pasted text
+- `/api/observations/synthesize` creates Draft Inbox items from imported Observations
 - `/api/build/preview` for build previews
 - `/api/sync` for syncing declared mirrors and generated artifacts
 - `/api/status` for synced / missing / drifted mirror state

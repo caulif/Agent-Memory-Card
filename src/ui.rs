@@ -83,6 +83,7 @@ mod tests {
     fn canvas_html_has_observations_panel() {
         assert!(INDEX_HTML.contains("Observations"));
         assert!(INDEX_HTML.contains("observation-count"));
+        assert!(INDEX_HTML.contains("Synthesize Drafts"));
     }
 }
 
@@ -154,6 +155,10 @@ pub async fn serve(project: PathBuf, port: u16, open_browser: bool) -> Result<()
         .route("/api/draft/approve", post(api_draft_approve))
         .route("/api/draft/reject", post(api_draft_reject))
         .route("/api/extract", post(api_extract))
+        .route(
+            "/api/observations/synthesize",
+            post(api_observations_synthesize),
+        )
         .route("/api/build/preview", post(api_build_preview))
         .route("/api/artifacts/import", post(api_artifacts_import))
         .route("/api/sync", post(api_sync))
@@ -289,6 +294,30 @@ async fn api_extract(
             "text": report.render(),
         })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+async fn api_observations_synthesize(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let targets = config::load_or_default_project_config(state.project_root.as_ref())
+        .map(|project| {
+            project
+                .agents
+                .into_iter()
+                .filter_map(|(name, agent)| agent.enabled.then_some(name))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    match observation::synthesize_observations_to_drafts(
+        state.project_root.as_ref(),
+        targets,
+        false,
+    ) {
+        Ok(report) => Json(serde_json::json!({
+            "ok": true,
+            "text": report.render(),
+            "report": report,
+        })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "text": error.to_string() })),
     }
 }
 
@@ -486,6 +515,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
       <div class="pane-title">Draft Inbox <span id="draft-count">0</span></div>
       <div id="drafts"></div>
       <div class="pane-title">Observations <span id="observation-count">0</span></div>
+      <button class="btn" id="synthesize-drafts" style="width:100%;margin-bottom:8px">Synthesize Drafts</button>
       <div id="observations"></div>
     </aside>
 
@@ -994,6 +1024,14 @@ const INDEX_HTML: &str = r##"<!doctype html>
       await loadState();
     }
 
+    async function synthesizeDrafts() {
+      const res = await fetch("/api/observations/synthesize", { method: "POST" });
+      const result = await res.json();
+      document.getElementById("build-output").textContent = result.text;
+      await loadState();
+      await renderReview(false);
+    }
+
     async function installCatalogPackage(id) {
       const targets = Array.from(document.querySelectorAll(".extract-target:checked")).map(input => input.value);
       const res = await fetch("/api/catalog/install", {
@@ -1029,6 +1067,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
     document.getElementById("sync").addEventListener("click", syncMirrors);
     document.getElementById("import-artifacts").addEventListener("click", importArtifacts);
     document.getElementById("extract-drafts").addEventListener("click", extractDrafts);
+    document.getElementById("synthesize-drafts").addEventListener("click", synthesizeDrafts);
     document.getElementById("refresh").addEventListener("click", loadState);
     document.getElementById("open-store").addEventListener("click", () => document.getElementById("store").classList.add("open"));
     document.getElementById("close-store").addEventListener("click", () => document.getElementById("store").classList.remove("open"));

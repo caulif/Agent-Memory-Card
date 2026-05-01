@@ -51,6 +51,7 @@
 - v0.30 范围：重置 MVP 范围，默认只支持 Claude Code / Codex；Cursor 和 Cline 从默认配置与 Canvas 目标中移除，但保留通用 exporter/adapter 接口。
 - v0.31 范围：增强 Skilllet 操作能力，支持把一个或多个 Skilllet 分配到某个项目或 Agent，合并多个 Skilllet，并把 Skilllet 作为生成补充追加进已有 mirrored Skill。
 - v0.32 范围：启动 Observation Layer，支持把本地对话文件和 Claude Code / Codex 常见 JSONL session 目录导入 `.agent-kernel/observations`，先保存原始观察记录，后续再进行 Skilllet Synthesis。
+- v0.33 范围：打通本地进化闭环第一版，`observe synthesize` 将 Observation 转成 Draft Inbox 候选，Canvas 也可以从 Observations 一键生成待审阅 Draft，但不会自动启用 Skilllet。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 npm 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。
