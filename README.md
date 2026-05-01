@@ -44,6 +44,12 @@ v0.6 adds local heuristic extraction:
 3. The extractor is local-only and does not call an LLM.
 4. Extracted candidates remain drafts until approved.
 
+v0.7 exposes extraction in the Canvas UI:
+
+1. The right-side panel has an Extract Drafts text box.
+2. `/api/extract` writes local heuristic candidates into Draft Inbox.
+3. Extracted drafts can be approved or rejected from the UI.
+
 ## Commands
 
 ```bash
@@ -109,6 +115,7 @@ The Canvas UI exposes:
 
 - `/api/state` for project config, imported rules, and skill index
 - `/api/mirror` for declaring a Skill mirror
+- `/api/extract` creates Draft Inbox items from pasted text
 - `/api/build/preview` for build previews
 - `/api/sync` for syncing declared mirrors and generated artifacts
 - `/api/status` for synced / missing / drifted mirror state

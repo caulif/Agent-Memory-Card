@@ -14,6 +14,7 @@ use tower_http::cors::CorsLayer;
 use crate::build;
 use crate::config;
 use crate::draft::{self, DraftRecord};
+use crate::extract;
 use crate::fsutil;
 use crate::skilllet::{self, SkillletRecord};
 
@@ -31,6 +32,12 @@ struct MirrorRequest {
 #[derive(Debug, Deserialize)]
 struct DraftActionRequest {
     id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExtractRequest {
+    text: String,
+    targets: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -55,6 +62,7 @@ pub async fn serve(project: PathBuf, port: u16, open_browser: bool) -> Result<()
         .route("/api/mirror", post(api_mirror))
         .route("/api/draft/approve", post(api_draft_approve))
         .route("/api/draft/reject", post(api_draft_reject))
+        .route("/api/extract", post(api_extract))
         .route("/api/build/preview", post(api_build_preview))
         .route("/api/sync", post(api_sync))
         .route("/api/status", get(api_status))
@@ -126,6 +134,22 @@ async fn api_draft_reject(
 ) -> Json<serde_json::Value> {
     match draft::reject_draft(state.project_root.as_ref(), &req.id) {
         Ok(_) => Json(serde_json::json!({ "ok": true })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+async fn api_extract(
+    State(state): State<AppState>,
+    Json(req): Json<ExtractRequest>,
+) -> Json<serde_json::Value> {
+    match extract::extract_text_to_drafts(state.project_root.as_ref(), &req.text, req.targets, "ui")
+    {
+        Ok(report) => Json(serde_json::json!({
+            "ok": true,
+            "created": report.created,
+            "skipped": report.skipped,
+            "text": report.render(),
+        })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
 }
@@ -253,6 +277,11 @@ const INDEX_HTML: &str = r##"<!doctype html>
       <section>
         <h3>Inspector</h3>
         <div id="inspector" class="empty">Select a skill or agent.</div>
+      </section>
+      <section>
+        <h3>Extract Drafts</h3>
+        <textarea id="extract-text" placeholder="Paste a correction or session note" style="width:100%;min-height:90px;resize:vertical;border:1px solid var(--line);border-radius:7px;padding:8px"></textarea>
+        <button class="btn" id="extract-drafts" style="margin-top:8px">Extract</button>
       </section>
       <section>
         <h3>Declared Mirrors</h3>
@@ -521,6 +550,18 @@ const INDEX_HTML: &str = r##"<!doctype html>
       await loadState();
     }
 
+    async function extractDrafts() {
+      const text = document.getElementById("extract-text").value;
+      const res = await fetch("/api/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, targets: ["codex"] })
+      });
+      const result = await res.json();
+      document.getElementById("build-output").textContent = result.ok ? result.text : result.error;
+      await loadState();
+    }
+
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
     }
@@ -532,6 +573,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
     document.getElementById("search").addEventListener("input", renderSkills);
     document.getElementById("preview").addEventListener("click", previewBuild);
     document.getElementById("sync").addEventListener("click", syncMirrors);
+    document.getElementById("extract-drafts").addEventListener("click", extractDrafts);
     document.getElementById("refresh").addEventListener("click", loadState);
     document.getElementById("open-store").addEventListener("click", () => document.getElementById("store").classList.add("open"));
     document.getElementById("close-store").addEventListener("click", () => document.getElementById("store").classList.remove("open"));

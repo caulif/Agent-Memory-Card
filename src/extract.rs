@@ -58,7 +58,16 @@ pub fn extract_to_drafts(
         _ => return Err(anyhow!("provide exactly one of --text or --file")),
     };
 
-    let candidates = extract_candidates(&input);
+    extract_text_to_drafts(project_root, &input, targets, &source)
+}
+
+pub fn extract_text_to_drafts(
+    project_root: &Path,
+    input: &str,
+    targets: Vec<String>,
+    source: &str,
+) -> Result<ExtractReport> {
+    let candidates = extract_candidates(input);
     let mut created = Vec::new();
     let mut skipped = Vec::new();
     for candidate in candidates {
