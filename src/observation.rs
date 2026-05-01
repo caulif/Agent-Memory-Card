@@ -36,6 +36,7 @@ pub struct ObservationSynthesisReport {
     pub skipped: usize,
     pub candidates: usize,
     pub drafts: Vec<String>,
+    pub candidate_drafts: Vec<String>,
     pub dry_run: bool,
 }
 
@@ -47,6 +48,7 @@ pub struct ObservationEvolveReport {
     pub draft_candidates: usize,
     pub synthesis_skipped: usize,
     pub drafts: Vec<String>,
+    pub candidate_drafts: Vec<String>,
     pub dry_run: bool,
 }
 
@@ -86,6 +88,12 @@ impl ObservationSynthesisReport {
                 out.push_str(&format!("- {id}\n"));
             }
         }
+        if !self.candidate_drafts.is_empty() {
+            out.push_str("\nCandidate drafts:\n");
+            for id in &self.candidate_drafts {
+                out.push_str(&format!("- {id}\n"));
+            }
+        }
         if self.dry_run {
             out.push_str("Mode: dry run\n");
         }
@@ -105,6 +113,12 @@ impl ObservationEvolveReport {
         if !self.drafts.is_empty() {
             out.push_str("\nDrafts:\n");
             for id in &self.drafts {
+                out.push_str(&format!("- {id}\n"));
+            }
+        }
+        if !self.candidate_drafts.is_empty() {
+            out.push_str("\nCandidate drafts:\n");
+            for id in &self.candidate_drafts {
                 out.push_str(&format!("- {id}\n"));
             }
         }
@@ -210,6 +224,7 @@ pub fn synthesize_observations_to_drafts(
         skipped: 0,
         candidates: 0,
         drafts: Vec::new(),
+        candidate_drafts: Vec::new(),
         dry_run,
     };
 
@@ -226,6 +241,12 @@ pub fn synthesize_observations_to_drafts(
         let candidate_count = extracted.candidates.len();
         report.created += created_count;
         report.drafts.extend(extracted.created);
+        report.candidate_drafts.extend(
+            extracted
+                .candidates
+                .iter()
+                .map(|candidate| candidate.id.clone()),
+        );
         report.skipped += extracted.skipped.len();
         report.candidates += candidate_count;
         if created_count == 0 && candidate_count == 0 {
@@ -251,6 +272,7 @@ pub fn evolve_local_conversations(
         draft_candidates: synthesized.candidates,
         synthesis_skipped: synthesized.skipped,
         drafts: synthesized.drafts,
+        candidate_drafts: synthesized.candidate_drafts,
         dry_run,
     })
 }
@@ -530,6 +552,7 @@ mod tests {
 
         assert_eq!(report.created, 0);
         assert_eq!(report.candidates, 1);
+        assert_eq!(report.candidate_drafts, vec!["project:use-vitest"]);
         assert!(draft::load_drafts(temp.path()).expect("drafts").is_empty());
     }
 

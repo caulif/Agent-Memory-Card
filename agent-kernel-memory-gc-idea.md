@@ -59,6 +59,7 @@
 - v0.38 范围：本地提取器识别 Fetch -> Axios 这类高频 HTTP 客户端偏好纠正，归一化为稳定 `project:use-axios` Draft。
 - v0.39 范围：引入 Known Preference Registry，把 Bun、Axios、Vitest 等高置信偏好归一化改为表驱动，后续扩展更多 Skilllet 模板时只需增加条目。
 - v0.40 范围：Observation Synthesis / Evolve 报告返回具体 Draft ID 列表，让本地进化过程能解释“生成了哪些候选”，而不是只显示数量。
+- v0.41 范围：Observation dry-run 报告也返回候选 Draft ID，让 UI / CLI 在真正写入 Draft Inbox 前就能展示“将会生成哪些候选”。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 JavaScript registry 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。

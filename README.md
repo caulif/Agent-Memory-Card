@@ -251,6 +251,12 @@ v0.40 improves evolution report explainability:
 2. `observe evolve` carries those Draft IDs through the one-command local evolution report.
 3. CLI and JSON consumers can show "what changed" instead of only counts.
 
+v0.41 improves dry-run evolution previews:
+
+1. Observation synthesis dry-runs now report candidate Draft IDs before writing files.
+2. One-command local evolution dry-runs carry the same candidate Draft IDs.
+3. This makes preview/review flows suitable for UI confirmation before Draft Inbox writes.
+
 ## Commands
 
 ```bash
