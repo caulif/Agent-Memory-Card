@@ -11,6 +11,8 @@ use crate::project_registry::{self, ProjectRegistry, RegisteredProject};
 use crate::review;
 use crate::skilllet;
 
+const APP_TITLE: &str = "Agent-Kernel";
+const APP_SUBTITLE: &str = "Local Skilllet evolution for Claude Code and Codex";
 const DRAFT_INBOX_TITLE: &str = "Draft Inbox";
 const CATALOG_TITLE: &str = "Skilllet Catalog";
 const SKILLLET_MATRIX_TITLE: &str = "Skilllet Target Matrix";
@@ -21,6 +23,148 @@ const INSTALL_CLAUDE_LABEL: &str = "Install to Claude Code";
 const CONFIDENCE_LABEL: &str = "Confidence";
 const MATCHED_TEMPLATE_LABEL: &str = "Matched Template";
 const REASON_LABEL: &str = "Reason";
+const SIDEBAR_SCROLL_ID: &str = "native-project-sidebar-scroll";
+const DRAFT_SCROLL_ID: &str = "native-draft-inbox-scroll";
+const CATALOG_SCROLL_ID: &str = "native-catalog-scroll";
+const MATRIX_SCROLL_ID: &str = "native-skilllet-matrix-scroll";
+const OUTPUT_SCROLL_ID: &str = "native-output-scroll";
+
+#[derive(Debug, Clone, Copy)]
+struct UiPalette {
+    background: egui::Color32,
+    sidebar: egui::Color32,
+    card: egui::Color32,
+    card_alt: egui::Color32,
+    border: egui::Color32,
+    text: egui::Color32,
+    muted: egui::Color32,
+    accent: egui::Color32,
+    accent_soft: egui::Color32,
+    success: egui::Color32,
+    danger: egui::Color32,
+}
+
+fn ui_palette() -> UiPalette {
+    UiPalette {
+        background: egui::Color32::from_rgb(242, 244, 248),
+        sidebar: egui::Color32::from_rgb(232, 236, 243),
+        card: egui::Color32::from_rgb(255, 255, 255),
+        card_alt: egui::Color32::from_rgb(247, 249, 252),
+        border: egui::Color32::from_rgb(218, 224, 233),
+        text: egui::Color32::from_rgb(27, 31, 38),
+        muted: egui::Color32::from_rgb(103, 112, 126),
+        accent: egui::Color32::from_rgb(0, 113, 227),
+        accent_soft: egui::Color32::from_rgb(224, 239, 255),
+        success: egui::Color32::from_rgb(35, 132, 67),
+        danger: egui::Color32::from_rgb(190, 61, 61),
+    }
+}
+
+fn configure_native_style(ctx: &egui::Context) {
+    let palette = ui_palette();
+    let mut style = (*ctx.global_style()).clone();
+    style.visuals = egui::Visuals::light();
+    style.visuals.panel_fill = palette.background;
+    style.visuals.window_fill = palette.card;
+    style.visuals.window_stroke = egui::Stroke::new(1.0, palette.border);
+    style.visuals.window_corner_radius = egui::CornerRadius::same(18);
+    style.visuals.menu_corner_radius = egui::CornerRadius::same(12);
+    style.visuals.faint_bg_color = palette.card_alt;
+    style.visuals.extreme_bg_color = palette.card;
+    style.visuals.hyperlink_color = palette.accent;
+    style.visuals.selection.bg_fill = palette.accent_soft;
+    style.visuals.selection.stroke = egui::Stroke::new(1.0, palette.accent);
+    style.visuals.widgets.noninteractive.bg_fill = palette.card;
+    style.visuals.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, palette.border);
+    style.visuals.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, palette.text);
+    style.visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(12);
+    style.visuals.widgets.inactive.bg_fill = palette.card_alt;
+    style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, palette.border);
+    style.visuals.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, palette.text);
+    style.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(10);
+    style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(238, 244, 252);
+    style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, palette.accent);
+    style.visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, palette.text);
+    style.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(10);
+    style.visuals.widgets.active.bg_fill = palette.accent_soft;
+    style.visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, palette.accent);
+    style.visuals.widgets.active.fg_stroke = egui::Stroke::new(1.0, palette.text);
+    style.visuals.widgets.active.corner_radius = egui::CornerRadius::same(10);
+    style.spacing.item_spacing = egui::vec2(8.0, 8.0);
+    style.spacing.button_padding = egui::vec2(12.0, 7.0);
+    style.spacing.window_margin = egui::Margin::same(18);
+    ctx.set_global_style(style);
+}
+
+fn page_frame() -> egui::Frame {
+    let palette = ui_palette();
+    egui::Frame::new()
+        .fill(palette.background)
+        .inner_margin(egui::Margin::same(18))
+}
+
+fn sidebar_frame() -> egui::Frame {
+    let palette = ui_palette();
+    egui::Frame::new()
+        .fill(palette.sidebar)
+        .stroke(egui::Stroke::new(1.0, palette.border))
+        .corner_radius(egui::CornerRadius::same(22))
+        .inner_margin(egui::Margin::same(16))
+}
+
+fn card_frame() -> egui::Frame {
+    let palette = ui_palette();
+    egui::Frame::new()
+        .fill(palette.card)
+        .stroke(egui::Stroke::new(1.0, palette.border))
+        .corner_radius(egui::CornerRadius::same(18))
+        .inner_margin(egui::Margin::same(16))
+        .outer_margin(egui::Margin::symmetric(0, 7))
+}
+
+fn subtle_card_frame() -> egui::Frame {
+    let palette = ui_palette();
+    egui::Frame::new()
+        .fill(palette.card_alt)
+        .stroke(egui::Stroke::new(1.0, palette.border))
+        .corner_radius(egui::CornerRadius::same(14))
+        .inner_margin(egui::Margin::same(12))
+        .outer_margin(egui::Margin::symmetric(0, 5))
+}
+
+fn primary_button(label: &'static str) -> egui::Button<'static> {
+    let palette = ui_palette();
+    egui::Button::new(
+        egui::RichText::new(label)
+            .color(egui::Color32::WHITE)
+            .strong(),
+    )
+    .fill(palette.accent)
+    .stroke(egui::Stroke::NONE)
+    .corner_radius(egui::CornerRadius::same(12))
+    .min_size(egui::vec2(0.0, 34.0))
+}
+
+fn secondary_button(label: &'static str) -> egui::Button<'static> {
+    let palette = ui_palette();
+    egui::Button::new(egui::RichText::new(label).color(palette.text))
+        .fill(palette.card)
+        .stroke(egui::Stroke::new(1.0, palette.border))
+        .corner_radius(egui::CornerRadius::same(12))
+        .min_size(egui::vec2(0.0, 34.0))
+}
+
+fn danger_button(label: &'static str) -> egui::Button<'static> {
+    let palette = ui_palette();
+    egui::Button::new(egui::RichText::new(label).color(palette.danger).strong())
+        .fill(egui::Color32::from_rgb(255, 245, 245))
+        .stroke(egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgb(245, 200, 200),
+        ))
+        .corner_radius(egui::CornerRadius::same(12))
+        .min_size(egui::vec2(0.0, 34.0))
+}
 
 #[cfg(test)]
 mod tests {
@@ -93,6 +237,25 @@ mod tests {
         assert_eq!(CONFIDENCE_LABEL, "Confidence");
         assert_eq!(MATCHED_TEMPLATE_LABEL, "Matched Template");
         assert_eq!(REASON_LABEL, "Reason");
+    }
+
+    #[test]
+    fn native_modern_ui_tokens_are_stable() {
+        assert_eq!(APP_TITLE, "Agent-Kernel");
+        assert_eq!(
+            APP_SUBTITLE,
+            "Local Skilllet evolution for Claude Code and Codex"
+        );
+        assert_eq!(SIDEBAR_SCROLL_ID, "native-project-sidebar-scroll");
+        assert_eq!(DRAFT_SCROLL_ID, "native-draft-inbox-scroll");
+        assert_eq!(CATALOG_SCROLL_ID, "native-catalog-scroll");
+        assert_eq!(MATRIX_SCROLL_ID, "native-skilllet-matrix-scroll");
+        assert_eq!(OUTPUT_SCROLL_ID, "native-output-scroll");
+
+        let palette = ui_palette();
+        assert!(palette.background.r() > 235);
+        assert!(palette.card.r() > palette.background.r());
+        assert!(palette.accent.b() > palette.accent.r());
     }
 
     #[test]
@@ -214,9 +377,12 @@ pub fn run(home: PathBuf, scan_roots: Vec<PathBuf>, max_depth: usize) -> Result<
     };
 
     eframe::run_native(
-        "Agent-Kernel",
+        APP_TITLE,
         options,
-        Box::new(move |_cc| Ok(Box::new(AgentKernelApp::new(home, roots, max_depth)))),
+        Box::new(move |cc| {
+            configure_native_style(&cc.egui_ctx);
+            Ok(Box::new(AgentKernelApp::new(home, roots, max_depth)))
+        }),
     )
     .map_err(|err| anyhow!(err.to_string()))
 }
@@ -475,293 +641,539 @@ impl AgentKernelApp {
 
 impl eframe::App for AgentKernelApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        ui.horizontal(|ui| {
-            ui.heading("Agent-Kernel");
-            ui.separator();
-            ui.label("Native project console for Claude Code / Codex Skilllet evolution");
-        });
-        ui.separator();
-
-        ui.columns(2, |columns| {
-            self.render_project_list(&mut columns[0]);
-            self.render_project_workspace(&mut columns[1]);
+        page_frame().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(330.0, ui.available_height()),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| self.render_project_list(ui),
+                );
+                ui.add_space(14.0);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), ui.available_height()),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| self.render_project_workspace(ui),
+                );
+            });
         });
     }
 }
 
 impl AgentKernelApp {
     fn render_project_list(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.heading("Projects");
-            if ui.button("Scan").clicked() {
-                self.refresh_with_scan();
-            }
-        });
-        ui.label(format!(
-            "Registry: {}",
-            project_registry::registry_path(&self.home).display()
-        ));
-        ui.add_space(8.0);
+        let palette = ui_palette();
+        sidebar_frame().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new(APP_TITLE)
+                            .size(24.0)
+                            .strong()
+                            .color(palette.text),
+                    );
+                    ui.label(
+                        egui::RichText::new(APP_SUBTITLE)
+                            .size(13.0)
+                            .color(palette.muted),
+                    );
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.add(secondary_button("Scan")).clicked() {
+                        self.refresh_with_scan();
+                    }
+                });
+            });
+            ui.add_space(14.0);
+            ui.label(
+                egui::RichText::new(format!(
+                    "Registry\n{}",
+                    project_registry::registry_path(&self.home).display()
+                ))
+                .size(11.0)
+                .color(palette.muted),
+            );
+            ui.add_space(14.0);
 
-        if self.registry.projects.is_empty() {
-            ui.label("No projects found yet.");
-        }
-
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for project in &self.registry.projects {
-                let selected = self.selected_path.as_deref() == Some(project.path.as_str());
-                if ui
-                    .selectable_label(
-                        selected,
-                        format!("{}  [{}]", project.name, project.agents.join(", ")),
-                    )
-                    .clicked()
-                {
-                    self.selected_path = Some(project.path.clone());
-                }
-                ui.small(&project.path);
-                ui.add_space(6.0);
+            if self.registry.projects.is_empty() {
+                subtle_card_frame().show(ui, |ui| {
+                    ui.label(egui::RichText::new("No projects found yet.").color(palette.muted));
+                });
+                return;
             }
+
+            egui::ScrollArea::vertical()
+                .id_salt(SIDEBAR_SCROLL_ID)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    for project in &self.registry.projects {
+                        let selected = self.selected_path.as_deref() == Some(project.path.as_str());
+                        let fill = if selected {
+                            palette.accent_soft
+                        } else {
+                            palette.card
+                        };
+                        let stroke = if selected {
+                            egui::Stroke::new(1.0, palette.accent)
+                        } else {
+                            egui::Stroke::new(1.0, palette.border)
+                        };
+                        egui::Frame::new()
+                            .fill(fill)
+                            .stroke(stroke)
+                            .corner_radius(egui::CornerRadius::same(16))
+                            .inner_margin(egui::Margin::same(12))
+                            .outer_margin(egui::Margin::symmetric(0, 5))
+                            .show(ui, |ui| {
+                                if ui
+                                    .add(
+                                        egui::Button::new(
+                                            egui::RichText::new(&project.name)
+                                                .strong()
+                                                .color(palette.text),
+                                        )
+                                        .fill(egui::Color32::TRANSPARENT)
+                                        .stroke(egui::Stroke::NONE)
+                                        .corner_radius(egui::CornerRadius::same(12)),
+                                    )
+                                    .clicked()
+                                {
+                                    self.selected_path = Some(project.path.clone());
+                                }
+                                ui.label(
+                                    egui::RichText::new(project.agents.join("  /  "))
+                                        .size(12.0)
+                                        .color(palette.accent),
+                                );
+                                ui.label(
+                                    egui::RichText::new(&project.path)
+                                        .size(11.0)
+                                        .color(palette.muted),
+                                );
+                            });
+                    }
+                });
         });
     }
 
     fn render_project_workspace(&mut self, ui: &mut egui::Ui) {
-        if !self.status.is_empty() {
-            ui.label(&self.status);
-            ui.separator();
-        }
+        let palette = ui_palette();
 
         let Some(project) = self.selected_project() else {
-            ui.heading("Select a project");
-            ui.label("Scan common local folders or register a project from the CLI.");
+            card_frame().show(ui, |ui| {
+                ui.heading("Select a project");
+                ui.label("Scan common local folders or register a project from the CLI.");
+            });
             return;
         };
 
-        ui.heading(&project.name);
-        ui.monospace(&project.path);
-        ui.add_space(8.0);
+        egui::ScrollArea::vertical()
+            .id_salt("native-project-workspace-scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                card_frame().show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(
+                                egui::RichText::new(&project.name)
+                                    .size(26.0)
+                                    .strong()
+                                    .color(palette.text),
+                            );
+                            ui.label(egui::RichText::new(&project.path).color(palette.muted));
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                egui::RichText::new(&self.status)
+                                    .size(12.0)
+                                    .color(palette.muted),
+                            );
+                        });
+                    });
+                    ui.add_space(12.0);
+                    ui.horizontal_wrapped(|ui| {
+                        for agent in &project.agents {
+                            Self::pill(ui, &format!("Agent: {agent}"), palette.accent_soft);
+                        }
+                        for marker in &project.markers {
+                            Self::pill(ui, &format!("Marker: {marker}"), palette.card_alt);
+                        }
+                    });
+                    ui.add_space(14.0);
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.add(secondary_button("Open Folder")).clicked() {
+                            let _ = open::that(&project.path);
+                        }
+                        if ui.add(secondary_button("Review")).clicked() {
+                            self.review_selected();
+                        }
+                        if ui
+                            .add(secondary_button("Preview Conversation Evolution"))
+                            .clicked()
+                        {
+                            self.evolve_selected(true);
+                        }
+                        if ui
+                            .add(primary_button("Evolve Conversations to Drafts"))
+                            .clicked()
+                        {
+                            self.evolve_selected(false);
+                        }
+                    });
+                });
 
-        ui.horizontal_wrapped(|ui| {
-            for agent in &project.agents {
-                ui.label(format!("Agent: {agent}"));
-            }
-            for marker in &project.markers {
-                ui.label(format!("Marker: {marker}"));
-            }
-        });
+                self.render_draft_inbox(ui, &project);
+                self.render_catalog_store(ui, &project);
+                self.render_skilllet_matrix(ui, &project);
+                self.render_output(ui);
+            });
+    }
 
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            if ui.button("Open Folder").clicked() {
-                let _ = open::that(&project.path);
-            }
-            if ui.button("Review").clicked() {
-                self.review_selected();
-            }
-            if ui.button("Preview Conversation Evolution").clicked() {
-                self.evolve_selected(true);
-            }
-            if ui.button("Evolve Conversations to Drafts").clicked() {
-                self.evolve_selected(false);
-            }
-        });
+    fn pill(ui: &mut egui::Ui, text: &str, fill: egui::Color32) {
+        let palette = ui_palette();
+        egui::Frame::new()
+            .fill(fill)
+            .stroke(egui::Stroke::new(1.0, palette.border))
+            .corner_radius(egui::CornerRadius::same(99))
+            .inner_margin(egui::Margin::symmetric(10, 5))
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new(text).size(12.0).color(palette.text));
+            });
+    }
 
-        ui.add_space(12.0);
-        self.render_draft_inbox(ui, &project);
-        ui.add_space(12.0);
-        self.render_catalog_store(ui, &project);
-        ui.add_space(12.0);
-        self.render_skilllet_matrix(ui, &project);
-        ui.add_space(12.0);
-        ui.separator();
-        ui.heading("Output");
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            if self.report.is_empty() {
-                ui.label("Run Review or Conversation Evolution to inspect this project.");
-            } else {
-                ui.monospace(&self.report);
-            }
+    fn render_output(&mut self, ui: &mut egui::Ui) {
+        let palette = ui_palette();
+        card_frame().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("Output")
+                        .size(18.0)
+                        .strong()
+                        .color(palette.text),
+                );
+                ui.label(egui::RichText::new("Latest command result").color(palette.muted));
+            });
+            ui.add_space(8.0);
+            egui::Frame::new()
+                .fill(palette.card_alt)
+                .corner_radius(egui::CornerRadius::same(14))
+                .inner_margin(egui::Margin::same(12))
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt(OUTPUT_SCROLL_ID)
+                        .max_height(180.0)
+                        .show(ui, |ui| {
+                            if self.report.is_empty() {
+                                ui.label(
+                                    egui::RichText::new(
+                                        "Run Review or Conversation Evolution to inspect this project.",
+                                    )
+                                    .color(palette.muted),
+                                );
+                            } else {
+                                ui.monospace(&self.report);
+                            }
+                        });
+                });
         });
     }
 
     fn render_draft_inbox(&mut self, ui: &mut egui::Ui, project: &RegisteredProject) {
-        ui.heading(DRAFT_INBOX_TITLE);
-        let drafts = match draft::load_drafts(&PathBuf::from(&project.path)) {
-            Ok(drafts) => drafts,
-            Err(err) => {
-                ui.label(format!("Could not load drafts: {err}"));
-                return;
-            }
-        };
-
-        if drafts.is_empty() {
-            ui.label("No pending drafts.");
-            return;
-        }
-
-        let mut decision: Option<(String, bool)> = None;
-        egui::ScrollArea::vertical()
-            .max_height(240.0)
-            .show(ui, |ui| {
-                for draft in &drafts {
-                    ui.group(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.strong(&draft.title);
-                            ui.label(format!("[{} / {}]", draft.kind, draft.scope));
-                        });
-                        ui.monospace(&draft.id);
-                        ui.label(&draft.body);
-                        if !draft.targets.is_empty() {
-                            ui.small(format!("Targets: {}", draft.targets.join(", ")));
-                        }
-                        if let Some(confidence) = draft.confidence {
-                            ui.small(format!("{CONFIDENCE_LABEL}: {:.0}%", confidence * 100.0));
-                        }
-                        if let Some(template) = draft.matched_template.as_deref() {
-                            ui.small(format!("{MATCHED_TEMPLATE_LABEL}: {template}"));
-                        }
-                        if let Some(reason) = draft.reason.as_deref() {
-                            ui.small(format!("{REASON_LABEL}: {reason}"));
-                        }
-                        ui.horizontal(|ui| {
-                            if ui.button(APPROVE_LABEL).clicked() {
-                                decision = Some((draft.id.clone(), true));
-                            }
-                            if ui.button(REJECT_LABEL).clicked() {
-                                decision = Some((draft.id.clone(), false));
-                            }
-                        });
-                    });
-                    ui.add_space(6.0);
-                }
+        let palette = ui_palette();
+        card_frame().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(DRAFT_INBOX_TITLE)
+                        .size(18.0)
+                        .strong()
+                        .color(palette.text),
+                );
+                ui.label(
+                    egui::RichText::new("Review before enabling generated Skilllets")
+                        .color(palette.muted),
+                );
             });
 
-        if let Some((draft_id, approve)) = decision {
-            self.decide_draft_for_selected(&draft_id, approve);
-        }
+            let drafts = match draft::load_drafts(&PathBuf::from(&project.path)) {
+                Ok(drafts) => drafts,
+                Err(err) => {
+                    ui.label(format!("Could not load drafts: {err}"));
+                    return;
+                }
+            };
+
+            if drafts.is_empty() {
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new("No pending drafts.").color(palette.muted));
+                return;
+            }
+
+            let mut decision: Option<(String, bool)> = None;
+            egui::ScrollArea::vertical()
+                .id_salt(DRAFT_SCROLL_ID)
+                .max_height(260.0)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    for draft in &drafts {
+                        subtle_card_frame().show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(&draft.title)
+                                        .strong()
+                                        .color(palette.text),
+                                );
+                                Self::pill(ui, &draft.kind, palette.accent_soft);
+                                Self::pill(ui, &draft.scope, palette.card);
+                            });
+                            ui.monospace(&draft.id);
+                            ui.label(egui::RichText::new(&draft.body).color(palette.text));
+                            if !draft.targets.is_empty() {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "Targets: {}",
+                                        draft.targets.join(", ")
+                                    ))
+                                    .size(12.0)
+                                    .color(palette.muted),
+                                );
+                            }
+                            if let Some(confidence) = draft.confidence {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{CONFIDENCE_LABEL}: {:.0}%",
+                                        confidence * 100.0
+                                    ))
+                                    .size(12.0)
+                                    .color(palette.success),
+                                );
+                            }
+                            if let Some(template) = draft.matched_template.as_deref() {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{MATCHED_TEMPLATE_LABEL}: {template}"
+                                    ))
+                                    .size(12.0)
+                                    .color(palette.muted),
+                                );
+                            }
+                            if let Some(reason) = draft.reason.as_deref() {
+                                ui.label(
+                                    egui::RichText::new(format!("{REASON_LABEL}: {reason}"))
+                                        .size(12.0)
+                                        .color(palette.muted),
+                                );
+                            }
+                            ui.horizontal(|ui| {
+                                if ui.add(primary_button(APPROVE_LABEL)).clicked() {
+                                    decision = Some((draft.id.clone(), true));
+                                }
+                                if ui.add(danger_button(REJECT_LABEL)).clicked() {
+                                    decision = Some((draft.id.clone(), false));
+                                }
+                            });
+                        });
+                    }
+                });
+
+            if let Some((draft_id, approve)) = decision {
+                self.decide_draft_for_selected(&draft_id, approve);
+            }
+        });
     }
 
     fn render_catalog_store(&mut self, ui: &mut egui::Ui, project: &RegisteredProject) {
-        ui.heading(CATALOG_TITLE);
-        let root = PathBuf::from(&project.path);
-        let validation = match catalog::load_or_default_catalog(&root) {
-            Ok(catalog) => catalog::validate_catalog(&catalog),
-            Err(err) => {
-                ui.label(format!("Could not load catalog: {err}"));
-                return;
-            }
-        };
-        ui.label(format!(
-            "Catalog Health: {} errors, {} warnings",
-            validation.errors, validation.warnings
-        ));
-
-        let status = match catalog::catalog_status(&root) {
-            Ok(status) => status,
-            Err(err) => {
-                ui.label(format!("Could not load catalog status: {err}"));
-                return;
-            }
-        };
-
-        if status.items.is_empty() {
-            ui.label("No catalog packages found.");
-            return;
-        }
-
-        let mut install: Option<(String, Vec<String>)> = None;
-        egui::ScrollArea::vertical()
-            .max_height(280.0)
-            .show(ui, |ui| {
-                for item in &status.items {
-                    ui.group(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.strong(&item.package.title);
-                            ui.label(if item.installed {
-                                "[installed]"
-                            } else {
-                                "[available]"
-                            });
-                            ui.small(format!("@{}", item.package.version));
-                        });
-                        ui.monospace(&item.package.id);
-                        ui.label(&item.package.description);
-                        ui.small(format!("Source: {}", item.package.source_url));
-                        if !item.package.tags.is_empty() {
-                            ui.small(format!("Tags: {}", item.package.tags.join(", ")));
-                        }
-                        ui.horizontal(|ui| {
-                            if ui.button(INSTALL_CODEX_LABEL).clicked() {
-                                install =
-                                    Some((item.package.id.clone(), vec!["codex".to_string()]));
-                            }
-                            if ui.button(INSTALL_CLAUDE_LABEL).clicked() {
-                                install = Some((
-                                    item.package.id.clone(),
-                                    vec!["claude-code".to_string()],
-                                ));
-                            }
-                        });
-                    });
-                    ui.add_space(6.0);
-                }
+        let palette = ui_palette();
+        card_frame().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(CATALOG_TITLE)
+                        .size(18.0)
+                        .strong()
+                        .color(palette.text),
+                );
+                ui.label(egui::RichText::new("Local App Store").color(palette.muted));
             });
 
-        if let Some((package_id, targets)) = install {
-            self.install_catalog_for_selected(&package_id, targets);
-        }
+            let root = PathBuf::from(&project.path);
+            let validation = match catalog::load_or_default_catalog(&root) {
+                Ok(catalog) => catalog::validate_catalog(&catalog),
+                Err(err) => {
+                    ui.label(format!("Could not load catalog: {err}"));
+                    return;
+                }
+            };
+            ui.label(
+                egui::RichText::new(format!(
+                    "Catalog Health: {} errors, {} warnings",
+                    validation.errors, validation.warnings
+                ))
+                .size(12.0)
+                .color(palette.muted),
+            );
+
+            let status = match catalog::catalog_status(&root) {
+                Ok(status) => status,
+                Err(err) => {
+                    ui.label(format!("Could not load catalog status: {err}"));
+                    return;
+                }
+            };
+
+            if status.items.is_empty() {
+                ui.label(egui::RichText::new("No catalog packages found.").color(palette.muted));
+                return;
+            }
+
+            let mut install: Option<(String, Vec<String>)> = None;
+            egui::ScrollArea::vertical()
+                .id_salt(CATALOG_SCROLL_ID)
+                .max_height(300.0)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    for item in &status.items {
+                        subtle_card_frame().show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(&item.package.title)
+                                        .strong()
+                                        .color(palette.text),
+                                );
+                                let status_text = if item.installed {
+                                    "installed"
+                                } else {
+                                    "available"
+                                };
+                                let status_color = if item.installed {
+                                    palette.success
+                                } else {
+                                    palette.accent
+                                };
+                                ui.label(
+                                    egui::RichText::new(status_text)
+                                        .size(12.0)
+                                        .color(status_color),
+                                );
+                                ui.label(
+                                    egui::RichText::new(format!("@{}", item.package.version))
+                                        .size(12.0)
+                                        .color(palette.muted),
+                                );
+                            });
+                            ui.monospace(&item.package.id);
+                            ui.label(
+                                egui::RichText::new(&item.package.description).color(palette.text),
+                            );
+                            ui.label(
+                                egui::RichText::new(format!("Source: {}", item.package.source_url))
+                                    .size(11.0)
+                                    .color(palette.muted),
+                            );
+                            if !item.package.tags.is_empty() {
+                                ui.horizontal_wrapped(|ui| {
+                                    for tag in &item.package.tags {
+                                        Self::pill(ui, tag, palette.card);
+                                    }
+                                });
+                            }
+                            ui.horizontal(|ui| {
+                                if ui.add(secondary_button(INSTALL_CODEX_LABEL)).clicked() {
+                                    install =
+                                        Some((item.package.id.clone(), vec!["codex".to_string()]));
+                                }
+                                if ui.add(secondary_button(INSTALL_CLAUDE_LABEL)).clicked() {
+                                    install = Some((
+                                        item.package.id.clone(),
+                                        vec!["claude-code".to_string()],
+                                    ));
+                                }
+                            });
+                        });
+                    }
+                });
+
+            if let Some((package_id, targets)) = install {
+                self.install_catalog_for_selected(&package_id, targets);
+            }
+        });
     }
 
     fn render_skilllet_matrix(&mut self, ui: &mut egui::Ui, project: &RegisteredProject) {
-        ui.heading(SKILLLET_MATRIX_TITLE);
-        let matrix = match skilllet::skilllet_target_matrix(&PathBuf::from(&project.path)) {
-            Ok(matrix) => matrix,
-            Err(err) => {
-                ui.label(format!("Could not load skilllet matrix: {err}"));
-                return;
-            }
-        };
-
-        if matrix.rows.is_empty() {
-            ui.label("No skilllets found.");
-            return;
-        }
-
-        let mut toggle: Option<(String, String)> = None;
-        egui::ScrollArea::vertical()
-            .max_height(260.0)
-            .show(ui, |ui| {
-                egui::Grid::new("native-skilllet-target-matrix")
-                    .striped(true)
-                    .show(ui, |ui| {
-                        ui.strong("Skilllet");
-                        for agent in &matrix.agents {
-                            ui.strong(agent);
-                        }
-                        ui.end_row();
-
-                        for row in &matrix.rows {
-                            ui.label(&row.title);
-                            for agent in &matrix.agents {
-                                let assigned = row.targets.get(agent).copied().unwrap_or(false);
-                                let label = if assigned { "assigned" } else { "off" };
-                                if ui.button(label).clicked() {
-                                    toggle = Some((row.skilllet_id.clone(), agent.clone()));
-                                }
-                            }
-                            ui.end_row();
-
-                            ui.small(&row.skilllet_id);
-                            for _ in &matrix.agents {
-                                ui.label("");
-                            }
-                            ui.end_row();
-                        }
-                    });
+        let palette = ui_palette();
+        card_frame().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(SKILLLET_MATRIX_TITLE)
+                        .size(18.0)
+                        .strong()
+                        .color(palette.text),
+                );
+                ui.label(egui::RichText::new("Assign Skilllets per Agent").color(palette.muted));
             });
 
-        if let Some((skilllet_id, agent)) = toggle {
-            self.toggle_skilllet_target_for_selected(&skilllet_id, &agent);
-        }
+            let matrix = match skilllet::skilllet_target_matrix(&PathBuf::from(&project.path)) {
+                Ok(matrix) => matrix,
+                Err(err) => {
+                    ui.label(format!("Could not load skilllet matrix: {err}"));
+                    return;
+                }
+            };
+
+            if matrix.rows.is_empty() {
+                ui.label(egui::RichText::new("No skilllets found.").color(palette.muted));
+                return;
+            }
+
+            let mut toggle: Option<(String, String)> = None;
+            egui::ScrollArea::vertical()
+                .id_salt(MATRIX_SCROLL_ID)
+                .max_height(280.0)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    egui::Grid::new("native-skilllet-target-matrix")
+                        .striped(false)
+                        .spacing(egui::vec2(14.0, 8.0))
+                        .show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new("Skilllet")
+                                    .strong()
+                                    .color(palette.muted),
+                            );
+                            for agent in &matrix.agents {
+                                ui.label(egui::RichText::new(agent).strong().color(palette.muted));
+                            }
+                            ui.end_row();
+
+                            for row in &matrix.rows {
+                                ui.vertical(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(&row.title)
+                                            .strong()
+                                            .color(palette.text),
+                                    );
+                                    ui.label(
+                                        egui::RichText::new(&row.skilllet_id)
+                                            .size(11.0)
+                                            .color(palette.muted),
+                                    );
+                                });
+                                for agent in &matrix.agents {
+                                    let assigned = row.targets.get(agent).copied().unwrap_or(false);
+                                    let button = if assigned {
+                                        primary_button("Assigned")
+                                    } else {
+                                        secondary_button("Off")
+                                    };
+                                    if ui.add(button).clicked() {
+                                        toggle = Some((row.skilllet_id.clone(), agent.clone()));
+                                    }
+                                }
+                                ui.end_row();
+                            }
+                        });
+                });
+
+            if let Some((skilllet_id, agent)) = toggle {
+                self.toggle_skilllet_target_for_selected(&skilllet_id, &agent);
+            }
+        });
     }
 }
