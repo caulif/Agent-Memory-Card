@@ -49,6 +49,7 @@ const INSPECTOR_WIDTH: f32 = 376.0;
 const BOTTOM_BAR_HEIGHT: f32 = 80.0;
 const CANVAS_MIN_HEIGHT: f32 = 520.0;
 const CANVAS_SCROLL_ID: &str = "native-reference-canvas-scroll";
+const BUSY_REPAINT_INTERVAL_MS: u64 = 50;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UiPage {
@@ -354,6 +355,49 @@ fn search_box_frame() -> egui::Frame {
         .outer_margin(egui::Margin::ZERO)
 }
 
+fn render_search_input(ui: &mut egui::Ui, query: &mut String, hint: &str, width: f32) {
+    let palette = ui_palette();
+    search_box_frame().show(ui, |ui| {
+        ui.set_width(width);
+        ui.horizontal(|ui| {
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+            let center = rect.center() - egui::vec2(2.0, 2.0);
+            ui.painter()
+                .circle_stroke(center, 5.0, egui::Stroke::new(1.4, palette.muted));
+            ui.painter().line_segment(
+                [center + egui::vec2(4.0, 4.0), center + egui::vec2(8.0, 8.0)],
+                egui::Stroke::new(1.4, palette.muted),
+            );
+            ui.add(
+                egui::TextEdit::singleline(query)
+                    .hint_text(hint)
+                    .desired_width((width - 96.0).max(120.0)),
+            );
+            SelflessUi::soft_badge(ui, "Ctrl K", palette.card_alt, palette.muted);
+        });
+    });
+}
+
+struct SelflessUi;
+
+impl SelflessUi {
+    fn soft_badge(ui: &mut egui::Ui, text: &str, fill: egui::Color32, color: egui::Color32) {
+        egui::Frame::new()
+            .fill(fill)
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_white_alpha(120)))
+            .corner_radius(egui::CornerRadius::same(8))
+            .inner_margin(egui::Margin::symmetric(10, 6))
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new(text).size(12.0).color(color));
+            });
+    }
+}
+
+fn matches_search(query: &str, text: &str) -> bool {
+    let query = query.trim();
+    query.is_empty() || text.to_lowercase().contains(&query.to_lowercase())
+}
+
 fn primary_button(label: &'static str) -> egui::Button<'static> {
     let palette = ui_palette();
     egui::Button::new(
@@ -549,6 +593,42 @@ mod tests {
 
         let report =
             apply_native_draft_decision(temp.path(), "project:prefer-bun", false).expect("reject");
+
+        assert_eq!(report.summary.drafts_pending, 0);
+        assert!(draft::load_drafts(temp.path()).expect("drafts").is_empty());
+    }
+
+    #[test]
+    fn native_batch_draft_decision_handles_selected_drafts() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        for id in ["project:prefer-bun", "project:use-axios"] {
+            draft::add_draft(
+                temp.path(),
+                draft::NewDraft {
+                    id: id.to_string(),
+                    title: id.to_string(),
+                    body: "Batch draft.".to_string(),
+                    kind: "preference".to_string(),
+                    scope: "project".to_string(),
+                    targets: vec!["codex".to_string()],
+                    evidence: "native batch test".to_string(),
+                    confidence: None,
+                    reason: None,
+                    matched_template: None,
+                },
+            )
+            .expect("add draft");
+        }
+
+        let report = apply_native_draft_decisions(
+            temp.path(),
+            &[
+                "project:prefer-bun".to_string(),
+                "project:use-axios".to_string(),
+            ],
+            false,
+        )
+        .expect("batch reject");
 
         assert_eq!(report.summary.drafts_pending, 0);
         assert!(draft::load_drafts(temp.path()).expect("drafts").is_empty());
@@ -1199,6 +1279,7 @@ mod tests {
             active_page: UiPage::Overview,
             status: String::new(),
             report: String::new(),
+            search_query: String::new(),
             draft_edit: None,
             draft_selection: Vec::new(),
             merge_edit: None,
@@ -1263,6 +1344,7 @@ mod tests {
             active_page: UiPage::Overview,
             status: String::new(),
             report: String::new(),
+            search_query: String::new(),
             draft_edit: None,
             draft_selection: Vec::new(),
             merge_edit: None,
@@ -1303,6 +1385,7 @@ mod tests {
             active_page: UiPage::Overview,
             status: String::new(),
             report: String::new(),
+            search_query: String::new(),
             draft_edit: None,
             draft_selection: Vec::new(),
             merge_edit: None,
@@ -1335,6 +1418,19 @@ mod tests {
     }
 
     #[test]
+    fn native_app_startup_scan_runs_in_background() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let app = AgentKernelApp::new(temp.path().to_path_buf(), Vec::new(), 1);
+
+        assert!(
+            app.is_busy(),
+            "startup project scan should not block the window from opening"
+        );
+        assert_eq!(app.busy_task.as_deref(), Some("扫描项目"));
+        assert!(app.report.contains("正在扫描项目"));
+    }
+
+    #[test]
     fn native_cjk_font_candidates_cover_major_desktop_platforms() {
         let candidates = cjk_font_candidates();
         let joined = candidates
@@ -1361,6 +1457,7 @@ mod tests {
         assert_eq!(INSPECTOR_WIDTH, 376.0);
         assert_eq!(BOTTOM_BAR_HEIGHT, 80.0);
         assert_eq!(CANVAS_MIN_HEIGHT, 520.0);
+        assert_eq!(BUSY_REPAINT_INTERVAL_MS, 50);
     }
 
     #[test]
@@ -1399,6 +1496,14 @@ mod tests {
     }
 
     #[test]
+    fn native_search_filter_matches_case_insensitive_text() {
+        assert!(matches_search("bun", "Prefer Bun runtime"));
+        assert!(matches_search("AXIOS", "Use Axios for HTTP"));
+        assert!(matches_search("", "anything"));
+        assert!(!matches_search("poetry", "Use Bun runtime"));
+    }
+
+    #[test]
     fn native_project_selection_loads_cache_in_background() {
         let temp = tempfile::tempdir().expect("tempdir");
         let project_root = temp.path().join("project");
@@ -1422,6 +1527,7 @@ mod tests {
             active_page: UiPage::Overview,
             status: String::new(),
             report: String::new(),
+            search_query: String::new(),
             draft_edit: None,
             draft_selection: Vec::new(),
             merge_edit: None,
@@ -1471,17 +1577,31 @@ pub fn run(home: PathBuf, scan_roots: Vec<PathBuf>, max_depth: usize) -> Result<
     .map_err(|err| anyhow!(err.to_string()))
 }
 
+#[cfg(test)]
 fn apply_native_draft_decision(
     project_root: &Path,
     draft_id: &str,
     approve: bool,
 ) -> Result<review::ReviewReport> {
-    let decision = if approve {
-        review::ReviewDecision::ApproveDraft(draft_id.to_string())
-    } else {
-        review::ReviewDecision::RejectDraft(draft_id.to_string())
-    };
-    review::apply_review_decisions(project_root, &[decision])?;
+    apply_native_draft_decisions(project_root, &[draft_id.to_string()], approve)
+}
+
+fn apply_native_draft_decisions(
+    project_root: &Path,
+    draft_ids: &[String],
+    approve: bool,
+) -> Result<review::ReviewReport> {
+    let decisions = draft_ids
+        .iter()
+        .map(|draft_id| {
+            if approve {
+                review::ReviewDecision::ApproveDraft(draft_id.clone())
+            } else {
+                review::ReviewDecision::RejectDraft(draft_id.clone())
+            }
+        })
+        .collect::<Vec<_>>();
+    review::apply_review_decisions(project_root, &decisions)?;
     review::review_project(project_root)
 }
 
@@ -1566,6 +1686,7 @@ struct AgentKernelApp {
     active_page: UiPage,
     status: String,
     report: String,
+    search_query: String,
     draft_edit: Option<DraftEditState>,
     draft_selection: Vec<String>,
     merge_edit: Option<MergeEditState>,
@@ -1581,18 +1702,29 @@ struct AgentKernelApp {
 
 impl AgentKernelApp {
     fn new(home: PathBuf, scan_roots: Vec<PathBuf>, max_depth: usize) -> Self {
+        let registry = project_registry::load_registry(&home).unwrap_or_default();
+        let selected_path = registry
+            .projects
+            .first()
+            .map(|project| project.path.clone());
+        let status = if registry.projects.is_empty() {
+            "正在后台扫描本地项目。".to_string()
+        } else {
+            format!(
+                "已载入 {} 个缓存项目，正在后台刷新。",
+                registry.projects.len()
+            )
+        };
         let mut app = Self {
             home,
             scan_roots,
             max_depth,
-            registry: ProjectRegistry {
-                version: 1,
-                projects: Vec::new(),
-            },
-            selected_path: None,
+            registry,
+            selected_path,
             active_page: UiPage::Overview,
-            status: String::new(),
+            status,
             report: String::new(),
+            search_query: String::new(),
             draft_edit: None,
             draft_selection: Vec::new(),
             merge_edit: None,
@@ -1605,29 +1737,8 @@ impl AgentKernelApp {
             task_rx: None,
             busy_task: None,
         };
-        app.refresh_with_scan();
+        app.start_scan();
         app
-    }
-
-    fn refresh_with_scan(&mut self) {
-        match project_registry::scan_and_register(&self.home, &self.scan_roots, self.max_depth) {
-            Ok(report) => {
-                self.status = format!(
-                    "已扫描 {} 个项目，注册表共 {} 个项目。",
-                    report.discovered.len(),
-                    report.total
-                );
-                self.registry = project_registry::load_registry(&self.home).unwrap_or_default();
-                if self.selected_path.is_none() {
-                    self.selected_path = self.registry.projects.first().map(|p| p.path.clone());
-                }
-                self.refresh_project_cache_for_selected();
-            }
-            Err(err) => {
-                self.status = format!("扫描失败：{err}");
-                self.registry = project_registry::load_registry(&self.home).unwrap_or_default();
-            }
-        }
     }
 
     fn selected_project(&self) -> Option<RegisteredProject> {
@@ -1640,6 +1751,7 @@ impl AgentKernelApp {
     }
 
     /// 为当前选中的项目刷新缓存：drafts、catalog、skilllet matrix 各加载一次，避免渲染循环中重复 IO。
+    #[cfg(test)]
     fn refresh_project_cache_for_selected(&mut self) {
         let project = self.selected_project();
         self.apply_project_cache(load_project_cache(project.as_ref()));
@@ -1861,25 +1973,34 @@ impl AgentKernelApp {
     }
 
     fn decide_draft_for_selected(&mut self, draft_id: &str, approve: bool) {
+        self.decide_drafts_for_selected(vec![draft_id.to_string()], approve);
+    }
+
+    fn decide_drafts_for_selected(&mut self, draft_ids: Vec<String>, approve: bool) {
         let Some(project) = self.selected_project() else {
             self.report = "请先选择一个项目。".to_string();
             return;
         };
+        if draft_ids.is_empty() {
+            self.report = "请先选择至少一个候选。".to_string();
+            return;
+        }
         let root = PathBuf::from(&project.path);
         let task_project = project.clone();
-        let draft_id = draft_id.to_string();
         let label = if approve {
             "批准候选"
         } else {
             "拒绝候选"
         };
+        let count = draft_ids.len();
+        self.draft_selection.clear();
         self.start_task(label, move || {
-            match apply_native_draft_decision(&root, &draft_id, approve) {
+            match apply_native_draft_decisions(&root, &draft_ids, approve) {
                 Ok(report) => {
                     let action = if approve { "已批准" } else { "已拒绝" };
                     UiTaskResult::Report {
                         report: format!(
-                            "{action} `{draft_id}` -> {}\n\n待审候选：{}\n规则测试失败：{}\n产物漂移：{}",
+                            "{action} {count} 个候选 -> {}\n\n待审候选：{}\n规则测试失败：{}\n产物漂移：{}",
                             task_project.name,
                             report.summary.drafts_pending,
                             report.summary.rule_tests_failed,
@@ -1889,7 +2010,7 @@ impl AgentKernelApp {
                     }
                 }
                 Err(err) => UiTaskResult::Report {
-                    report: format!("候选处理失败：`{draft_id}`\n{err}"),
+                    report: format!("候选处理失败：{err}"),
                     cache: None,
                 },
             }
@@ -2066,7 +2187,8 @@ impl eframe::App for AgentKernelApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll_task_result();
         if self.is_busy() {
-            ui.ctx().request_repaint();
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(BUSY_REPAINT_INTERVAL_MS));
         }
 
         let palette = ui_palette();
@@ -2172,20 +2294,7 @@ impl AgentKernelApp {
         ui.add_space(16.0);
         let action_budget = if shell_width > 1380.0 { 620.0 } else { 430.0 };
         let search_width = (ui.available_width() - action_budget).clamp(220.0, 440.0);
-        search_box_frame().show(ui, |ui| {
-            ui.set_width(search_width);
-            ui.horizontal(|ui| {
-                self.paint_tiny_lens(ui, palette.muted);
-                ui.label(
-                    egui::RichText::new("搜索任何内容...")
-                        .size(14.0)
-                        .color(palette.muted),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    Self::soft_badge(ui, "Ctrl K", palette.card_alt, palette.muted);
-                });
-            });
-        });
+        render_search_input(ui, &mut self.search_query, "搜索任何内容...", search_width);
 
         ui.add_space(16.0);
         if shell_width > 1260.0 {
@@ -2808,7 +2917,11 @@ impl AgentKernelApp {
                             "/mirrors/prod/skill-index.json",
                             palette.success,
                         ),
-                    ] {
+                    ]
+                    .into_iter()
+                    .filter(|row| {
+                        matches_search(&self.search_query, &format!("{} {}", row.0, row.1))
+                    }) {
                         Self::soft_badge(ui, action, egui::Color32::from_rgb(232, 247, 239), color);
                         ui.label(kind);
                         ui.label(egui::RichText::new(path).size(12.0).color(palette.text));
@@ -3010,14 +3123,7 @@ impl AgentKernelApp {
         card_frame().show(ui, |ui| {
             ui.set_min_height(470.0);
             ui.horizontal(|ui| {
-                search_box_frame().show(ui, |ui| {
-                    ui.set_width(300.0);
-                    ui.label(
-                        egui::RichText::new("搜索 observations...")
-                            .size(13.0)
-                            .color(palette.muted),
-                    );
-                });
+                render_search_input(ui, &mut self.search_query, "搜索 observations...", 300.0);
                 if ui
                     .add_enabled(!self.is_busy(), secondary_button("Filters"))
                     .clicked()
@@ -3232,14 +3338,7 @@ impl AgentKernelApp {
             self.card_title(ui, DRAFT_INBOX_TITLE, "先审查，再固化为项目记忆");
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                search_box_frame().show(ui, |ui| {
-                    ui.set_width(260.0);
-                    ui.label(
-                        egui::RichText::new("搜索 Skilllet...")
-                            .size(13.0)
-                            .color(palette.muted),
-                    );
-                });
+                render_search_input(ui, &mut self.search_query, "搜索 Skilllet...", 260.0);
                 Self::soft_badge(ui, "所有来源", palette.card_alt, palette.muted);
                 Self::soft_badge(ui, "所有状态", palette.card_alt, palette.muted);
             });
@@ -3279,7 +3378,16 @@ impl AgentKernelApp {
                             });
                         }
                     }
-                    for row in rows.iter().take(7) {
+                    for row in rows
+                        .iter()
+                        .filter(|row| {
+                            matches_search(
+                                &self.search_query,
+                                &format!("{} {}", row.title, row.skilllet_id),
+                            )
+                        })
+                        .take(7)
+                    {
                         ui.label(egui::RichText::new(&row.title).strong().color(palette.text));
                         ui.label(
                             egui::RichText::new("优先使用本地、可审查、可编译的轻量记忆。")
@@ -3471,27 +3579,27 @@ impl AgentKernelApp {
 
         card_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
-                search_box_frame().show(ui, |ui| {
-                    ui.set_width(320.0);
-                    ui.label(
-                        egui::RichText::new("搜索草稿标题、来源或摘要...")
-                            .size(13.0)
-                            .color(palette.muted),
-                    );
-                });
+                render_search_input(
+                    ui,
+                    &mut self.search_query,
+                    "搜索草稿标题、来源或摘要...",
+                    320.0,
+                );
+                let has_selection = !self.draft_selection.is_empty();
                 if ui
-                    .add_enabled(!self.is_busy(), secondary_button("批量批准"))
+                    .add_enabled(
+                        !self.is_busy() && has_selection,
+                        secondary_button("批准选中"),
+                    )
                     .clicked()
-                    && let Some(first) = drafts.first()
                 {
-                    decision = Some((first.id.clone(), true));
+                    self.decide_drafts_for_selected(self.draft_selection.clone(), true);
                 }
                 if ui
-                    .add_enabled(!self.is_busy(), danger_button("批量拒绝"))
+                    .add_enabled(!self.is_busy() && has_selection, danger_button("拒绝选中"))
                     .clicked()
-                    && let Some(first) = drafts.first()
                 {
-                    decision = Some((first.id.clone(), false));
+                    self.decide_drafts_for_selected(self.draft_selection.clone(), false);
                 }
             });
             ui.add_space(10.0);
@@ -3537,7 +3645,12 @@ impl AgentKernelApp {
                         drafts.to_vec()
                     };
 
-                    for draft in &display_drafts {
+                    for draft in display_drafts.iter().filter(|draft| {
+                        matches_search(
+                            &self.search_query,
+                            &format!("{} {} {}", draft.title, draft.body, draft.id),
+                        )
+                    }) {
                         let selected = self.draft_selection.contains(&draft.id);
                         let stroke = if selected {
                             egui::Stroke::new(1.2, palette.accent)
@@ -4335,17 +4448,6 @@ impl AgentKernelApp {
             text,
             egui::FontId::proportional(11.0),
             color,
-        );
-    }
-
-    fn paint_tiny_lens(&self, ui: &mut egui::Ui, color: egui::Color32) {
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
-        let center = rect.center() - egui::vec2(2.0, 2.0);
-        ui.painter()
-            .circle_stroke(center, 5.0, egui::Stroke::new(1.4, color));
-        ui.painter().line_segment(
-            [center + egui::vec2(4.0, 4.0), center + egui::vec2(8.0, 8.0)],
-            egui::Stroke::new(1.4, color),
         );
     }
 
