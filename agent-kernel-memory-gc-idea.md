@@ -44,6 +44,7 @@
 - v0.23 范围：加入 Agent target 启停控制，CLI 与 Canvas 都能切换 Agent enabled 状态，降低手改声明式 YAML 的门槛。
 - v0.24 范围：加入 Skilllet target assignment，CLI/UI 都能把同一 Skilllet 分配给不同 Agent，强化 Project 层 multi-agent 配置体验。
 - v0.25 范围：加入 Skilllet target matrix，CLI/UI 都能总览 Skilllet × Agent 分配关系，为后续拖拽连线和批量操作打底。
+- v0.26 范围：实现 Cline 原生规则目录 exporter，将 Cline 目标编译为 `.clinerules/agent-kernel.md`，并兼容早期 `.clinerules` 单文件配置迁移。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 npm 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。
@@ -135,6 +136,7 @@ Cline 的 Memory Bank 是一个结构化 Markdown 文档体系：
 - 通过 “initialize memory bank”“update memory bank”“follow your custom instructions” 等命令维护。
 - `/smol` 和 `/newtask` 用于压缩上下文或新任务交接。
 - 文档强调 Memory Bank 文件要短，详细信息应拆成按需读取的文档。
+- `.clinerules/` 目录适合作为项目级规则面，Agent-Kernel 应把自己的规则写成其中一个可审查的 build artifact，而不是独占整个 Cline 规则空间。
 
 关键启发：
 

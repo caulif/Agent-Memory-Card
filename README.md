@@ -160,6 +160,12 @@ v0.25 adds a Skilllet target matrix:
 2. `/api/skilllet/matrix` exposes the matrix to the Canvas.
 3. The inspector shows a compact target summary for each Skilllet.
 
+v0.26 adds the Cline rules exporter:
+
+1. Cline now uses a native rules directory export at `.clinerules/agent-kernel.md`.
+2. Legacy project configs that used `instructions: .clinerules` are migrated in memory to `rules_dir: .clinerules`.
+3. Cursor keeps `.mdc` frontmatter, while Cline receives plain Markdown rules.
+
 ## Commands
 
 ```bash
@@ -293,3 +299,4 @@ The Canvas UI exposes:
 - `.agent-kernel/project.lock.yml` records generated mirror and artifact hashes.
 - `AGENTS.md`, `CLAUDE.md`, and mirrored skill folders are build artifacts.
 - `.cursor/rules/agent-kernel.mdc` is generated when Cursor rules export is enabled.
+- `.clinerules/agent-kernel.md` is generated when Cline rules export is enabled.

@@ -50,6 +50,20 @@ Agent-Kernel should avoid rebuilding mature pieces from nearby ecosystems. The v
 - Source: https://cline.bot/blog/clinerules-version-controlled-shareable-and-ai-editable-instructions
 - Borrowed idea: Cline's Memory Bank uses structured markdown files for project continuity, while `.clinerules` treats instructions as version-controlled code.
 - Product impact: Agent-Kernel's Draft Inbox and build-artifact model can support `.clinerules/` and memory-bank exports later, with user review before mutable memories become always-loaded instructions.
+- 2026-05-01 update: Cline-style rules fit best as a rules directory where Agent-Kernel owns one generated file (`.clinerules/agent-kernel.md`) instead of overwriting the user's whole rule surface. This mirrors Cursor's generated `.mdc` artifact and keeps manual Cline rules available beside compiled Skilllets.
+
+## Roo Code And Windsurf Rules
+
+- Source: https://docs.roocode.com/features/custom-instructions
+- Source: https://docs.windsurf.com/windsurf/cascade/memories
+- Borrowed idea: adjacent agent tools also split persistent guidance into rules, memories, and scoped project files.
+- Product impact: the exporter layer should remain table-driven. Adding Roo/Windsurf later should mostly mean declaring target paths and renderers, not changing Skilllet storage.
+
+## Continue Rules
+
+- Source: https://docs.continue.dev/customize/rules
+- Borrowed idea: Continue rules are portable Markdown instructions that can be scoped and shared with a team.
+- Product impact: future exporters should support one Skilllet source compiled into tool-native rule files while keeping Agent-Kernel's source-of-truth YAML/MD declarative.
 
 ## Agent Skills Spec And Security Research
 

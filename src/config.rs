@@ -189,9 +189,9 @@ pub fn default_project_config(project_root: &Path) -> ProjectConfig {
         AgentConfig {
             enabled: false,
             exports: AgentExports {
-                instructions: Some(".clinerules".to_string()),
+                instructions: None,
                 skills_dir: None,
-                rules_dir: None,
+                rules_dir: Some(".clinerules".to_string()),
             },
         },
     );
@@ -211,12 +211,24 @@ pub fn default_project_config(project_root: &Path) -> ProjectConfig {
 
 pub fn load_or_default_project_config(project_root: &Path) -> Result<ProjectConfig> {
     let path = project_config_path(project_root);
-    if path.exists() {
+    let config = if path.exists() {
         let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-        Ok(serde_yaml::from_str(&text).with_context(|| format!("parse {}", path.display()))?)
+        serde_yaml::from_str(&text).with_context(|| format!("parse {}", path.display()))?
     } else {
-        Ok(default_project_config(project_root))
+        default_project_config(project_root)
+    };
+    Ok(migrate_project_config(config))
+}
+
+fn migrate_project_config(mut config: ProjectConfig) -> ProjectConfig {
+    if let Some(cline) = config.agents.get_mut("cline")
+        && cline.exports.instructions.as_deref() == Some(".clinerules")
+        && cline.exports.rules_dir.is_none()
+    {
+        cline.exports.instructions = None;
+        cline.exports.rules_dir = Some(".clinerules".to_string());
     }
+    config
 }
 
 pub fn save_project_config(project_root: &Path, config: &ProjectConfig) -> Result<()> {
@@ -326,5 +338,41 @@ mod tests {
                 .and_then(|agent| agent.exports.skills_dir.as_deref()),
             Some(".agents/skills")
         );
+    }
+
+    #[test]
+    fn default_config_uses_cline_rules_directory() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config = default_project_config(temp.path());
+        let cline = config.agents.get("cline").expect("cline");
+
+        assert_eq!(cline.exports.instructions.as_deref(), None);
+        assert_eq!(cline.exports.rules_dir.as_deref(), Some(".clinerules"));
+    }
+
+    #[test]
+    fn load_migrates_legacy_cline_single_file_export() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        ensure_kernel_dir(temp.path()).expect("kernel dir");
+        fs::write(
+            project_config_path(temp.path()),
+            r#"version: 1
+project:
+  name: demo
+  root: .
+agents:
+  cline:
+    enabled: true
+    exports:
+      instructions: .clinerules
+"#,
+        )
+        .expect("write project");
+
+        let config = load_or_default_project_config(temp.path()).expect("load config");
+        let cline = config.agents.get("cline").expect("cline");
+
+        assert_eq!(cline.exports.instructions.as_deref(), None);
+        assert_eq!(cline.exports.rules_dir.as_deref(), Some(".clinerules"));
     }
 }
