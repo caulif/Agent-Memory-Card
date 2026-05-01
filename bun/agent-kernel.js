@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 const { spawnSync } = require("node:child_process");
 const { existsSync } = require("node:fs");

@@ -126,9 +126,9 @@ mod tests {
         add_draft(
             temp.path(),
             NewDraft {
-                id: "project:prefer-pnpm".to_string(),
-                title: "Prefer pnpm".to_string(),
-                body: "Use pnpm for package management.".to_string(),
+                id: "project:prefer-bun".to_string(),
+                title: "Prefer Bun".to_string(),
+                body: "Use Bun for JavaScript package management and scripts.".to_string(),
                 kind: "preference".to_string(),
                 scope: "project".to_string(),
                 targets: vec!["codex".to_string()],
@@ -137,10 +137,10 @@ mod tests {
         )
         .expect("add draft");
 
-        approve_draft(temp.path(), "project:prefer-pnpm").expect("approve");
+        approve_draft(temp.path(), "project:prefer-bun").expect("approve");
 
         assert!(load_drafts(temp.path()).expect("drafts").is_empty());
         let skilllets = skilllet::load_skilllets(temp.path()).expect("skilllets");
-        assert_eq!(skilllets[0].id, "project:prefer-pnpm");
+        assert_eq!(skilllets[0].id, "project:prefer-bun");
     }
 }

@@ -18,9 +18,9 @@ mod tests {
         draft::add_draft(
             temp.path(),
             draft::NewDraft {
-                id: "project:prefer-pnpm".to_string(),
-                title: "Prefer pnpm".to_string(),
-                body: "Use pnpm for package management.".to_string(),
+                id: "project:prefer-bun".to_string(),
+                title: "Prefer Bun".to_string(),
+                body: "Use Bun for JavaScript package management and scripts.".to_string(),
                 kind: "preference".to_string(),
                 scope: "project".to_string(),
                 targets: vec!["codex".to_string()],
@@ -32,7 +32,7 @@ mod tests {
         let report = review_project(temp.path()).expect("review");
         let value = serde_json::to_value(report).expect("json");
 
-        assert_eq!(value["drafts"][0]["id"], "project:prefer-pnpm");
+        assert_eq!(value["drafts"][0]["id"], "project:prefer-bun");
         assert_eq!(value["summary"]["drafts_pending"], 1);
     }
 
@@ -42,9 +42,9 @@ mod tests {
         draft::add_draft(
             temp.path(),
             draft::NewDraft {
-                id: "project:prefer-pnpm".to_string(),
-                title: "Prefer pnpm".to_string(),
-                body: "Use pnpm for package management.".to_string(),
+                id: "project:prefer-bun".to_string(),
+                title: "Prefer Bun".to_string(),
+                body: "Use Bun for JavaScript package management and scripts.".to_string(),
                 kind: "preference".to_string(),
                 scope: "project".to_string(),
                 targets: vec!["codex".to_string()],
@@ -56,7 +56,7 @@ mod tests {
         let result = apply_review_decisions(
             temp.path(),
             &[ReviewDecision::ApproveDraft(
-                "project:prefer-pnpm".to_string(),
+                "project:prefer-bun".to_string(),
             )],
         )
         .expect("apply");
@@ -72,7 +72,7 @@ mod tests {
             temp.path(),
             "project:codex-rule",
             "Codex Rule",
-            "Use pnpm for package management.",
+            "Use Bun for JavaScript package management and scripts.",
             "preference",
             "project",
             vec!["codex".to_string()],

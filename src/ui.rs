@@ -33,9 +33,9 @@ mod tests {
         draft::add_draft(
             temp.path(),
             draft::NewDraft {
-                id: "project:prefer-pnpm".to_string(),
-                title: "Prefer pnpm".to_string(),
-                body: "Use pnpm for package management.".to_string(),
+                id: "project:prefer-bun".to_string(),
+                title: "Prefer Bun".to_string(),
+                body: "Use Bun for JavaScript package management and scripts.".to_string(),
                 kind: "preference".to_string(),
                 scope: "project".to_string(),
                 targets: vec!["codex".to_string()],
@@ -48,7 +48,7 @@ mod tests {
 
         assert_eq!(value["ok"], true);
         assert_eq!(value["report"]["summary"]["drafts_pending"], 1);
-        assert_eq!(value["report"]["drafts"][0]["id"], "project:prefer-pnpm");
+        assert_eq!(value["report"]["drafts"][0]["id"], "project:prefer-bun");
     }
 
     #[test]

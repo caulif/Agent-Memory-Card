@@ -330,7 +330,7 @@ mod tests {
 
         let report = extract_to_drafts(
             temp.path(),
-            Some("Always use pnpm for package management.".to_string()),
+            Some("Always use Bun for JavaScript package management and scripts.".to_string()),
             None,
             vec!["codex".to_string()],
             Some("local".to_string()),
@@ -349,7 +349,7 @@ mod tests {
 
         let report = extract_to_drafts(
             temp.path(),
-            Some("Always use pnpm for package management.".to_string()),
+            Some("Always use Bun for JavaScript package management and scripts.".to_string()),
             None,
             vec!["codex".to_string()],
             Some("local".to_string()),

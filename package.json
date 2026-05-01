@@ -2,20 +2,24 @@
   "name": "agent-kernel",
   "version": "0.1.0",
   "description": "Project-centered Agent skills and rules workspace",
+  "packageManager": "bun@1.3.12",
+  "engines": {
+    "bun": ">=1.3.0"
+  },
   "bin": {
-    "agent-kernel": "npm/agent-kernel.js"
+    "agent-kernel": "bun/agent-kernel.js"
   },
   "files": [
     "bin/",
-    "npm/agent-kernel.js",
-    "npm/agent-kernel-lib.js",
-    "npm/cargo.js",
+    "bun/agent-kernel.js",
+    "bun/agent-kernel-lib.js",
+    "bun/cargo.js",
     "README.md"
   ],
   "scripts": {
-    "build": "node npm/cargo.js build",
-    "test": "node --test npm/*.test.js && node npm/cargo.js test",
-    "test:js": "node --test npm/*.test.js",
-    "start": "node npm/cargo.js run --"
+    "build": "bun bun/cargo.js build",
+    "test": "bun test bun/agent-kernel-lib.test.js && bun bun/cargo.js test",
+    "test:js": "bun test bun/agent-kernel-lib.test.js",
+    "start": "bun bun/cargo.js run --"
   }
 }

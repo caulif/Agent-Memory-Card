@@ -47,7 +47,7 @@ jobs:
           name: ${{ matrix.artifact }}
           path: dist/${{ matrix.target }}
 
-  npm-pack:
+  bun-pack:
     needs: build-binaries
     runs-on: ubuntu-latest
     steps:
@@ -63,12 +63,12 @@ jobs:
           cp -R downloaded/agent-kernel-darwin-x64 bin/darwin-x64
           cp -R downloaded/agent-kernel-darwin-arm64 bin/darwin-arm64
           chmod +x bin/linux-x64/agent-kernel bin/darwin-x64/agent-kernel bin/darwin-arm64/agent-kernel
-      - uses: actions/setup-node@v5
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: 24
-      - run: node --test npm/*.test.js
-      - run: npm pack
+          bun-version: latest
+      - run: bun test bun/agent-kernel-lib.test.js
+      - run: bun pm pack
       - uses: actions/upload-artifact@v4
         with:
-          name: agent-kernel-npm-package
+          name: agent-kernel-bun-package
           path: agent-kernel-*.tgz

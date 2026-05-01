@@ -89,9 +89,9 @@ v0.13 starts review mode:
 v0.14 starts the release/distribution foundation:
 
 1. `agent-kernel --version` reports the Cargo package version.
-2. The npm entrypoint first looks for packaged binaries under `bin/<platform>-<arch>/`.
+2. The Bun entrypoint first looks for packaged binaries under `bin/<platform>-<arch>/`.
 3. Local development still falls back to `cargo build` when no packaged binary exists.
-4. Tag builds assemble Windows, Linux, and macOS artifacts plus an npm tarball.
+4. Tag builds assemble Windows, Linux, and macOS artifacts plus a Bun-compatible package tarball.
 
 v0.15 starts the interactive review protocol foundation:
 
@@ -220,6 +220,13 @@ v0.35 makes repeated evolution safer:
 2. Re-importing the same transcript reports `skipped` instead of pretending a new Observation was created.
 3. Repeated `observe evolve` runs become easier to trust in daily use.
 
+v0.36 switches the JavaScript package wrapper to Bun:
+
+1. The package entrypoint now lives under `bun/`.
+2. Local scripts use `bun` and `bun test`.
+3. Release packaging uses `bun pm pack`, while the Rust binary remains the core implementation.
+4. This repository's own package-management Skilllet now prefers Bun.
+
 ## Commands
 
 ```bash
@@ -234,13 +241,13 @@ cargo run -- sync --project .
 cargo run -- skilllet add --id project:use-axios --title "Use Axios" --body "Use Axios for frontend HTTP requests." --target codex --project .
 cargo run -- skilllet list --project .
 cargo run -- skilllet targets --id project:use-axios --target codex --target claude-code --project .
-cargo run -- skilllet merge --id project:frontend-defaults --title "Frontend Defaults" --source project:use-axios --source project:prefer-pnpm --target codex --project .
+cargo run -- skilllet merge --id project:frontend-defaults --title "Frontend Defaults" --source project:use-axios --source project:prefer-bun --target codex --project .
 cargo run -- skilllet attach-skill --id project:use-axios --skill superpowers:brainstorming --project .
 cargo run -- skilllet matrix --project .
-cargo run -- draft add --id project:prefer-pnpm --title "Prefer pnpm" --body "Use pnpm for package management." --target codex --project .
-cargo run -- draft approve --id project:prefer-pnpm --project .
-cargo run -- draft reject --id project:prefer-pnpm --project .
-cargo run -- extract --text "Always use pnpm for package management." --target codex --project .
+cargo run -- draft add --id project:prefer-bun --title "Prefer Bun" --body "Use Bun for JavaScript package management and scripts." --target codex --project .
+cargo run -- draft approve --id project:prefer-bun --project .
+cargo run -- draft reject --id project:prefer-bun --project .
+cargo run -- extract --text "Always use Bun for JavaScript package management and scripts." --target codex --project .
 cargo run -- extract --file chat.md --target codex --project .
 cargo run -- extract --text "Always run cargo test before pushing." --target codex --provider local --dry-run --project .
 cargo run -- observe import --file chat.jsonl --agent claude-code --source-kind claude-code-session --project .
@@ -256,8 +263,8 @@ cargo run -- extract --text "Always use token=supersecret123456789 before pushin
 cargo run -- test-rules --project .
 cargo run -- review --project .
 cargo run -- review --json --project .
-cargo run -- review --approve-draft project:prefer-pnpm --project .
-cargo run -- review --reject-draft project:prefer-pnpm --project .
+cargo run -- review --approve-draft project:prefer-bun --project .
+cargo run -- review --reject-draft project:prefer-bun --project .
 cargo run -- catalog list --project .
 cargo run -- catalog init --project .
 cargo run -- catalog validate --project .
@@ -267,14 +274,14 @@ cargo run -- agent enable --agent claude-code --project .
 cargo run -- agent disable --agent claude-code --project .
 ```
 
-The npm wrapper works locally after the Rust binary has been built:
+The Bun wrapper works locally after the Rust binary has been built:
 
 ```bash
-node npm/agent-kernel.js scan --scan-home --project .
-node npm/agent-kernel.js --version
+bun bun/agent-kernel.js scan --scan-home --project .
+bun bun/agent-kernel.js --version
 ```
 
-For a packaged `npx` flow, the wrapper resolves binaries in this order:
+For a packaged `bunx` flow, the wrapper resolves binaries in this order:
 
 1. `bin/<platform>-<arch>/agent-kernel[.exe]`
 2. `target/release/agent-kernel[.exe]`
@@ -310,11 +317,11 @@ cargo run -- sync --project .
 cargo run -- skilllet add --id project:use-axios --title "Use Axios" --body "Use Axios for frontend HTTP requests." --target codex --project .
 
 # 9. Add and approve a Draft Inbox item.
-cargo run -- draft add --id project:prefer-pnpm --title "Prefer pnpm" --body "Use pnpm for package management." --target codex --project .
-cargo run -- draft approve --id project:prefer-pnpm --project .
+cargo run -- draft add --id project:prefer-bun --title "Prefer Bun" --body "Use Bun for JavaScript package management and scripts." --target codex --project .
+cargo run -- draft approve --id project:prefer-bun --project .
 
 # 10. Extract local heuristic drafts from text or files.
-cargo run -- extract --text "Always use pnpm for package management." --target codex --project .
+cargo run -- extract --text "Always use Bun for JavaScript package management and scripts." --target codex --project .
 cargo run -- extract --file chat.md --target codex --project .
 
 # 11. Initialize Hybrid provider config and preview extraction payloads locally.
@@ -332,7 +339,7 @@ cargo run -- review --project .
 
 # 15. Use review as a scriptable protocol for future interactive CLI/UI decisions.
 cargo run -- review --json --project .
-cargo run -- review --approve-draft project:prefer-pnpm --project .
+cargo run -- review --approve-draft project:prefer-bun --project .
 ```
 
 The Canvas UI exposes:

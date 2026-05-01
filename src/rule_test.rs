@@ -160,7 +160,7 @@ mod tests {
     fn local_rule_test_passes_and_fails() {
         let temp = tempfile::tempdir().expect("tempdir");
         fs::create_dir_all(config::kernel_dir(temp.path()).join("tests")).expect("tests dir");
-        fs::write(temp.path().join("AGENTS.md"), "Use Axios\nPrefer pnpm").expect("artifact");
+        fs::write(temp.path().join("AGENTS.md"), "Use Axios\nPrefer Bun").expect("artifact");
         fs::write(
             config::kernel_dir(temp.path())
                 .join("tests")

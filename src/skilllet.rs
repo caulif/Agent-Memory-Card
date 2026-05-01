@@ -367,14 +367,14 @@ mod tests {
         .expect("add axios");
         add_skilllet(
             temp.path(),
-            "project:prefer-pnpm",
-            "Prefer pnpm",
-            "Use pnpm for package management.",
+            "project:prefer-bun",
+            "Prefer Bun",
+            "Use Bun for JavaScript package management and scripts.",
             "preference",
             "project",
             vec!["codex".to_string()],
         )
-        .expect("add pnpm");
+        .expect("add bun");
 
         merge_skilllets(
             temp.path(),
@@ -382,7 +382,7 @@ mod tests {
             "Frontend Defaults",
             vec![
                 "project:use-axios".to_string(),
-                "project:prefer-pnpm".to_string(),
+                "project:prefer-bun".to_string(),
             ],
             vec!["claude-code".to_string(), "codex".to_string()],
         )
@@ -397,7 +397,11 @@ mod tests {
                 .body
                 .contains("Use Axios for frontend HTTP requests.")
         );
-        assert!(merged.body.contains("Use pnpm for package management."));
+        assert!(
+            merged
+                .body
+                .contains("Use Bun for JavaScript package management and scripts.")
+        );
 
         let project = config::load_or_default_project_config(temp.path()).expect("project");
         let merged_ref = project
