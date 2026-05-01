@@ -140,6 +140,14 @@ cargo run -- draft update --id project:use-axios --title "Use Axios" --body "Use
 
 也可以打开原生 app，在选中的项目页直接查看 `Draft Inbox`，点击 `Edit` 修改标题、类型、作用域、正文和目标 Agent，再点击 `Save`。保存只更新 Draft，不会自动批准或启用；确认无误后再点击 `Approve`，不想保留则点击 `Reject`。
 
+如果多个候选其实是同一组项目偏好，可以先合并为一个新的待审 Draft：
+
+```bash
+cargo run -- draft merge --id project:frontend-defaults --title "Frontend Defaults" --source project:use-axios --source project:prefer-bun --target codex --target claude-code --project .
+```
+
+`draft merge` 至少需要两个 source。它只创建一个新的 Draft，不会删除源 Draft，也不会自动批准。原生 app 的 `Draft Inbox` 也可以勾选多个候选，点击 `Merge Selected` 后编辑合并 Draft 的 ID、标题和目标 Agent，再创建新的合并候选。
+
 高置信模板生成的 Draft 会带上可解释信息：
 
 - `confidence`：当前本地规则对这个候选的信心，例如 `92%`
@@ -256,9 +264,11 @@ cargo run -- preference list --project .
 cargo run -- preference test --text "以后前端请求统一使用 Axios，不要再用 Fetch。" --project .
 cargo run -- extract --text "以后前端请求统一使用 Axios，不要再用 Fetch。" --target codex --dry-run --project .
 cargo run -- extract --text "以后前端请求统一使用 Axios，不要再用 Fetch。" --target codex --project .
+cargo run -- extract --text "以后 JS 包管理统一使用 Bun。" --target codex --project .
 cargo run -- draft list --project .
 cargo run -- draft update --id project:use-axios --target codex --target claude-code --project .
-cargo run -- draft approve --id project:use-axios --project .
+cargo run -- draft merge --id project:frontend-defaults --title "Frontend Defaults" --source project:use-axios --source project:prefer-bun --target codex --target claude-code --project .
+cargo run -- draft approve --id project:frontend-defaults --project .
 cargo run -- build --preview --project .
 cargo run -- build --project .
 cargo run -- test-rules --project .
@@ -272,6 +282,6 @@ cargo run -- test-rules --project .
 - LLM provider 仍是配置地基，本地提取器是主路径
 - Cursor / Cline 不在当前 MVP 主线
 - 原生 app 已经能浏览项目、Review、触发对话进化，并处理 Draft Inbox；更细的 Canvas 拖拽、App Store、Preference Registry 编辑体验仍会继续补强
-- 原生 app 已经接入 Skilllet Catalog、Skilllet target matrix、Draft explainability 和 Draft inline editing；后续还需要把包详情编辑、Skilllet remove/disable、Draft 合并做得更顺手
+- 原生 app 已经接入 Skilllet Catalog、Skilllet target matrix、Draft explainability、Draft inline editing 和 Draft merge；后续还需要把包详情编辑、Skilllet remove/disable、lineage 展示做得更顺手
 
-下一步最值得补的是 Draft 合并能力和更完整的 Skilllet lineage，让审查体验继续靠近一个可解释的进化系统。
+下一步最值得补的是更完整的 Skilllet lineage，让审查体验继续靠近一个可解释的进化系统。

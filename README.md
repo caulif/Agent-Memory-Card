@@ -323,6 +323,12 @@ v0.52 lets users edit Draft Inbox candidates before approval:
 2. The native Draft Inbox has an inline Edit / Save / Cancel flow, so generated candidates can be corrected before becoming Skilllets.
 3. Draft editing keeps the trust boundary intact: updates do not approve the Draft or enable it automatically.
 
+v0.53 adds conservative Draft merging:
+
+1. `draft merge` combines two or more Draft Inbox candidates into a new reviewable Draft.
+2. Source Drafts stay in the inbox, so users can compare, reject, or approve later.
+3. The native Draft Inbox can select multiple Drafts, prefill merged Agent targets, and create a merged candidate without enabling it.
+
 See [docs/quickstart.md](docs/quickstart.md) for a hands-on walkthrough.
 See [docs/platform-support.md](docs/platform-support.md) for Windows / macOS / Linux support details.
 
@@ -348,6 +354,7 @@ cargo run -- skilllet attach-skill --id project:use-axios --skill superpowers:br
 cargo run -- skilllet matrix --project .
 cargo run -- draft add --id project:prefer-bun --title "Prefer Bun" --body "Use Bun for JavaScript package management and scripts." --target codex --project .
 cargo run -- draft update --id project:prefer-bun --title "Prefer Bun Runtime" --body "Use Bun for package management, scripts, and JS runtime tasks." --target codex --target claude-code --project .
+cargo run -- draft merge --id project:frontend-defaults --title "Frontend Defaults" --source project:use-axios --source project:prefer-bun --target codex --target claude-code --project .
 cargo run -- draft approve --id project:prefer-bun --project .
 cargo run -- draft reject --id project:prefer-bun --project .
 cargo run -- extract --text "Always use Bun for JavaScript package management and scripts." --target codex --project .

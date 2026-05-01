@@ -33,6 +33,9 @@ const MATRIX_SCROLL_ID: &str = "native-skilllet-matrix-scroll";
 const OUTPUT_SCROLL_ID: &str = "native-output-scroll";
 const WORKSPACE_SCROLL_ID: &str = "native-project-workspace-scroll";
 const MAX_HEADER_MARKERS: usize = 3;
+const MERGE_SELECTED_LABEL: &str = "Merge Selected";
+const MERGE_CONFIRM_LABEL: &str = "Create Merged Draft";
+const MERGE_CANCEL_LABEL: &str = "Deselect All";
 
 #[derive(Debug, Clone, Copy)]
 struct UiPalette {
@@ -57,6 +60,14 @@ struct DraftEditState {
     body: String,
     kind: String,
     scope: String,
+    targets_text: String,
+}
+
+/// Tracks in-progress merge form state when merging multiple drafts.
+#[derive(Debug, Clone)]
+struct MergeEditState {
+    merged_id: String,
+    merged_title: String,
     targets_text: String,
 }
 
@@ -631,6 +642,251 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn native_merge_selects_drafts_and_creates_merged_draft() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        draft::add_draft(
+            temp.path(),
+            draft::NewDraft {
+                id: "project:use-axios".to_string(),
+                title: "Use Axios".to_string(),
+                body: "Use Axios for frontend HTTP requests.".to_string(),
+                kind: "preference".to_string(),
+                scope: "project".to_string(),
+                targets: vec!["codex".to_string()],
+                evidence: "test".to_string(),
+                confidence: Some(0.92),
+                reason: None,
+                matched_template: None,
+            },
+        )
+        .expect("add axios");
+        draft::add_draft(
+            temp.path(),
+            draft::NewDraft {
+                id: "project:prefer-bun".to_string(),
+                title: "Prefer Bun".to_string(),
+                body: "Use Bun for package management and scripts.".to_string(),
+                kind: "preference".to_string(),
+                scope: "project".to_string(),
+                targets: vec!["claude-code".to_string()],
+                evidence: "test".to_string(),
+                confidence: Some(0.84),
+                reason: None,
+                matched_template: None,
+            },
+        )
+        .expect("add bun");
+
+        let merged = draft::merge_drafts(
+            temp.path(),
+            "project:frontend-defaults",
+            "Frontend Defaults",
+            vec![
+                "project:use-axios".to_string(),
+                "project:prefer-bun".to_string(),
+            ],
+            vec!["codex".to_string(), "claude-code".to_string()],
+        )
+        .expect("merge");
+
+        assert_eq!(merged.id, "project:frontend-defaults");
+        assert_eq!(merged.title, "Frontend Defaults");
+        assert_eq!(merged.kind, "procedure");
+        assert_eq!(merged.scope, "project");
+        assert_eq!(merged.status, "draft");
+        assert!(merged.body.contains("Use Axios"));
+        assert!(merged.body.contains("Prefer Bun"));
+        assert!(merged.body.contains("## Use Axios"));
+        assert_eq!(
+            merged.evidence,
+            "Merged Drafts: project:use-axios, project:prefer-bun"
+        );
+
+        // Source drafts must still exist (conservative merge).
+        let all_drafts = draft::load_drafts(temp.path()).expect("drafts");
+        assert_eq!(all_drafts.len(), 3);
+        assert!(all_drafts.iter().any(|d| d.id == "project:use-axios"));
+        assert!(all_drafts.iter().any(|d| d.id == "project:prefer-bun"));
+        assert!(
+            all_drafts
+                .iter()
+                .any(|d| d.id == "project:frontend-defaults")
+        );
+    }
+
+    #[test]
+    fn native_merge_rejects_empty_sources() {
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        let err = draft::merge_drafts(
+            temp.path(),
+            "project:bad-merge",
+            "Bad Merge",
+            vec![],
+            vec!["codex".to_string()],
+        )
+        .expect_err("empty sources should fail");
+
+        assert!(err.to_string().contains("at least two source drafts"));
+    }
+
+    #[test]
+    fn native_merge_rejects_single_source() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        draft::add_draft(
+            temp.path(),
+            draft::NewDraft {
+                id: "project:solo".to_string(),
+                title: "Solo".to_string(),
+                body: "Only one.".to_string(),
+                kind: "preference".to_string(),
+                scope: "project".to_string(),
+                targets: vec!["codex".to_string()],
+                evidence: "test".to_string(),
+                confidence: None,
+                reason: None,
+                matched_template: None,
+            },
+        )
+        .expect("add solo");
+
+        let err = draft::merge_drafts(
+            temp.path(),
+            "project:solo-merged",
+            "Solo Merged",
+            vec!["project:solo".to_string()],
+            vec!["codex".to_string()],
+        )
+        .expect_err("single source should fail");
+
+        assert!(err.to_string().contains("at least two source drafts"));
+        let drafts = draft::load_drafts(temp.path()).expect("drafts");
+        assert_eq!(drafts.len(), 1);
+    }
+
+    #[test]
+    fn native_merge_rejects_missing_sources() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        draft::add_draft(
+            temp.path(),
+            draft::NewDraft {
+                id: "project:present".to_string(),
+                title: "Present".to_string(),
+                body: "This one exists.".to_string(),
+                kind: "preference".to_string(),
+                scope: "project".to_string(),
+                targets: vec!["codex".to_string()],
+                evidence: "test".to_string(),
+                confidence: None,
+                reason: None,
+                matched_template: None,
+            },
+        )
+        .expect("add present");
+
+        let err = draft::merge_drafts(
+            temp.path(),
+            "project:bad-merge",
+            "Bad Merge",
+            vec!["project:present".to_string(), "project:missing".to_string()],
+            vec!["codex".to_string()],
+        )
+        .expect_err("missing source should fail");
+
+        assert!(err.to_string().contains("missing source drafts"));
+        assert!(err.to_string().contains("project:missing"));
+    }
+
+    #[test]
+    fn native_merge_form_state_holds_editable_fields() {
+        let state = MergeEditState {
+            merged_id: "project:merged-2".to_string(),
+            merged_title: "Merged Draft".to_string(),
+            targets_text: "codex, claude-code".to_string(),
+        };
+
+        assert_eq!(state.merged_id, "project:merged-2");
+        assert_eq!(state.merged_title, "Merged Draft");
+        assert_eq!(state.targets_text, "codex, claude-code");
+    }
+
+    #[test]
+    fn native_merge_labels_are_compact() {
+        for label in &[
+            MERGE_SELECTED_LABEL,
+            MERGE_CONFIRM_LABEL,
+            MERGE_CANCEL_LABEL,
+        ] {
+            assert!(
+                label.len() <= 22,
+                "merge label `{label}` is {len} chars; keep it short",
+                len = label.len()
+            );
+        }
+    }
+
+    #[test]
+    fn native_merge_preserves_source_explainability() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        draft::add_draft(
+            temp.path(),
+            draft::NewDraft {
+                id: "project:use-axios".to_string(),
+                title: "Use Axios".to_string(),
+                body: "Use Axios for frontend HTTP requests.".to_string(),
+                kind: "preference".to_string(),
+                scope: "project".to_string(),
+                targets: vec!["codex".to_string()],
+                evidence: "observation:a".to_string(),
+                confidence: Some(0.92),
+                reason: Some("Matched HTTP client preference".to_string()),
+                matched_template: Some("built-in:Use Axios".to_string()),
+            },
+        )
+        .expect("add axios");
+        draft::add_draft(
+            temp.path(),
+            draft::NewDraft {
+                id: "project:prefer-bun".to_string(),
+                title: "Prefer Bun".to_string(),
+                body: "Use Bun for package management.".to_string(),
+                kind: "preference".to_string(),
+                scope: "project".to_string(),
+                targets: vec!["claude-code".to_string()],
+                evidence: "observation:b".to_string(),
+                confidence: Some(0.78),
+                reason: Some("Matched package manager preference".to_string()),
+                matched_template: Some("built-in:Prefer Bun".to_string()),
+            },
+        )
+        .expect("add bun");
+
+        let merged = draft::merge_drafts(
+            temp.path(),
+            "project:frontend-defaults",
+            "Frontend Defaults",
+            vec![
+                "project:use-axios".to_string(),
+                "project:prefer-bun".to_string(),
+            ],
+            vec!["codex".to_string(), "claude-code".to_string()],
+        )
+        .expect("merge");
+
+        // Merged draft carries the min confidence.
+        assert_eq!(merged.confidence, Some(0.78));
+        // Merged draft records the merge source.
+        assert!(merged.evidence.contains("Merged Drafts"));
+        assert!(merged.matched_template.as_deref() == Some("manual:draft-merge"));
+
+        // Source drafts retain their original explainability fields.
+        let drafts = draft::load_drafts(temp.path()).expect("drafts");
+        let axios = drafts.iter().find(|d| d.id == "project:use-axios").unwrap();
+        assert_eq!(axios.confidence, Some(0.92));
+        assert!(axios.reason.as_deref().unwrap().contains("HTTP client"));
+    }
 }
 
 pub fn run(home: PathBuf, scan_roots: Vec<PathBuf>, max_depth: usize) -> Result<()> {
@@ -754,6 +1010,8 @@ struct AgentKernelApp {
     status: String,
     report: String,
     draft_edit: Option<DraftEditState>,
+    draft_selection: Vec<String>,
+    merge_edit: Option<MergeEditState>,
 }
 
 impl AgentKernelApp {
@@ -770,6 +1028,8 @@ impl AgentKernelApp {
             status: String::new(),
             report: String::new(),
             draft_edit: None,
+            draft_selection: Vec::new(),
+            merge_edit: None,
         };
         app.refresh_with_scan();
         app
@@ -907,6 +1167,63 @@ impl AgentKernelApp {
             Err(err) => {
                 self.draft_edit = None;
                 self.report = format!("Draft update failed for `{draft_id}`: {err}");
+            }
+        }
+    }
+
+    fn merge_drafts_for_selected(&mut self) {
+        let Some(project) = self.selected_project() else {
+            self.report = "Select a project first.".to_string();
+            self.draft_selection.clear();
+            self.merge_edit = None;
+            return;
+        };
+        let Some(ref edit) = self.merge_edit else {
+            return;
+        };
+        let merged_id = edit.merged_id.trim().to_string();
+        let merged_title = edit.merged_title.trim().to_string();
+        if merged_id.is_empty() {
+            self.report = "Merged draft ID is required.".to_string();
+            return;
+        }
+        if merged_title.is_empty() {
+            self.report = "Merged draft title is required.".to_string();
+            return;
+        }
+        if self.draft_selection.len() < 2 {
+            self.report = "Select at least two drafts to merge.".to_string();
+            return;
+        }
+        let targets: Vec<String> = if edit.targets_text.trim().is_empty() {
+            Vec::new()
+        } else {
+            edit.targets_text
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        };
+        let source_ids = self.draft_selection.clone();
+        match draft::merge_drafts(
+            &PathBuf::from(&project.path),
+            &merged_id,
+            &merged_title,
+            source_ids,
+            targets,
+        ) {
+            Ok(merged) => {
+                self.draft_selection.clear();
+                self.merge_edit = None;
+                self.report = format!(
+                    "Merged draft `{}` created for {}\nTitle: {}\nRun Review to inspect.",
+                    merged.id, project.name, merged.title
+                );
+            }
+            Err(err) => {
+                self.draft_selection.clear();
+                self.merge_edit = None;
+                self.report = format!("Draft merge failed: {err}");
             }
         }
     }
@@ -1263,6 +1580,11 @@ impl AgentKernelApp {
             let mut decision: Option<(String, bool)> = None;
             let mut edit_action: Option<EditAction> = None;
             let mut local_edit: Option<DraftEditState> = self.draft_edit.clone();
+            let mut toggle_selection: Option<String> = None;
+            let mut start_merge = false;
+            let mut merge_confirm = false;
+            let mut merge_cancel = false;
+            let mut local_merge: Option<MergeEditState> = self.merge_edit.clone();
             egui::ScrollArea::vertical()
                 .id_salt(DRAFT_SCROLL_ID)
                 .max_height(260.0)
@@ -1330,7 +1652,13 @@ impl AgentKernelApp {
                                     }
                                 });
                             } else {
+                                let is_selected =
+                                    self.draft_selection.iter().any(|s| s == &draft.id);
                                 ui.horizontal(|ui| {
+                                    let mut checked = is_selected;
+                                    if ui.checkbox(&mut checked, "").changed() {
+                                        toggle_selection = Some(draft.id.clone());
+                                    }
                                     ui.label(
                                         egui::RichText::new(&draft.title)
                                             .strong()
@@ -1402,6 +1730,123 @@ impl AgentKernelApp {
 
             // Persist TextEdit mutations and apply the edit action.
             self.draft_edit = reduce_edit_state(local_edit, &edit_action);
+
+            // Handle draft selection toggle.
+            if let Some(draft_id) = toggle_selection {
+                if let Some(pos) = self.draft_selection.iter().position(|s| s == &draft_id) {
+                    self.draft_selection.remove(pos);
+                } else {
+                    self.draft_selection.push(draft_id);
+                }
+                self.draft_selection.sort();
+                // Clear merge form when selection changes.
+                self.merge_edit = None;
+            }
+
+            // Render merge bar when 2+ drafts selected.
+            let selection_count = self.draft_selection.len();
+            if selection_count >= 2 {
+                ui.add_space(8.0);
+                subtle_card_frame().show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "{} draft{} selected",
+                                selection_count,
+                                if selection_count > 1 { "s" } else { "" }
+                            ))
+                            .color(palette.accent),
+                        );
+                        if ui.add(primary_button(MERGE_SELECTED_LABEL)).clicked() {
+                            start_merge = true;
+                        }
+                        if ui.add(danger_button(MERGE_CANCEL_LABEL)).clicked() {
+                            merge_cancel = true;
+                        }
+                    });
+                });
+            }
+
+            // Render merge form when active.
+            if self.merge_edit.is_some() {
+                let merge = local_merge.as_mut().unwrap();
+                ui.add_space(6.0);
+                card_frame().show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new("Create Merged Draft")
+                            .size(14.0)
+                            .strong()
+                            .color(palette.text),
+                    );
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label("ID");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut merge.merged_id)
+                                .hint_text("project:merged-draft")
+                                .desired_width(ui.available_width()),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Title");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut merge.merged_title)
+                                .hint_text("Merged Draft Title")
+                                .desired_width(ui.available_width()),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Targets");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut merge.targets_text)
+                                .hint_text("codex, claude-code")
+                                .desired_width(ui.available_width()),
+                        );
+                    });
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        if ui.add(primary_button(MERGE_CONFIRM_LABEL)).clicked() {
+                            merge_confirm = true;
+                        }
+                        if ui.add(danger_button(MERGE_CANCEL_LABEL)).clicked() {
+                            merge_cancel = true;
+                        }
+                    });
+                });
+            }
+
+            // Apply merge form persistence.
+            if start_merge {
+                // Pre-fill merge form with defaults from selected drafts.
+                let default_targets = {
+                    let all_drafts =
+                        draft::load_drafts(&PathBuf::from(&project.path)).unwrap_or_default();
+                    let mut union_targets: Vec<String> = Vec::new();
+                    for d in &all_drafts {
+                        if self.draft_selection.contains(&d.id) {
+                            union_targets.extend(d.targets.clone());
+                        }
+                    }
+                    union_targets.sort();
+                    union_targets.dedup();
+                    union_targets.join(", ")
+                };
+                self.merge_edit = Some(MergeEditState {
+                    merged_id: format!("project:merged-{}", selection_count),
+                    merged_title: String::new(),
+                    targets_text: default_targets,
+                });
+            } else if merge_cancel {
+                self.draft_selection.clear();
+                self.merge_edit = None;
+            } else {
+                // Persist merge form edits between frames.
+                self.merge_edit = local_merge;
+            }
+
+            if merge_confirm {
+                self.merge_drafts_for_selected();
+            }
 
             if let Some((draft_id, approve)) = decision {
                 self.decide_draft_for_selected(&draft_id, approve);

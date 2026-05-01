@@ -258,6 +258,48 @@ mod tests {
             _ => panic!("expected draft update command"),
         }
     }
+
+    #[test]
+    fn cli_accepts_draft_merge_command() {
+        let cli = Cli::parse_from([
+            "agent-kernel",
+            "draft",
+            "merge",
+            "--id",
+            "project:frontend-defaults",
+            "--title",
+            "Frontend Defaults",
+            "--source",
+            "project:use-axios",
+            "--source",
+            "project:prefer-bun",
+            "--target",
+            "codex",
+            "--target",
+            "claude-code",
+            "--project",
+            ".",
+        ]);
+
+        match cli.command {
+            Commands::Draft {
+                command:
+                    DraftCommands::Merge {
+                        id,
+                        title,
+                        sources,
+                        targets,
+                        ..
+                    },
+            } => {
+                assert_eq!(id, "project:frontend-defaults");
+                assert_eq!(title, "Frontend Defaults");
+                assert_eq!(sources, vec!["project:use-axios", "project:prefer-bun"]);
+                assert_eq!(targets, vec!["codex", "claude-code"]);
+            }
+            _ => panic!("expected draft merge command"),
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -668,6 +710,20 @@ enum DraftCommands {
         project: PathBuf,
     },
 
+    /// Merge multiple Draft Inbox items into one new reviewable Draft.
+    Merge {
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        title: String,
+        #[arg(long = "source")]
+        sources: Vec<String>,
+        #[arg(long = "target")]
+        targets: Vec<String>,
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
     /// Approve a Draft Inbox item into an owned Skilllet.
     Approve {
         #[arg(long)]
@@ -1042,6 +1098,17 @@ async fn main() -> Result<()> {
                     },
                 )?;
                 println!("Updated draft `{}`: {}", updated.id, updated.title);
+            }
+            DraftCommands::Merge {
+                id,
+                title,
+                sources,
+                targets,
+                project,
+            } => {
+                let merged = draft::merge_drafts(&project, &id, &title, sources, targets)?;
+                println!("Merged draft `{}`: {}", merged.id, merged.title);
+                println!("Review and approve it when ready.");
             }
             DraftCommands::Approve { id, project } => {
                 draft::approve_draft(&project, &id)?;
