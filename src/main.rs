@@ -4,6 +4,7 @@ mod config;
 mod draft;
 mod extract;
 mod fsutil;
+mod observation;
 mod provider;
 mod review;
 mod rule_test;
@@ -46,6 +47,18 @@ mod tests {
         match cli.command {
             Commands::Import { artifacts, .. } => assert!(artifacts),
             _ => panic!("expected import command"),
+        }
+    }
+
+    #[test]
+    fn cli_accepts_observe_local_command() {
+        let cli = Cli::parse_from(["agent-kernel", "observe", "local", "--home", "."]);
+
+        match cli.command {
+            Commands::Observe {
+                command: ObserveCommands::Local { home, .. },
+            } => assert_eq!(home, Some(PathBuf::from("."))),
+            _ => panic!("expected observe local command"),
         }
     }
 }
@@ -161,6 +174,12 @@ enum Commands {
         /// Project root.
         #[arg(long, default_value = ".")]
         project: PathBuf,
+    },
+
+    /// Import and inspect raw observations before Skilllet synthesis.
+    Observe {
+        #[command(subcommand)]
+        command: ObserveCommands,
     },
 
     /// Manage Hybrid provider configuration.
@@ -383,6 +402,35 @@ enum DraftCommands {
     Reject {
         #[arg(long)]
         id: String,
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum ObserveCommands {
+    /// Import one local conversation or note file as an Observation.
+    Import {
+        #[arg(long)]
+        file: PathBuf,
+        #[arg(long, default_value = "manual-file")]
+        source_kind: String,
+        #[arg(long)]
+        agent: Option<String>,
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
+    /// Scan known local Claude Code and Codex conversation folders.
+    Local {
+        #[arg(long)]
+        home: Option<PathBuf>,
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
+    /// List imported Observations.
+    List {
         #[arg(long, default_value = ".")]
         project: PathBuf,
     },
@@ -613,6 +661,42 @@ async fn main() -> Result<()> {
                 extract::extract_to_drafts(&project, text, file, targets, provider, dry_run)?;
             println!("{}", report.render());
         }
+        Commands::Observe { command } => match command {
+            ObserveCommands::Import {
+                file,
+                source_kind,
+                agent,
+                project,
+            } => {
+                let report = observation::import_observation_file(
+                    &project,
+                    &file,
+                    &source_kind,
+                    agent.as_deref(),
+                )?;
+                println!("{}", report.render());
+            }
+            ObserveCommands::Local { home, project } => {
+                let home = home.unwrap_or_else(default_home_dir);
+                let report = observation::import_local_conversations(&project, &home)?;
+                println!("{}", report.render());
+            }
+            ObserveCommands::List { project } => {
+                let observations = observation::load_observations(&project)?;
+                if observations.is_empty() {
+                    println!("No observations found.");
+                } else {
+                    for observation in observations {
+                        println!(
+                            "- {} [{}] {}",
+                            observation.id,
+                            observation.agent.as_deref().unwrap_or("local"),
+                            observation.source_path
+                        );
+                    }
+                }
+            }
+        },
         Commands::Provider { command } => match command {
             ProviderCommands::Init { project } => {
                 let cfg = provider::init_provider_config(&project)?;
@@ -716,4 +800,11 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn default_home_dir() -> PathBuf {
+    std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
 }

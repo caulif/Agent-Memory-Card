@@ -18,6 +18,7 @@ use crate::config;
 use crate::draft::{self, DraftRecord};
 use crate::extract;
 use crate::fsutil;
+use crate::observation;
 use crate::review;
 use crate::rule_test;
 use crate::skilllet::{self, SkillletRecord};
@@ -77,6 +78,12 @@ mod tests {
         assert!(INDEX_HTML.contains("import-artifacts"));
         assert!(INDEX_HTML.contains("Import Artifacts"));
     }
+
+    #[test]
+    fn canvas_html_has_observations_panel() {
+        assert!(INDEX_HTML.contains("Observations"));
+        assert!(INDEX_HTML.contains("observation-count"));
+    }
 }
 
 #[derive(Clone)]
@@ -127,6 +134,7 @@ struct ApiState {
     skilllets: Vec<SkillletRecord>,
     drafts: Vec<DraftRecord>,
     imported_rules: serde_yaml::Value,
+    observations: Vec<observation::ObservationRecord>,
 }
 
 pub async fn serve(project: PathBuf, port: u16, open_browser: bool) -> Result<()> {
@@ -185,6 +193,7 @@ async fn api_state(State(state): State<AppState>) -> Json<ApiState> {
     let skill_index = config::load_skill_index(root).unwrap_or_default();
     let skilllets = skilllet::load_skilllets(root).unwrap_or_default();
     let drafts = draft::load_drafts(root).unwrap_or_default();
+    let observations = observation::load_observations(root).unwrap_or_default();
     let rules_path = config::kernel_dir(root).join("imported-rules.yml");
     let imported_rules = fs::read_to_string(rules_path)
         .ok()
@@ -198,6 +207,7 @@ async fn api_state(State(state): State<AppState>) -> Json<ApiState> {
         skilllets,
         drafts,
         imported_rules,
+        observations,
     })
 }
 
@@ -475,6 +485,8 @@ const INDEX_HTML: &str = r##"<!doctype html>
       <div id="skilllets"></div>
       <div class="pane-title">Draft Inbox <span id="draft-count">0</span></div>
       <div id="drafts"></div>
+      <div class="pane-title">Observations <span id="observation-count">0</span></div>
+      <div id="observations"></div>
     </aside>
 
     <main>
@@ -565,6 +577,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
       renderSkills();
       renderSkilllets();
       renderDrafts();
+      renderObservations();
       renderCanvas();
       renderMirrors();
       await renderTargetMatrix();
@@ -634,6 +647,19 @@ const INDEX_HTML: &str = r##"<!doctype html>
           </div>
         </div>
       `).join("") || `<div class="empty">No drafts yet.</div>`;
+    }
+
+    function renderObservations() {
+      const observations = state.observations || [];
+      document.getElementById("observation-count").textContent = observations.length;
+      document.getElementById("observations").innerHTML = observations.slice(0, 12).map(item => `
+        <div class="skill">
+          <strong>${escapeHtml(item.id)}</strong>
+          <p>${escapeHtml((item.body || "").slice(0, 180))}</p>
+          <span class="tag">${escapeHtml(item.agent || "local")}</span>
+          <span class="tag">${escapeHtml(item.source_kind)}</span>
+        </div>
+      `).join("") || `<div class="empty">No observations yet.</div>`;
     }
 
     function renderCanvas() {

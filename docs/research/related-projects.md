@@ -16,6 +16,7 @@ Agent-Kernel should avoid rebuilding mature pieces from nearby ecosystems. The v
 - Borrowed idea: progressive disclosure and on-demand skills keep always-loaded context small.
 - Product impact: Agent-Kernel treats full Skills as attachable capabilities, while rule files stay short build artifacts.
 - 2026-05-01 update: Claude Code documents personal/project/plugin skill locations, live skill change detection, nested `.claude/skills/` discovery, and optional supporting files (`references/`, `examples/`, `scripts/`) loaded only when needed. This reinforces Mirror mode and argues for keeping Skilllets small while preserving full Skill folders.
+- 2026-05-01 update: Claude Code local transcript JSONL files are treated as Observation inputs rather than direct Skilllet outputs. This preserves the review boundary before any learned preference is compiled back into `CLAUDE.md` or Skills.
 
 ## OpenAI Codex Skills And AGENTS.md
 
@@ -25,6 +26,7 @@ Agent-Kernel should avoid rebuilding mature pieces from nearby ecosystems. The v
 - Product impact: Codex export writes `AGENTS.md` and mirrors Skills into `.agents/skills`.
 - 2026-05-01 update: Codex skills use progressive disclosure with an initial skill list capped around 2% of the context window or 8,000 characters when unknown. Codex also treats plugins as the distribution unit for reusable skills. This directly supports Agent-Kernel's separation between tiny compiled instructions, referenced Skills, and installable Catalog packages.
 - 2026-05-01 update: Codex `AGENTS.md` discovery is layered: global guidance, then project files from root to current directory, with closer files overriding earlier guidance. Codex stops once the combined size reaches `project_doc_max_bytes` (32 KiB default), which supports adding future budget checks to Agent-Kernel build previews.
+- 2026-05-01 update: local Codex session JSONL files are a useful Observation source for Skilllet evolution. Agent-Kernel now treats Codex conversations as raw observations before any Skilllet synthesis.
 
 ## Letta Code / MemFS
 

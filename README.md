@@ -196,6 +196,12 @@ v0.31 adds richer Skilllet operations:
 2. `skilllet attach-skill` attaches a Skilllet as a generated supplement to an existing mirrored Skill.
 3. Mirrored Skills receive `AGENT_KERNEL_SKILLLETS.md` supplements without modifying the original Skill source.
 
+v0.32 starts the Observation Layer:
+
+1. Raw observations live under `.agent-kernel/observations`.
+2. `observe import --file <path>` imports a local transcript or note file with secret redaction.
+3. `observe local` scans common Claude Code and Codex local JSONL conversation folders and stores observations for later Skilllet synthesis.
+
 ## Commands
 
 ```bash
@@ -219,6 +225,9 @@ cargo run -- draft reject --id project:prefer-pnpm --project .
 cargo run -- extract --text "Always use pnpm for package management." --target codex --project .
 cargo run -- extract --file chat.md --target codex --project .
 cargo run -- extract --text "Always run cargo test before pushing." --target codex --provider local --dry-run --project .
+cargo run -- observe import --file chat.jsonl --agent claude-code --source-kind claude-code-session --project .
+cargo run -- observe local --project .
+cargo run -- observe list --project .
 cargo run -- provider init --project .
 cargo run -- provider show --project .
 cargo run -- extract --text "Always use token=supersecret123456789 before pushing." --target codex --provider local --dry-run --project .
