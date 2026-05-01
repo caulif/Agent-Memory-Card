@@ -218,6 +218,46 @@ mod tests {
             _ => panic!("expected app command"),
         }
     }
+
+    #[test]
+    fn cli_accepts_draft_update_command() {
+        let cli = Cli::parse_from([
+            "agent-kernel",
+            "draft",
+            "update",
+            "--id",
+            "project:prefer-bun",
+            "--title",
+            "Prefer Bun Runtime",
+            "--body",
+            "Use Bun everywhere.",
+            "--target",
+            "codex",
+            "--target",
+            "claude-code",
+            "--project",
+            ".",
+        ]);
+
+        match cli.command {
+            Commands::Draft {
+                command:
+                    DraftCommands::Update {
+                        id,
+                        title,
+                        body,
+                        targets,
+                        ..
+                    },
+            } => {
+                assert_eq!(id, "project:prefer-bun");
+                assert_eq!(title.as_deref(), Some("Prefer Bun Runtime"));
+                assert_eq!(body.as_deref(), Some("Use Bun everywhere."));
+                assert_eq!(targets, vec!["codex", "claude-code"]);
+            }
+            _ => panic!("expected draft update command"),
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -610,6 +650,24 @@ enum DraftCommands {
         project: PathBuf,
     },
 
+    /// Update editable Draft Inbox fields before approval.
+    Update {
+        #[arg(long)]
+        id: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        body: Option<String>,
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        scope: Option<String>,
+        #[arg(long = "target")]
+        targets: Vec<String>,
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
     /// Approve a Draft Inbox item into an owned Skilllet.
     Approve {
         #[arg(long)]
@@ -957,6 +1015,33 @@ async fn main() -> Result<()> {
                         println!("- {}: {} [{}]", record.id, record.title, record.status);
                     }
                 }
+            }
+            DraftCommands::Update {
+                id,
+                title,
+                body,
+                kind,
+                scope,
+                targets,
+                project,
+            } => {
+                let targets = if targets.is_empty() {
+                    None
+                } else {
+                    Some(targets)
+                };
+                let updated = draft::update_draft(
+                    &project,
+                    &id,
+                    draft::DraftUpdate {
+                        title,
+                        body,
+                        kind,
+                        scope,
+                        targets,
+                    },
+                )?;
+                println!("Updated draft `{}`: {}", updated.id, updated.title);
             }
             DraftCommands::Approve { id, project } => {
                 draft::approve_draft(&project, &id)?;

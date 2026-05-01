@@ -71,6 +71,7 @@
 - v0.49 范围：把 Skilllet Catalog / App Store 接入原生 app。选中项目后展示 Catalog Health、package provenance、安装状态，并支持把 catalog package 安装或分配给 Codex / Claude Code；重复分配时合并 targets，不覆盖已有 Agent 分配。
 - v0.50 范围：把 Skilllet × Agent target matrix 接入原生 app。选中项目后可以直接点击矩阵单元格给 Codex / Claude Code 分配或取消分配 Skilllet；同时防止通过 UI 产生空 targets，因为当前声明式语义中空 targets 表示“所有启用 Agent”。
 - v0.51 范围：让 Draft Inbox 具备可解释性。自动提炼出来的 Draft 需要保存并展示 `confidence`、`matched_template`、`reason`，dry-run 与原生 app 都能说明“为什么建议固化这条 Skilllet”，把进化系统的信任边界从“可审批”推进到“可审计”。
+- v0.52 范围：让 Draft Inbox 支持审批前编辑。CLI 提供 `draft update` 修改 title、body、kind、scope、targets，同时保留 evidence、confidence、matched_template、reason；原生 app 的 Draft 卡片提供 Edit / Save / Cancel，让用户能先修正候选，再决定 approve/reject。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 JavaScript registry 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。

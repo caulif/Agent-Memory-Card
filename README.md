@@ -317,6 +317,12 @@ v0.51 makes Draft Inbox candidates explainable:
 2. Dry-run extraction reports show why a candidate matched before writing Draft files.
 3. The native Draft Inbox shows compact confidence, template, and reason details so approval feels auditable instead of magical.
 
+v0.52 lets users edit Draft Inbox candidates before approval:
+
+1. `draft update` edits title, body, kind, scope, and Agent targets while preserving evidence and explainability fields.
+2. The native Draft Inbox has an inline Edit / Save / Cancel flow, so generated candidates can be corrected before becoming Skilllets.
+3. Draft editing keeps the trust boundary intact: updates do not approve the Draft or enable it automatically.
+
 See [docs/quickstart.md](docs/quickstart.md) for a hands-on walkthrough.
 See [docs/platform-support.md](docs/platform-support.md) for Windows / macOS / Linux support details.
 
@@ -341,6 +347,7 @@ cargo run -- skilllet merge --id project:frontend-defaults --title "Frontend Def
 cargo run -- skilllet attach-skill --id project:use-axios --skill superpowers:brainstorming --project .
 cargo run -- skilllet matrix --project .
 cargo run -- draft add --id project:prefer-bun --title "Prefer Bun" --body "Use Bun for JavaScript package management and scripts." --target codex --project .
+cargo run -- draft update --id project:prefer-bun --title "Prefer Bun Runtime" --body "Use Bun for package management, scripts, and JS runtime tasks." --target codex --target claude-code --project .
 cargo run -- draft approve --id project:prefer-bun --project .
 cargo run -- draft reject --id project:prefer-bun --project .
 cargo run -- extract --text "Always use Bun for JavaScript package management and scripts." --target codex --project .

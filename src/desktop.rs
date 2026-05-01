@@ -18,6 +18,9 @@ const CATALOG_TITLE: &str = "Skilllet Catalog";
 const SKILLLET_MATRIX_TITLE: &str = "Skilllet Target Matrix";
 const APPROVE_LABEL: &str = "Approve";
 const REJECT_LABEL: &str = "Reject";
+const EDIT_LABEL: &str = "Edit";
+const SAVE_LABEL: &str = "Save";
+const CANCEL_LABEL: &str = "Cancel";
 const INSTALL_CODEX_LABEL: &str = "Install Codex";
 const INSTALL_CLAUDE_LABEL: &str = "Install Claude";
 const CONFIDENCE_LABEL: &str = "Confidence";
@@ -44,6 +47,40 @@ struct UiPalette {
     accent_soft: egui::Color32,
     success: egui::Color32,
     danger: egui::Color32,
+}
+
+/// Tracks in-progress edits to a single draft card.
+#[derive(Debug, Clone)]
+struct DraftEditState {
+    draft_id: String,
+    title: String,
+    body: String,
+    kind: String,
+    scope: String,
+    targets_text: String,
+}
+
+enum EditAction {
+    Start(DraftEditState),
+    Save(DraftEditState),
+    Cancel,
+}
+
+/// Reduces the current-frame local edit and an optional action into the next draft_edit state.
+/// - `None` action: persist local_edit so TextEdit mutations survive between frames.
+/// - `Start` action: replace with a fresh edit state.
+/// - `Save` action: set state for downstream save (caller clears after save_draft_edit_for_selected).
+/// - `Cancel` action: clear edit state.
+fn reduce_edit_state(
+    local_edit: Option<DraftEditState>,
+    action: &Option<EditAction>,
+) -> Option<DraftEditState> {
+    match action {
+        Some(EditAction::Start(state)) => Some(state.clone()),
+        Some(EditAction::Save(state)) => Some(state.clone()),
+        Some(EditAction::Cancel) => None,
+        None => local_edit,
+    }
 }
 
 fn ui_palette() -> UiPalette {
@@ -256,6 +293,9 @@ mod tests {
         assert_eq!(SKILLLET_MATRIX_TITLE, "Skilllet Target Matrix");
         assert_eq!(APPROVE_LABEL, "Approve");
         assert_eq!(REJECT_LABEL, "Reject");
+        assert_eq!(EDIT_LABEL, "Edit");
+        assert_eq!(SAVE_LABEL, "Save");
+        assert_eq!(CANCEL_LABEL, "Cancel");
         assert_eq!(INSTALL_CODEX_LABEL, "Install Codex");
         assert_eq!(INSTALL_CLAUDE_LABEL, "Install Claude");
         assert_eq!(CONFIDENCE_LABEL, "Confidence");
@@ -434,6 +474,9 @@ mod tests {
         let labels = &[
             APPROVE_LABEL,
             REJECT_LABEL,
+            EDIT_LABEL,
+            SAVE_LABEL,
+            CANCEL_LABEL,
             INSTALL_CODEX_LABEL,
             INSTALL_CLAUDE_LABEL,
         ];
@@ -452,6 +495,141 @@ mod tests {
         // Verify palette tokens are coherent: card is lighter than background
         assert!(palette.card.r() > palette.background.r());
         assert!(palette.sidebar.r() < palette.card.r());
+    }
+
+    #[test]
+    fn native_draft_edit_state_captures_fields_from_record() {
+        let state = DraftEditState {
+            draft_id: "project:prefer-bun".to_string(),
+            title: "Prefer Bun".to_string(),
+            body: "Use Bun.".to_string(),
+            kind: "preference".to_string(),
+            scope: "project".to_string(),
+            targets_text: "codex, claude-code".to_string(),
+        };
+
+        assert_eq!(state.draft_id, "project:prefer-bun");
+        assert_eq!(state.title, "Prefer Bun");
+        assert_eq!(state.body, "Use Bun.");
+        assert_eq!(state.kind, "preference");
+        assert_eq!(state.scope, "project");
+        assert_eq!(state.targets_text, "codex, claude-code");
+    }
+
+    #[test]
+    fn native_draft_update_edits_without_approving() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        draft::add_draft(
+            temp.path(),
+            draft::NewDraft {
+                id: "project:prefer-bun".to_string(),
+                title: "Prefer Bun".to_string(),
+                body: "Use Bun for JavaScript package management and scripts.".to_string(),
+                kind: "preference".to_string(),
+                scope: "project".to_string(),
+                targets: vec!["codex".to_string()],
+                evidence: "native app test".to_string(),
+                confidence: None,
+                reason: None,
+                matched_template: None,
+            },
+        )
+        .expect("add draft");
+
+        let updated = draft::update_draft(
+            temp.path(),
+            "project:prefer-bun",
+            draft::DraftUpdate {
+                title: Some("Prefer Bun Runtime".to_string()),
+                body: Some("Use Bun everywhere.".to_string()),
+                kind: Some("constraint".to_string()),
+                scope: Some("global".to_string()),
+                targets: Some(vec!["codex".to_string(), "claude-code".to_string()]),
+            },
+        )
+        .expect("update draft");
+
+        assert_eq!(updated.title, "Prefer Bun Runtime");
+        assert_eq!(updated.body, "Use Bun everywhere.");
+        assert_eq!(updated.kind, "constraint");
+        assert_eq!(updated.scope, "global");
+        assert_eq!(updated.targets, vec!["claude-code", "codex"]);
+
+        // Draft should still exist after update (not approved)
+        let drafts = draft::load_drafts(temp.path()).expect("drafts");
+        assert_eq!(drafts.len(), 1);
+        assert_eq!(drafts[0].status, "draft");
+    }
+
+    #[test]
+    fn native_draft_edit_persists_text_edits_between_frames() {
+        // The production reducer is reduce_edit_state. This test exercises it
+        // directly so the regression test will FAIL if the reducer is ever
+        // weakened (e.g. TextEdit mutations stop surviving between frames).
+        let start_state = DraftEditState {
+            draft_id: "test:id".to_string(),
+            title: "Original Title".to_string(),
+            body: "Original body text.".to_string(),
+            kind: "preference".to_string(),
+            scope: "project".to_string(),
+            targets_text: "codex, claude-code".to_string(),
+        };
+        let start_action = EditAction::Start(start_state);
+
+        // Frame 1: user clicks Edit, so Start action sets draft_edit.
+        let draft_edit = reduce_edit_state(None, &Some(start_action));
+        assert_eq!(draft_edit.as_ref().unwrap().title, "Original Title");
+        assert_eq!(draft_edit.as_ref().unwrap().body, "Original body text.");
+
+        // Frame 2: render clones draft_edit into local_edit, TextEdit mutates it
+        let mut local_edit = draft_edit.clone();
+        local_edit.as_mut().unwrap().title = "Modified Title".to_string();
+        local_edit.as_mut().unwrap().body = "Modified body text.".to_string();
+        // No action this frame; reducer must persist local_edit.
+        let draft_edit = reduce_edit_state(local_edit, &None);
+        assert_eq!(draft_edit.as_ref().unwrap().title, "Modified Title");
+        assert_eq!(draft_edit.as_ref().unwrap().body, "Modified body text.");
+
+        // Frame 3: next clone must see persisted mutations
+        let persisted = draft_edit.clone().expect("state still present");
+        assert_eq!(persisted.title, "Modified Title");
+        assert_eq!(persisted.body, "Modified body text.");
+
+        // Cancel clears the edit state
+        let cancel_action = EditAction::Cancel;
+        let draft_edit = reduce_edit_state(draft_edit, &Some(cancel_action));
+        assert!(draft_edit.is_none(), "Cancel clears edit state");
+
+        // Start overrides with fresh state from the draft record
+        let start_action2 = EditAction::Start(persisted.clone());
+        // Start uses the state supplied by the selected draft record.
+        let draft_edit = reduce_edit_state(None, &Some(start_action2));
+        assert_eq!(
+            draft_edit.as_ref().unwrap().title,
+            "Modified Title",
+            "Start uses whatever state is given (from draft record)"
+        );
+
+        // Save sets state (so save_draft_edit_for_selected can read it)
+        let save_edit = draft_edit.clone().unwrap();
+        let save_action = EditAction::Save(save_edit);
+        let draft_edit = reduce_edit_state(draft_edit, &Some(save_action));
+        assert!(
+            draft_edit.is_some(),
+            "Save sets state for downstream consumption"
+        );
+    }
+
+    #[test]
+    fn native_edit_labels_are_compact_for_min_width() {
+        // All action labels must be short enough to avoid wrapping at min width
+        for label in &[EDIT_LABEL, SAVE_LABEL, CANCEL_LABEL] {
+            assert!(
+                label.len() <= 10,
+                "label `{label}` is {len} chars; keep it very short for min-width layout",
+                len = label.len()
+            );
+        }
     }
 }
 
@@ -575,6 +753,7 @@ struct AgentKernelApp {
     selected_path: Option<String>,
     status: String,
     report: String,
+    draft_edit: Option<DraftEditState>,
 }
 
 impl AgentKernelApp {
@@ -590,6 +769,7 @@ impl AgentKernelApp {
             selected_path: None,
             status: String::new(),
             report: String::new(),
+            draft_edit: None,
         };
         app.refresh_with_scan();
         app
@@ -684,6 +864,49 @@ impl AgentKernelApp {
             }
             Err(err) => {
                 self.report = format!("Draft decision failed for `{draft_id}`: {err}");
+            }
+        }
+    }
+
+    fn save_draft_edit_for_selected(&mut self) {
+        let Some(project) = self.selected_project() else {
+            self.report = "Select a project first.".to_string();
+            self.draft_edit = None;
+            return;
+        };
+        let Some(ref edit) = self.draft_edit else {
+            return;
+        };
+        let update = draft::DraftUpdate {
+            title: Some(edit.title.clone()),
+            body: Some(edit.body.clone()),
+            kind: Some(edit.kind.clone()),
+            scope: Some(edit.scope.clone()),
+            targets: {
+                let targets: Vec<String> = if edit.targets_text.trim().is_empty() {
+                    Vec::new()
+                } else {
+                    edit.targets_text
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                };
+                Some(targets)
+            },
+        };
+        let draft_id = edit.draft_id.clone();
+        match draft::update_draft(&PathBuf::from(&project.path), &draft_id, update) {
+            Ok(updated) => {
+                self.draft_edit = None;
+                self.report = format!(
+                    "Draft `{}` updated for {}\nTitle: {}\nRun Review to refresh the inbox.",
+                    updated.id, project.name, updated.title
+                );
+            }
+            Err(err) => {
+                self.draft_edit = None;
+                self.report = format!("Draft update failed for `{draft_id}`: {err}");
             }
         }
     }
@@ -1038,6 +1261,8 @@ impl AgentKernelApp {
             }
 
             let mut decision: Option<(String, bool)> = None;
+            let mut edit_action: Option<EditAction> = None;
+            let mut local_edit: Option<DraftEditState> = self.draft_edit.clone();
             egui::ScrollArea::vertical()
                 .id_salt(DRAFT_SCROLL_ID)
                 .max_height(260.0)
@@ -1045,67 +1270,144 @@ impl AgentKernelApp {
                 .show(ui, |ui| {
                     for draft in &drafts {
                         subtle_card_frame().show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    egui::RichText::new(&draft.title)
-                                        .strong()
-                                        .color(palette.text),
+                            let is_editing =
+                                local_edit.as_ref().is_some_and(|e| e.draft_id == draft.id);
+
+                            if is_editing {
+                                let edit = local_edit.as_mut().unwrap();
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        egui::RichText::new("Editing")
+                                            .size(12.0)
+                                            .color(palette.accent),
+                                    );
+                                    ui.monospace(&draft.id);
+                                });
+                                ui.add_space(4.0);
+                                ui.horizontal(|ui| {
+                                    ui.label("Title");
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut edit.title)
+                                            .hint_text("Draft title")
+                                            .desired_width(ui.available_width()),
+                                    );
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.label("Kind");
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut edit.kind)
+                                            .hint_text("preference")
+                                            .desired_width(120.0),
+                                    );
+                                    ui.label("Scope");
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut edit.scope)
+                                            .hint_text("project")
+                                            .desired_width(120.0),
+                                    );
+                                });
+                                ui.label("Body");
+                                ui.add(
+                                    egui::TextEdit::multiline(&mut edit.body)
+                                        .hint_text("Draft body")
+                                        .desired_rows(2)
+                                        .desired_width(ui.available_width()),
                                 );
-                                Self::pill(ui, &draft.kind, palette.accent_soft);
-                                Self::pill(ui, &draft.scope, palette.card);
-                            });
-                            ui.monospace(&draft.id);
-                            ui.label(egui::RichText::new(&draft.body).color(palette.text));
-                            if !draft.targets.is_empty() {
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "Targets: {}",
-                                        draft.targets.join(", ")
-                                    ))
-                                    .size(12.0)
-                                    .color(palette.muted),
+                                ui.label("Targets");
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut edit.targets_text)
+                                        .hint_text("codex, claude-code")
+                                        .desired_width(ui.available_width()),
                                 );
-                            }
-                            if let Some(confidence) = draft.confidence {
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "{CONFIDENCE_LABEL}: {:.0}%",
-                                        confidence * 100.0
-                                    ))
-                                    .size(12.0)
-                                    .color(palette.success),
-                                );
-                            }
-                            if let Some(template) = draft.matched_template.as_deref() {
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "{MATCHED_TEMPLATE_LABEL}: {template}"
-                                    ))
-                                    .size(12.0)
-                                    .color(palette.muted),
-                                );
-                            }
-                            if let Some(reason) = draft.reason.as_deref() {
-                                ui.label(
-                                    egui::RichText::new(format!("{REASON_LABEL}: {reason}"))
+                                ui.add_space(4.0);
+                                ui.horizontal(|ui| {
+                                    if ui.add(primary_button(SAVE_LABEL)).clicked() {
+                                        edit_action =
+                                            Some(EditAction::Save(local_edit.clone().unwrap()));
+                                    }
+                                    if ui.add(danger_button(CANCEL_LABEL)).clicked() {
+                                        edit_action = Some(EditAction::Cancel);
+                                    }
+                                });
+                            } else {
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        egui::RichText::new(&draft.title)
+                                            .strong()
+                                            .color(palette.text),
+                                    );
+                                    Self::pill(ui, &draft.kind, palette.accent_soft);
+                                    Self::pill(ui, &draft.scope, palette.card);
+                                });
+                                ui.monospace(&draft.id);
+                                ui.label(egui::RichText::new(&draft.body).color(palette.text));
+                                if !draft.targets.is_empty() {
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "Targets: {}",
+                                            draft.targets.join(", ")
+                                        ))
                                         .size(12.0)
                                         .color(palette.muted),
-                                );
+                                    );
+                                }
+                                if let Some(confidence) = draft.confidence {
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{CONFIDENCE_LABEL}: {:.0}%",
+                                            confidence * 100.0
+                                        ))
+                                        .size(12.0)
+                                        .color(palette.success),
+                                    );
+                                }
+                                if let Some(template) = draft.matched_template.as_deref() {
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{MATCHED_TEMPLATE_LABEL}: {template}"
+                                        ))
+                                        .size(12.0)
+                                        .color(palette.muted),
+                                    );
+                                }
+                                if let Some(reason) = draft.reason.as_deref() {
+                                    ui.label(
+                                        egui::RichText::new(format!("{REASON_LABEL}: {reason}"))
+                                            .size(12.0)
+                                            .color(palette.muted),
+                                    );
+                                }
+                                ui.horizontal(|ui| {
+                                    if ui.add(primary_button(APPROVE_LABEL)).clicked() {
+                                        decision = Some((draft.id.clone(), true));
+                                    }
+                                    if ui.add(danger_button(REJECT_LABEL)).clicked() {
+                                        decision = Some((draft.id.clone(), false));
+                                    }
+                                    if ui.add(secondary_button(EDIT_LABEL)).clicked() {
+                                        edit_action = Some(EditAction::Start(DraftEditState {
+                                            draft_id: draft.id.clone(),
+                                            title: draft.title.clone(),
+                                            body: draft.body.clone(),
+                                            kind: draft.kind.clone(),
+                                            scope: draft.scope.clone(),
+                                            targets_text: draft.targets.join(", "),
+                                        }));
+                                    }
+                                });
                             }
-                            ui.horizontal(|ui| {
-                                if ui.add(primary_button(APPROVE_LABEL)).clicked() {
-                                    decision = Some((draft.id.clone(), true));
-                                }
-                                if ui.add(danger_button(REJECT_LABEL)).clicked() {
-                                    decision = Some((draft.id.clone(), false));
-                                }
-                            });
                         });
                     }
                 });
 
+            // Persist TextEdit mutations and apply the edit action.
+            self.draft_edit = reduce_edit_state(local_edit, &edit_action);
+
             if let Some((draft_id, approve)) = decision {
                 self.decide_draft_for_selected(&draft_id, approve);
+            }
+            if matches!(edit_action, Some(EditAction::Save(_))) {
+                self.save_draft_edit_for_selected();
             }
         });
     }

@@ -132,7 +132,13 @@ cargo run -- extract --text "以后前端请求统一使用 Axios，不要再用
 cargo run -- draft list --project .
 ```
 
-也可以打开原生 app，在选中的项目页直接查看 `Draft Inbox`，点击 `Approve` 或 `Reject`。
+如果候选内容需要微调，可以在批准前更新它：
+
+```bash
+cargo run -- draft update --id project:use-axios --title "Use Axios" --body "Use Axios for frontend HTTP requests." --target codex --target claude-code --project .
+```
+
+也可以打开原生 app，在选中的项目页直接查看 `Draft Inbox`，点击 `Edit` 修改标题、类型、作用域、正文和目标 Agent，再点击 `Save`。保存只更新 Draft，不会自动批准或启用；确认无误后再点击 `Approve`，不想保留则点击 `Reject`。
 
 高置信模板生成的 Draft 会带上可解释信息：
 
@@ -251,6 +257,7 @@ cargo run -- preference test --text "以后前端请求统一使用 Axios，不�
 cargo run -- extract --text "以后前端请求统一使用 Axios，不要再用 Fetch。" --target codex --dry-run --project .
 cargo run -- extract --text "以后前端请求统一使用 Axios，不要再用 Fetch。" --target codex --project .
 cargo run -- draft list --project .
+cargo run -- draft update --id project:use-axios --target codex --target claude-code --project .
 cargo run -- draft approve --id project:use-axios --project .
 cargo run -- build --preview --project .
 cargo run -- build --project .
@@ -265,6 +272,6 @@ cargo run -- test-rules --project .
 - LLM provider 仍是配置地基，本地提取器是主路径
 - Cursor / Cline 不在当前 MVP 主线
 - 原生 app 已经能浏览项目、Review、触发对话进化，并处理 Draft Inbox；更细的 Canvas 拖拽、App Store、Preference Registry 编辑体验仍会继续补强
-- 原生 app 已经接入 Skilllet Catalog、Skilllet target matrix 和 Draft explainability；后续还需要把包详情编辑、Skilllet remove/disable、Draft 编辑/合并做得更顺手
+- 原生 app 已经接入 Skilllet Catalog、Skilllet target matrix、Draft explainability 和 Draft inline editing；后续还需要把包详情编辑、Skilllet remove/disable、Draft 合并做得更顺手
 
-下一步最值得补的是 Draft 编辑/合并能力和更完整的 Skilllet lineage，让审查体验继续靠近一个可解释的进化系统。
+下一步最值得补的是 Draft 合并能力和更完整的 Skilllet lineage，让审查体验继续靠近一个可解释的进化系统。
