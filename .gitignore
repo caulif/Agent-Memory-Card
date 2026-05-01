@@ -1,4 +1,6 @@
 /target/
+/.playwright-cli/
+/output/
 /.agent-kernel/cache/
 /.agent-kernel/canvas.state.json
 /.agent-kernel/imported-rules.yml

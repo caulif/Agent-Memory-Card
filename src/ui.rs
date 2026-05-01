@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::response::Html;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -16,8 +17,38 @@ use crate::config;
 use crate::draft::{self, DraftRecord};
 use crate::extract;
 use crate::fsutil;
+use crate::review;
 use crate::rule_test;
 use crate::skilllet::{self, SkillletRecord};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn review_json_value_includes_summary_and_drafts() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        draft::add_draft(
+            temp.path(),
+            draft::NewDraft {
+                id: "project:prefer-pnpm".to_string(),
+                title: "Prefer pnpm".to_string(),
+                body: "Use pnpm for package management.".to_string(),
+                kind: "preference".to_string(),
+                scope: "project".to_string(),
+                targets: vec!["codex".to_string()],
+                evidence: "manual test".to_string(),
+            },
+        )
+        .expect("add draft");
+
+        let value = review_json_value(temp.path()).expect("review json");
+
+        assert_eq!(value["ok"], true);
+        assert_eq!(value["report"]["summary"]["drafts_pending"], 1);
+        assert_eq!(value["report"]["drafts"][0]["id"], "project:prefer-pnpm");
+    }
+}
 
 #[derive(Clone)]
 struct AppState {
@@ -59,6 +90,7 @@ pub async fn serve(project: PathBuf, port: u16, open_browser: bool) -> Result<()
 
     let app = Router::new()
         .route("/", get(index))
+        .route("/favicon.ico", get(favicon))
         .route("/api/state", get(api_state))
         .route("/api/mirror", post(api_mirror))
         .route("/api/draft/approve", post(api_draft_approve))
@@ -68,6 +100,7 @@ pub async fn serve(project: PathBuf, port: u16, open_browser: bool) -> Result<()
         .route("/api/sync", post(api_sync))
         .route("/api/status", get(api_status))
         .route("/api/rule-tests", get(api_rule_tests))
+        .route("/api/review", get(api_review))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -85,6 +118,10 @@ pub async fn serve(project: PathBuf, port: u16, open_browser: bool) -> Result<()
 
 async fn index() -> Html<&'static str> {
     Html(INDEX_HTML)
+}
+
+async fn favicon() -> StatusCode {
+    StatusCode::NO_CONTENT
 }
 
 async fn api_state(State(state): State<AppState>) -> Json<ApiState> {
@@ -201,6 +238,21 @@ async fn api_rule_tests(State(state): State<AppState>) -> Json<serde_json::Value
     }
 }
 
+async fn api_review(State(state): State<AppState>) -> Json<serde_json::Value> {
+    match review_json_value(state.project_root.as_ref()) {
+        Ok(value) => Json(value),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+fn review_json_value(project_root: &std::path::Path) -> Result<serde_json::Value> {
+    let report = review::review_project(project_root)?;
+    Ok(serde_json::json!({
+        "ok": true,
+        "report": report,
+    }))
+}
+
 const INDEX_HTML: &str = r##"<!doctype html>
 <html lang="en">
 <head>
@@ -217,6 +269,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
       --line: #d8dee8;
       --accent: #0f766e;
       --accent-2: #2563eb;
+      --good: #15803d;
       --warn: #b45309;
       --danger: #b91c1c;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -265,6 +318,12 @@ const INDEX_HTML: &str = r##"<!doctype html>
     .card { border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: #fbfcfe; }
     .card h4 { margin: 0 0 8px; font-size: 14px; }
     .card p { color: var(--muted); font-size: 12px; line-height: 1.4; }
+    .review-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .metric { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfcfe; }
+    .metric strong { display: block; font-size: 18px; }
+    .metric span { color: var(--muted); font-size: 11px; }
+    .ok { color: var(--good); }
+    .bad { color: var(--danger); }
   </style>
 </head>
 <body>
@@ -313,6 +372,10 @@ const INDEX_HTML: &str = r##"<!doctype html>
         <div id="mirrors"></div>
       </section>
       <section>
+        <h3>Review</h3>
+        <div id="review"></div>
+      </section>
+      <section>
         <h3>Mirror Status</h3>
         <div id="mirror-status"></div>
       </section>
@@ -328,6 +391,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
 
     <footer>
       <button class="btn primary" id="preview">Preview Build</button>
+      <button class="btn" id="review-button">Review</button>
       <button class="btn" id="run-rule-tests">Rule CI</button>
       <button class="btn" id="sync">Sync Mirrors</button>
       <button class="btn" id="refresh">Refresh</button>
@@ -366,6 +430,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
       renderMirrors();
       await renderStatus();
       await renderRuleTests(false);
+      await renderReview(false);
       renderRules();
       renderStore();
       renderExtractTargets();
@@ -492,6 +557,35 @@ const INDEX_HTML: &str = r##"<!doctype html>
       }
     }
 
+    async function renderReview(writeOutput) {
+      const res = await fetch("/api/review");
+      const payload = await res.json();
+      if (!payload.ok) {
+        document.getElementById("review").innerHTML = `<p>${escapeHtml(payload.error)}</p>`;
+        if (writeOutput) document.getElementById("build-output").textContent = payload.error;
+        return;
+      }
+      const report = payload.report;
+      const summary = report.summary || {};
+      const failed = Number(summary.rule_tests_failed || 0);
+      const pending = Number(summary.drafts_pending || 0);
+      const actions = report.build_preview?.actions || [];
+      document.getElementById("review").innerHTML = `
+        <div class="review-grid">
+          <div class="metric"><strong>${pending}</strong><span>Pending drafts</span></div>
+          <div class="metric"><strong class="${failed ? "bad" : "ok"}">${failed}</strong><span>Rule CI failures</span></div>
+        </div>
+        <p>${actions.length} build actions · ${(report.mirror_status?.warnings || []).length} warnings</p>
+      `;
+      if (writeOutput) {
+        document.getElementById("build-output").textContent = [
+          `Drafts pending: ${pending}`,
+          `Rule CI failures: ${failed}`,
+          `Build actions: ${actions.length}`
+        ].join("\n");
+      }
+    }
+
     function renderRules() {
       const rules = Array.isArray(state.imported_rules) ? state.imported_rules : [];
       document.getElementById("rules").innerHTML = rules.length ? `<ul>${rules.map(rule =>
@@ -585,6 +679,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
       const result = await res.json();
       document.getElementById("build-output").textContent = result.ok ? `Approved draft: ${id}` : result.error;
       await loadState();
+      await renderReview(false);
     }
 
     async function rejectDraft(id) {
@@ -596,6 +691,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
       const result = await res.json();
       document.getElementById("build-output").textContent = result.ok ? `Rejected draft: ${id}` : result.error;
       await loadState();
+      await renderReview(false);
     }
 
     async function syncMirrors() {
@@ -628,6 +724,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
 
     document.getElementById("search").addEventListener("input", renderSkills);
     document.getElementById("preview").addEventListener("click", previewBuild);
+    document.getElementById("review-button").addEventListener("click", () => renderReview(true));
     document.getElementById("run-rule-tests").addEventListener("click", () => renderRuleTests(true));
     document.getElementById("sync").addEventListener("click", syncMirrors);
     document.getElementById("extract-drafts").addEventListener("click", extractDrafts);

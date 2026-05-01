@@ -100,6 +100,12 @@ v0.15 starts the interactive review protocol foundation:
 3. `review --reject-draft <id>` removes an unwanted draft before rendering the report.
 4. These flags are the scriptable base for a later `git add -p` style CLI.
 
+v0.16 brings review into the Canvas:
+
+1. `/api/review` exposes the same structured review report to the UI.
+2. The inspector shows pending Drafts, Rule CI failures, build action count, and warnings.
+3. The footer Review button refreshes the review report without leaving the Canvas.
+
 ## Commands
 
 ```bash
@@ -205,6 +211,7 @@ The Canvas UI exposes:
 - `/api/sync` for syncing declared mirrors and generated artifacts
 - `/api/status` for synced / missing / drifted mirror state
 - `/api/rule-tests` for structured Rule CI results
+- `/api/review` for the unified review protocol used by the Canvas
 
 ## Generated State
 
