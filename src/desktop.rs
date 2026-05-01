@@ -1,4 +1,6 @@
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::thread;
 
 use anyhow::{Result, anyhow};
 use eframe::egui;
@@ -12,20 +14,20 @@ use crate::review;
 use crate::skilllet;
 
 const APP_TITLE: &str = "Agent-Kernel";
-const APP_SUBTITLE: &str = "Local Skilllet evolution for Claude Code and Codex";
-const DRAFT_INBOX_TITLE: &str = "Draft Inbox";
-const CATALOG_TITLE: &str = "Skilllet Catalog";
-const SKILLLET_MATRIX_TITLE: &str = "Skilllet Target Matrix";
-const APPROVE_LABEL: &str = "Approve";
-const REJECT_LABEL: &str = "Reject";
-const EDIT_LABEL: &str = "Edit";
-const SAVE_LABEL: &str = "Save";
-const CANCEL_LABEL: &str = "Cancel";
-const INSTALL_CODEX_LABEL: &str = "Install Codex";
-const INSTALL_CLAUDE_LABEL: &str = "Install Claude";
-const CONFIDENCE_LABEL: &str = "Confidence";
-const MATCHED_TEMPLATE_LABEL: &str = "Matched Template";
-const REASON_LABEL: &str = "Reason";
+const APP_SUBTITLE: &str = "Claude Code / Codex 本地 Skilllet 进化引擎";
+const DRAFT_INBOX_TITLE: &str = "待审候选";
+const CATALOG_TITLE: &str = "技能商店";
+const SKILLLET_MATRIX_TITLE: &str = "Agent 分配矩阵";
+const APPROVE_LABEL: &str = "批准";
+const REJECT_LABEL: &str = "拒绝";
+const EDIT_LABEL: &str = "编辑";
+const SAVE_LABEL: &str = "保存";
+const CANCEL_LABEL: &str = "取消";
+const INSTALL_CODEX_LABEL: &str = "安装到 Codex";
+const INSTALL_CLAUDE_LABEL: &str = "安装到 Claude";
+const CONFIDENCE_LABEL: &str = "可信度";
+const MATCHED_TEMPLATE_LABEL: &str = "匹配模板";
+const REASON_LABEL: &str = "生成原因";
 const SIDEBAR_SCROLL_ID: &str = "native-project-sidebar-scroll";
 const DRAFT_SCROLL_ID: &str = "native-draft-inbox-scroll";
 const CATALOG_SCROLL_ID: &str = "native-catalog-scroll";
@@ -33,9 +35,9 @@ const MATRIX_SCROLL_ID: &str = "native-skilllet-matrix-scroll";
 const OUTPUT_SCROLL_ID: &str = "native-output-scroll";
 const WORKSPACE_SCROLL_ID: &str = "native-project-workspace-scroll";
 const MAX_HEADER_MARKERS: usize = 3;
-const MERGE_SELECTED_LABEL: &str = "Merge Selected";
-const MERGE_CONFIRM_LABEL: &str = "Create Merged Draft";
-const MERGE_CANCEL_LABEL: &str = "Deselect All";
+const MERGE_SELECTED_LABEL: &str = "合并所选";
+const MERGE_CONFIRM_LABEL: &str = "创建合并候选";
+const MERGE_CANCEL_LABEL: &str = "清空选择";
 
 #[derive(Debug, Clone, Copy)]
 struct UiPalette {
@@ -69,6 +71,28 @@ struct MergeEditState {
     merged_id: String,
     merged_title: String,
     targets_text: String,
+}
+
+struct ProjectCache {
+    project_path: Option<String>,
+    drafts: Vec<draft::DraftRecord>,
+    catalog_validation: Option<catalog::CatalogValidationReport>,
+    catalog_status: Option<catalog::CatalogStatus>,
+    skilllet_matrix: Option<skilllet::SkillletTargetMatrix>,
+    error: Option<String>,
+}
+
+enum UiTaskResult {
+    Scan {
+        status: String,
+        registry: ProjectRegistry,
+        selected_path: Option<String>,
+        cache: ProjectCache,
+    },
+    Report {
+        report: String,
+        cache: Option<ProjectCache>,
+    },
 }
 
 enum EditAction {
@@ -211,11 +235,11 @@ fn visible_header_markers(markers: &[String]) -> Vec<String> {
     let mut visible = markers
         .iter()
         .take(MAX_HEADER_MARKERS)
-        .map(|marker| format!("Marker: {}", compact_marker(marker)))
+        .map(|marker| format!("标记：{}", compact_marker(marker)))
         .collect::<Vec<_>>();
     if markers.len() > MAX_HEADER_MARKERS {
         visible.push(format!(
-            "+{} more markers",
+            "还有 {} 个标记",
             markers.len() - MAX_HEADER_MARKERS
         ));
     }
@@ -236,6 +260,66 @@ fn compact_marker(marker: &str) -> String {
         .rev()
         .collect::<String>();
     format!("…{tail}")
+}
+
+fn empty_project_cache() -> ProjectCache {
+    ProjectCache {
+        project_path: None,
+        drafts: Vec::new(),
+        catalog_validation: None,
+        catalog_status: None,
+        skilllet_matrix: None,
+        error: None,
+    }
+}
+
+fn load_project_cache(project: Option<&RegisteredProject>) -> ProjectCache {
+    let Some(project) = project else {
+        return empty_project_cache();
+    };
+    let root = PathBuf::from(&project.path);
+    let mut cache = ProjectCache {
+        project_path: Some(project.path.clone()),
+        drafts: Vec::new(),
+        catalog_validation: None,
+        catalog_status: None,
+        skilllet_matrix: None,
+        error: None,
+    };
+
+    match draft::load_drafts(&root) {
+        Ok(drafts) => cache.drafts = drafts,
+        Err(err) => cache.error = Some(format!("候选读取失败：{err}")),
+    }
+
+    match catalog::load_or_default_catalog(&root) {
+        Ok(cat) => cache.catalog_validation = Some(catalog::validate_catalog(&cat)),
+        Err(err) => {
+            if cache.error.is_none() {
+                cache.error = Some(format!("技能商店读取失败：{err}"));
+            }
+        }
+    }
+
+    match catalog::catalog_status(&root) {
+        Ok(status) => cache.catalog_status = Some(status),
+        Err(err) => {
+            if cache.error.is_none() {
+                cache.error = Some(format!("技能商店状态读取失败：{err}"));
+            }
+        }
+    }
+
+    match skilllet::skilllet_target_matrix(&root) {
+        Ok(matrix) => cache.skilllet_matrix = Some(matrix),
+        Err(err) => {
+            if cache.error.is_none() {
+                cache.error = Some(format!("Agent 分配矩阵读取失败：{err}"));
+            }
+        }
+    }
+
+    cache
 }
 
 #[cfg(test)]
@@ -299,28 +383,25 @@ mod tests {
 
     #[test]
     fn native_review_inbox_labels_are_stable() {
-        assert_eq!(DRAFT_INBOX_TITLE, "Draft Inbox");
-        assert_eq!(CATALOG_TITLE, "Skilllet Catalog");
-        assert_eq!(SKILLLET_MATRIX_TITLE, "Skilllet Target Matrix");
-        assert_eq!(APPROVE_LABEL, "Approve");
-        assert_eq!(REJECT_LABEL, "Reject");
-        assert_eq!(EDIT_LABEL, "Edit");
-        assert_eq!(SAVE_LABEL, "Save");
-        assert_eq!(CANCEL_LABEL, "Cancel");
-        assert_eq!(INSTALL_CODEX_LABEL, "Install Codex");
-        assert_eq!(INSTALL_CLAUDE_LABEL, "Install Claude");
-        assert_eq!(CONFIDENCE_LABEL, "Confidence");
-        assert_eq!(MATCHED_TEMPLATE_LABEL, "Matched Template");
-        assert_eq!(REASON_LABEL, "Reason");
+        assert_eq!(DRAFT_INBOX_TITLE, "待审候选");
+        assert_eq!(CATALOG_TITLE, "技能商店");
+        assert_eq!(SKILLLET_MATRIX_TITLE, "Agent 分配矩阵");
+        assert_eq!(APPROVE_LABEL, "批准");
+        assert_eq!(REJECT_LABEL, "拒绝");
+        assert_eq!(EDIT_LABEL, "编辑");
+        assert_eq!(SAVE_LABEL, "保存");
+        assert_eq!(CANCEL_LABEL, "取消");
+        assert_eq!(INSTALL_CODEX_LABEL, "安装到 Codex");
+        assert_eq!(INSTALL_CLAUDE_LABEL, "安装到 Claude");
+        assert_eq!(CONFIDENCE_LABEL, "可信度");
+        assert_eq!(MATCHED_TEMPLATE_LABEL, "匹配模板");
+        assert_eq!(REASON_LABEL, "生成原因");
     }
 
     #[test]
     fn native_modern_ui_tokens_are_stable() {
         assert_eq!(APP_TITLE, "Agent-Kernel");
-        assert_eq!(
-            APP_SUBTITLE,
-            "Local Skilllet evolution for Claude Code and Codex"
-        );
+        assert_eq!(APP_SUBTITLE, "Claude Code / Codex 本地 Skilllet 进化引擎");
         assert_eq!(SIDEBAR_SCROLL_ID, "native-project-sidebar-scroll");
         assert_eq!(DRAFT_SCROLL_ID, "native-draft-inbox-scroll");
         assert_eq!(CATALOG_SCROLL_ID, "native-catalog-scroll");
@@ -347,7 +428,7 @@ mod tests {
         let visible = visible_header_markers(&markers);
 
         assert_eq!(visible.len(), 4);
-        assert_eq!(visible[3], "+2 more markers");
+        assert_eq!(visible[3], "还有 2 个标记");
         assert!(visible.iter().all(|marker| marker.chars().count() <= 40));
     }
 
@@ -887,6 +968,192 @@ mod tests {
         assert_eq!(axios.confidence, Some(0.92));
         assert!(axios.reason.as_deref().unwrap().contains("HTTP client"));
     }
+
+    #[test]
+    fn native_render_labels_are_chinese() {
+        // 验证所有界面标签已转换为中文
+        assert_eq!(DRAFT_INBOX_TITLE, "待审候选");
+        assert_eq!(CATALOG_TITLE, "技能商店");
+        assert_eq!(SKILLLET_MATRIX_TITLE, "Agent 分配矩阵");
+        assert_eq!(APPROVE_LABEL, "批准");
+        assert_eq!(REJECT_LABEL, "拒绝");
+        assert_eq!(EDIT_LABEL, "编辑");
+        assert_eq!(SAVE_LABEL, "保存");
+        assert_eq!(CANCEL_LABEL, "取消");
+        // 确认所有核心标签包含中文字符
+        for label in &[
+            DRAFT_INBOX_TITLE,
+            CATALOG_TITLE,
+            SKILLLET_MATRIX_TITLE,
+            APPROVE_LABEL,
+            REJECT_LABEL,
+            EDIT_LABEL,
+            SAVE_LABEL,
+            CANCEL_LABEL,
+            INSTALL_CODEX_LABEL,
+            INSTALL_CLAUDE_LABEL,
+            CONFIDENCE_LABEL,
+            MATCHED_TEMPLATE_LABEL,
+            REASON_LABEL,
+            MERGE_SELECTED_LABEL,
+            MERGE_CONFIRM_LABEL,
+            MERGE_CANCEL_LABEL,
+        ] {
+            assert!(
+                label.chars().any(|c| c as u32 > 127),
+                "label `{label}` must contain Chinese characters"
+            );
+        }
+    }
+
+    #[test]
+    fn native_cache_state_exists_after_init() {
+        // 验证 AgentKernelApp 初始化后缓存字段存在且为空状态
+        let temp = tempfile::tempdir().expect("tempdir");
+        let home = temp.path().to_path_buf();
+        let app = AgentKernelApp {
+            home: home.clone(),
+            scan_roots: Vec::new(),
+            max_depth: 2,
+            registry: ProjectRegistry {
+                version: 1,
+                projects: Vec::new(),
+            },
+            selected_path: None,
+            status: String::new(),
+            report: String::new(),
+            draft_edit: None,
+            draft_selection: Vec::new(),
+            merge_edit: None,
+            cached_project_path: None,
+            cached_drafts: Vec::new(),
+            cached_catalog_validation: None,
+            cached_catalog_status: None,
+            cached_skilllet_matrix: None,
+            cache_error: None,
+            task_rx: None,
+            busy_task: None,
+        };
+        assert!(app.cached_project_path.is_none());
+        assert!(app.cached_drafts.is_empty());
+        assert!(app.cached_catalog_validation.is_none());
+        assert!(app.cached_catalog_status.is_none());
+        assert!(app.cached_skilllet_matrix.is_none());
+        assert!(app.cache_error.is_none());
+    }
+
+    #[test]
+    fn native_refresh_project_cache_loads_drafts_from_temp_project() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let project_root = temp.path().to_path_buf();
+
+        // 注册项目到 registry
+        let registered = project_registry::RegisteredProject {
+            name: "test-project".to_string(),
+            path: project_root.to_string_lossy().to_string(),
+            agents: vec!["codex".to_string()],
+            markers: Vec::new(),
+            last_seen: String::new(),
+        };
+
+        // 添加 draft
+        draft::add_draft(
+            &project_root,
+            draft::NewDraft {
+                id: "project:cache-test".to_string(),
+                title: "Cache Test Draft".to_string(),
+                body: "Testing cache refresh.".to_string(),
+                kind: "preference".to_string(),
+                scope: "project".to_string(),
+                targets: vec!["codex".to_string()],
+                evidence: "cache test".to_string(),
+                confidence: Some(0.95),
+                reason: None,
+                matched_template: None,
+            },
+        )
+        .expect("add draft");
+
+        let mut app = AgentKernelApp {
+            home: temp.path().to_path_buf(),
+            scan_roots: Vec::new(),
+            max_depth: 2,
+            registry: ProjectRegistry {
+                version: 1,
+                projects: vec![registered],
+            },
+            selected_path: Some(project_root.to_string_lossy().to_string()),
+            status: String::new(),
+            report: String::new(),
+            draft_edit: None,
+            draft_selection: Vec::new(),
+            merge_edit: None,
+            cached_project_path: None,
+            cached_drafts: Vec::new(),
+            cached_catalog_validation: None,
+            cached_catalog_status: None,
+            cached_skilllet_matrix: None,
+            cache_error: None,
+            task_rx: None,
+            busy_task: None,
+        };
+
+        app.refresh_project_cache_for_selected();
+
+        assert_eq!(
+            app.cached_project_path,
+            Some(project_root.to_string_lossy().to_string())
+        );
+        assert_eq!(app.cached_drafts.len(), 1);
+        assert_eq!(app.cached_drafts[0].id, "project:cache-test");
+        assert_eq!(app.cached_drafts[0].title, "Cache Test Draft");
+        assert!(app.cache_error.is_none());
+    }
+
+    #[test]
+    fn native_background_task_reports_without_blocking_state() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut app = AgentKernelApp {
+            home: temp.path().to_path_buf(),
+            scan_roots: Vec::new(),
+            max_depth: 2,
+            registry: ProjectRegistry {
+                version: 1,
+                projects: Vec::new(),
+            },
+            selected_path: None,
+            status: String::new(),
+            report: String::new(),
+            draft_edit: None,
+            draft_selection: Vec::new(),
+            merge_edit: None,
+            cached_project_path: None,
+            cached_drafts: Vec::new(),
+            cached_catalog_validation: None,
+            cached_catalog_status: None,
+            cached_skilllet_matrix: None,
+            cache_error: None,
+            task_rx: None,
+            busy_task: None,
+        };
+
+        app.start_task("测试任务", || UiTaskResult::Report {
+            report: "后台任务完成".to_string(),
+            cache: None,
+        });
+
+        assert!(app.is_busy());
+        for _ in 0..20 {
+            app.poll_task_result();
+            if !app.is_busy() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+
+        assert!(!app.is_busy());
+        assert_eq!(app.report, "后台任务完成");
+    }
 }
 
 pub fn run(home: PathBuf, scan_roots: Vec<PathBuf>, max_depth: usize) -> Result<()> {
@@ -1012,6 +1279,14 @@ struct AgentKernelApp {
     draft_edit: Option<DraftEditState>,
     draft_selection: Vec<String>,
     merge_edit: Option<MergeEditState>,
+    cached_project_path: Option<String>,
+    cached_drafts: Vec<draft::DraftRecord>,
+    cached_catalog_validation: Option<catalog::CatalogValidationReport>,
+    cached_catalog_status: Option<catalog::CatalogStatus>,
+    cached_skilllet_matrix: Option<skilllet::SkillletTargetMatrix>,
+    cache_error: Option<String>,
+    task_rx: Option<Receiver<UiTaskResult>>,
+    busy_task: Option<String>,
 }
 
 impl AgentKernelApp {
@@ -1030,6 +1305,14 @@ impl AgentKernelApp {
             draft_edit: None,
             draft_selection: Vec::new(),
             merge_edit: None,
+            cached_project_path: None,
+            cached_drafts: Vec::new(),
+            cached_catalog_validation: None,
+            cached_catalog_status: None,
+            cached_skilllet_matrix: None,
+            cache_error: None,
+            task_rx: None,
+            busy_task: None,
         };
         app.refresh_with_scan();
         app
@@ -1039,7 +1322,7 @@ impl AgentKernelApp {
         match project_registry::scan_and_register(&self.home, &self.scan_roots, self.max_depth) {
             Ok(report) => {
                 self.status = format!(
-                    "Scanned {} project(s). Registry now has {}.",
+                    "已扫描 {} 个项目，注册表共 {} 个项目。",
                     report.discovered.len(),
                     report.total
                 );
@@ -1047,9 +1330,10 @@ impl AgentKernelApp {
                 if self.selected_path.is_none() {
                     self.selected_path = self.registry.projects.first().map(|p| p.path.clone());
                 }
+                self.refresh_project_cache_for_selected();
             }
             Err(err) => {
-                self.status = format!("Scan failed: {err}");
+                self.status = format!("扫描失败：{err}");
                 self.registry = project_registry::load_registry(&self.home).unwrap_or_default();
             }
         }
@@ -1064,73 +1348,236 @@ impl AgentKernelApp {
             .cloned()
     }
 
-    fn review_selected(&mut self) {
-        let Some(project) = self.selected_project() else {
-            self.report = "Select a project first.".to_string();
+    /// 为当前选中的项目刷新缓存：drafts、catalog、skilllet matrix 各加载一次，避免渲染循环中重复 IO。
+    fn refresh_project_cache_for_selected(&mut self) {
+        let project = self.selected_project();
+        self.apply_project_cache(load_project_cache(project.as_ref()));
+    }
+
+    fn apply_project_cache(&mut self, cache: ProjectCache) {
+        self.cached_project_path = cache.project_path;
+        self.cached_drafts = cache.drafts;
+        self.cached_catalog_validation = cache.catalog_validation;
+        self.cached_catalog_status = cache.catalog_status;
+        self.cached_skilllet_matrix = cache.skilllet_matrix;
+        self.cache_error = cache.error;
+    }
+
+    fn is_busy(&self) -> bool {
+        self.task_rx.is_some()
+    }
+
+    fn start_task<F>(&mut self, label: &'static str, job: F)
+    where
+        F: FnOnce() -> UiTaskResult + Send + 'static,
+    {
+        if self.is_busy() {
+            self.report = format!(
+                "正在处理“{}”，请稍候。",
+                self.busy_task.as_deref().unwrap_or("任务")
+            );
+            return;
+        }
+
+        let (tx, rx) = mpsc::channel();
+        self.task_rx = Some(rx);
+        self.busy_task = Some(label.to_string());
+        self.report = format!("正在{}...", label);
+        thread::spawn(move || {
+            let _ = tx.send(job());
+        });
+    }
+
+    fn poll_task_result(&mut self) {
+        let Some(rx) = self.task_rx.take() else {
             return;
         };
-        match review::review_project(&PathBuf::from(&project.path)) {
-            Ok(report) => {
-                self.report = format!(
-                    "Review for {}\n\nDrafts pending: {}\nRule CI failures: {}\nArtifact drifts: {}",
+
+        match rx.try_recv() {
+            Ok(result) => {
+                self.busy_task = None;
+                self.apply_task_result(result);
+            }
+            Err(TryRecvError::Empty) => {
+                self.task_rx = Some(rx);
+            }
+            Err(TryRecvError::Disconnected) => {
+                self.busy_task = None;
+                self.report = "后台任务意外结束，没有返回结果。".to_string();
+            }
+        }
+    }
+
+    fn apply_task_result(&mut self, result: UiTaskResult) {
+        match result {
+            UiTaskResult::Scan {
+                status,
+                registry,
+                selected_path,
+                cache,
+            } => {
+                self.status = status;
+                self.registry = registry;
+                self.selected_path = selected_path;
+                self.apply_project_cache(cache);
+            }
+            UiTaskResult::Report { report, cache } => {
+                self.report = report;
+                if let Some(cache) = cache {
+                    self.apply_project_cache(cache);
+                }
+            }
+        }
+    }
+
+    fn start_scan(&mut self) {
+        let home = self.home.clone();
+        let scan_roots = self.scan_roots.clone();
+        let max_depth = self.max_depth;
+        let selected_path = self.selected_path.clone();
+        self.start_task(
+            "扫描项目",
+            move || match project_registry::scan_and_register(&home, &scan_roots, max_depth) {
+                Ok(report) => {
+                    let registry = project_registry::load_registry(&home).unwrap_or_default();
+                    let selected_path = selected_path
+                        .filter(|path| {
+                            registry
+                                .projects
+                                .iter()
+                                .any(|project| &project.path == path)
+                        })
+                        .or_else(|| {
+                            registry
+                                .projects
+                                .first()
+                                .map(|project| project.path.clone())
+                        });
+                    let selected_project = selected_path.as_ref().and_then(|path| {
+                        registry
+                            .projects
+                            .iter()
+                            .find(|project| &project.path == path)
+                            .cloned()
+                    });
+                    let cache = load_project_cache(selected_project.as_ref());
+                    UiTaskResult::Scan {
+                        status: format!(
+                            "已扫描 {} 个项目，注册表共 {} 个项目。",
+                            report.discovered.len(),
+                            report.total
+                        ),
+                        registry,
+                        selected_path,
+                        cache,
+                    }
+                }
+                Err(err) => {
+                    let registry = project_registry::load_registry(&home).unwrap_or_default();
+                    UiTaskResult::Scan {
+                        status: format!("扫描失败：{err}"),
+                        registry,
+                        selected_path: None,
+                        cache: empty_project_cache(),
+                    }
+                }
+            },
+        );
+    }
+
+    fn review_selected(&mut self) {
+        let Some(project) = self.selected_project() else {
+            self.report = "请先选择一个项目。".to_string();
+            return;
+        };
+        let project_name = project.name.clone();
+        let root = PathBuf::from(&project.path);
+        self.start_task("项目体检", move || {
+            let report = match review::review_project(&root) {
+                Ok(report) => format!(
+                    "项目体检：{}\n\n待审候选：{}\n规则测试失败：{}\n产物漂移：{}",
                     project.name,
                     report.summary.drafts_pending,
                     report.summary.rule_tests_failed,
                     report.summary.artifact_drifts
-                );
+                ),
+                Err(err) => format!("项目体检失败：{project_name}\n{err}"),
+            };
+            UiTaskResult::Report {
+                report,
+                cache: None,
             }
-            Err(err) => {
-                self.report = format!("Review failed for {}: {err}", project.name);
-            }
-        }
+        });
     }
 
     fn evolve_selected(&mut self, dry_run: bool) {
         let Some(project) = self.selected_project() else {
-            self.report = "Select a project first.".to_string();
+            self.report = "请先选择一个项目。".to_string();
             return;
         };
         let targets = vec!["codex".to_string(), "claude-code".to_string()];
-        match observation::evolve_local_conversations(
-            &PathBuf::from(&project.path),
-            &self.home,
-            targets,
-            dry_run,
-        ) {
-            Ok(report) => {
-                self.report = report.render();
-            }
-            Err(err) => {
-                self.report = format!("Conversation evolution failed for {}: {err}", project.name);
-            }
-        }
+        let home = self.home.clone();
+        let root = PathBuf::from(&project.path);
+        let task_project = project.clone();
+        let label = if dry_run {
+            "预览对话进化"
+        } else {
+            "生成候选"
+        };
+        self.start_task(
+            label,
+            move || match observation::evolve_local_conversations(&root, &home, targets, dry_run) {
+                Ok(report) => UiTaskResult::Report {
+                    report: report.render(),
+                    cache: (!dry_run).then(|| load_project_cache(Some(&task_project))),
+                },
+                Err(err) => UiTaskResult::Report {
+                    report: format!("对话进化失败：{}\n{err}", task_project.name),
+                    cache: None,
+                },
+            },
+        );
     }
 
     fn decide_draft_for_selected(&mut self, draft_id: &str, approve: bool) {
         let Some(project) = self.selected_project() else {
-            self.report = "Select a project first.".to_string();
+            self.report = "请先选择一个项目。".to_string();
             return;
         };
-        match apply_native_draft_decision(&PathBuf::from(&project.path), draft_id, approve) {
-            Ok(report) => {
-                let action = if approve { "Approved" } else { "Rejected" };
-                self.report = format!(
-                    "{action} `{draft_id}` for {}\n\nDrafts pending: {}\nRule CI failures: {}\nArtifact drifts: {}",
-                    project.name,
-                    report.summary.drafts_pending,
-                    report.summary.rule_tests_failed,
-                    report.summary.artifact_drifts
-                );
+        let root = PathBuf::from(&project.path);
+        let task_project = project.clone();
+        let draft_id = draft_id.to_string();
+        let label = if approve {
+            "批准候选"
+        } else {
+            "拒绝候选"
+        };
+        self.start_task(label, move || {
+            match apply_native_draft_decision(&root, &draft_id, approve) {
+                Ok(report) => {
+                    let action = if approve { "已批准" } else { "已拒绝" };
+                    UiTaskResult::Report {
+                        report: format!(
+                            "{action} `{draft_id}` -> {}\n\n待审候选：{}\n规则测试失败：{}\n产物漂移：{}",
+                            task_project.name,
+                            report.summary.drafts_pending,
+                            report.summary.rule_tests_failed,
+                            report.summary.artifact_drifts
+                        ),
+                        cache: Some(load_project_cache(Some(&task_project))),
+                    }
+                }
+                Err(err) => UiTaskResult::Report {
+                    report: format!("候选处理失败：`{draft_id}`\n{err}"),
+                    cache: None,
+                },
             }
-            Err(err) => {
-                self.report = format!("Draft decision failed for `{draft_id}`: {err}");
-            }
-        }
+        });
     }
 
     fn save_draft_edit_for_selected(&mut self) {
         let Some(project) = self.selected_project() else {
-            self.report = "Select a project first.".to_string();
+            self.report = "请先选择一个项目。".to_string();
             self.draft_edit = None;
             return;
         };
@@ -1156,24 +1603,29 @@ impl AgentKernelApp {
             },
         };
         let draft_id = edit.draft_id.clone();
-        match draft::update_draft(&PathBuf::from(&project.path), &draft_id, update) {
-            Ok(updated) => {
-                self.draft_edit = None;
-                self.report = format!(
-                    "Draft `{}` updated for {}\nTitle: {}\nRun Review to refresh the inbox.",
-                    updated.id, project.name, updated.title
-                );
+        let root = PathBuf::from(&project.path);
+        let task_project = project.clone();
+        self.draft_edit = None;
+        self.start_task("保存候选", move || {
+            match draft::update_draft(&root, &draft_id, update) {
+                Ok(updated) => UiTaskResult::Report {
+                    report: format!(
+                        "候选已保存：`{}`\n项目：{}\n标题：{}",
+                        updated.id, task_project.name, updated.title
+                    ),
+                    cache: Some(load_project_cache(Some(&task_project))),
+                },
+                Err(err) => UiTaskResult::Report {
+                    report: format!("候选保存失败：`{draft_id}`\n{err}"),
+                    cache: None,
+                },
             }
-            Err(err) => {
-                self.draft_edit = None;
-                self.report = format!("Draft update failed for `{draft_id}`: {err}");
-            }
-        }
+        });
     }
 
     fn merge_drafts_for_selected(&mut self) {
         let Some(project) = self.selected_project() else {
-            self.report = "Select a project first.".to_string();
+            self.report = "请先选择一个项目。".to_string();
             self.draft_selection.clear();
             self.merge_edit = None;
             return;
@@ -1184,15 +1636,15 @@ impl AgentKernelApp {
         let merged_id = edit.merged_id.trim().to_string();
         let merged_title = edit.merged_title.trim().to_string();
         if merged_id.is_empty() {
-            self.report = "Merged draft ID is required.".to_string();
+            self.report = "请填写合并候选 ID。".to_string();
             return;
         }
         if merged_title.is_empty() {
-            self.report = "Merged draft title is required.".to_string();
+            self.report = "请填写合并候选标题。".to_string();
             return;
         }
         if self.draft_selection.len() < 2 {
-            self.report = "Select at least two drafts to merge.".to_string();
+            self.report = "至少选择两个候选才能合并。".to_string();
             return;
         }
         let targets: Vec<String> = if edit.targets_text.trim().is_empty() {
@@ -1205,76 +1657,96 @@ impl AgentKernelApp {
                 .collect()
         };
         let source_ids = self.draft_selection.clone();
-        match draft::merge_drafts(
-            &PathBuf::from(&project.path),
-            &merged_id,
-            &merged_title,
-            source_ids,
-            targets,
-        ) {
-            Ok(merged) => {
-                self.draft_selection.clear();
-                self.merge_edit = None;
-                self.report = format!(
-                    "Merged draft `{}` created for {}\nTitle: {}\nRun Review to inspect.",
-                    merged.id, project.name, merged.title
-                );
+        let root = PathBuf::from(&project.path);
+        let task_project = project.clone();
+        self.draft_selection.clear();
+        self.merge_edit = None;
+        self.start_task("合并候选", move || {
+            match draft::merge_drafts(&root, &merged_id, &merged_title, source_ids, targets) {
+                Ok(merged) => UiTaskResult::Report {
+                    report: format!(
+                        "合并候选已创建：`{}`\n项目：{}\n标题：{}",
+                        merged.id, task_project.name, merged.title
+                    ),
+                    cache: Some(load_project_cache(Some(&task_project))),
+                },
+                Err(err) => UiTaskResult::Report {
+                    report: format!("候选合并失败：{err}"),
+                    cache: None,
+                },
             }
-            Err(err) => {
-                self.draft_selection.clear();
-                self.merge_edit = None;
-                self.report = format!("Draft merge failed: {err}");
-            }
-        }
+        });
     }
 
     fn install_catalog_for_selected(&mut self, package_id: &str, targets: Vec<String>) {
         let Some(project) = self.selected_project() else {
-            self.report = "Select a project first.".to_string();
+            self.report = "请先选择一个项目。".to_string();
             return;
         };
         let target_summary = if targets.is_empty() {
-            "all enabled agents".to_string()
+            "全部已启用 Agent".to_string()
         } else {
             targets.join(", ")
         };
-        match install_native_catalog_package(&PathBuf::from(&project.path), package_id, targets) {
-            Ok(status) => {
-                let installed = status.items.iter().filter(|item| item.installed).count();
-                self.report = format!(
-                    "Installed `{package_id}` for {target_summary} in {}\n\nInstalled catalog packages: {installed}/{}",
-                    project.name,
-                    status.items.len()
-                );
+        let package_id = package_id.to_string();
+        let root = PathBuf::from(&project.path);
+        let task_project = project.clone();
+        self.start_task("安装 Skilllet", move || {
+            match install_native_catalog_package(&root, &package_id, targets) {
+                Ok(status) => {
+                    let installed = status.items.iter().filter(|item| item.installed).count();
+                    UiTaskResult::Report {
+                        report: format!(
+                            "已安装 `{package_id}` 到 {target_summary}\n项目：{}\n\n已安装包：{installed}/{}",
+                            task_project.name,
+                            status.items.len()
+                        ),
+                        cache: Some(load_project_cache(Some(&task_project))),
+                    }
+                }
+                Err(err) => UiTaskResult::Report {
+                    report: format!("技能包安装失败：`{package_id}`\n{err}"),
+                    cache: None,
+                },
             }
-            Err(err) => {
-                self.report = format!("Catalog install failed for `{package_id}`: {err}");
-            }
-        }
+        });
     }
 
     fn toggle_skilllet_target_for_selected(&mut self, skilllet_id: &str, agent: &str) {
         let Some(project) = self.selected_project() else {
-            self.report = "Select a project first.".to_string();
+            self.report = "请先选择一个项目。".to_string();
             return;
         };
-        match toggle_native_skilllet_target(&PathBuf::from(&project.path), skilllet_id, agent) {
-            Ok(matrix) => {
-                self.report = format!(
-                    "Updated `{skilllet_id}` target `{agent}` for {}\n\n{}",
-                    project.name,
-                    matrix.render()
-                );
-            }
-            Err(err) => {
-                self.report = format!("Skilllet target update failed for `{skilllet_id}`: {err}");
-            }
-        }
+        let skilllet_id = skilllet_id.to_string();
+        let agent = agent.to_string();
+        let root = PathBuf::from(&project.path);
+        let task_project = project.clone();
+        self.start_task(
+            "更新 Agent 分配",
+            move || match toggle_native_skilllet_target(&root, &skilllet_id, &agent) {
+                Ok(matrix) => UiTaskResult::Report {
+                    report: format!(
+                        "已更新 `{skilllet_id}` -> `{agent}`\n项目：{}\n\n{}",
+                        task_project.name,
+                        matrix.render()
+                    ),
+                    cache: Some(load_project_cache(Some(&task_project))),
+                },
+                Err(err) => UiTaskResult::Report {
+                    report: format!("Agent 分配更新失败：`{skilllet_id}`\n{err}"),
+                    cache: None,
+                },
+            },
+        );
     }
 }
 
 impl eframe::App for AgentKernelApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.poll_task_result();
+        if self.is_busy() {
+            ui.ctx().request_repaint();
+        }
         let palette = ui_palette();
         ui.painter()
             .rect_filled(ui.max_rect(), egui::CornerRadius::ZERO, palette.background);
@@ -1348,17 +1820,27 @@ impl AgentKernelApp {
                         .size(12.0)
                         .color(palette.muted),
                 );
+                if let Some(task) = self.busy_task.as_deref() {
+                    ui.label(
+                        egui::RichText::new(format!("正在{}...", task))
+                            .size(12.0)
+                            .color(palette.accent),
+                    );
+                }
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.add(secondary_button("Scan")).clicked() {
-                    self.refresh_with_scan();
+                if ui
+                    .add_enabled(!self.is_busy(), secondary_button("扫描"))
+                    .clicked()
+                {
+                    self.start_scan();
                 }
             });
         });
         ui.add_space(14.0);
         ui.label(
             egui::RichText::new(format!(
-                "Registry\n{}",
+                "项目索引\n{}",
                 project_registry::registry_path(&self.home).display()
             ))
             .size(11.0)
@@ -1368,11 +1850,15 @@ impl AgentKernelApp {
 
         if self.registry.projects.is_empty() {
             subtle_card_frame().show(ui, |ui| {
-                ui.label(egui::RichText::new("No projects found yet.").color(palette.muted));
+                ui.label(
+                    egui::RichText::new("还没有发现项目。点击“扫描”开始建立索引。")
+                        .color(palette.muted),
+                );
             });
             return;
         }
 
+        let mut project_path_selected: Option<String> = None;
         egui::ScrollArea::vertical()
             .id_salt(SIDEBAR_SCROLL_ID)
             .auto_shrink([false, false])
@@ -1409,7 +1895,7 @@ impl AgentKernelApp {
                                 )
                                 .clicked()
                             {
-                                self.selected_path = Some(project.path.clone());
+                                project_path_selected = Some(project.path.clone());
                             }
                             ui.label(
                                 egui::RichText::new(project.agents.join("  /  "))
@@ -1424,6 +1910,10 @@ impl AgentKernelApp {
                         });
                 }
             });
+        if let Some(path) = project_path_selected {
+            self.selected_path = Some(path);
+            self.refresh_project_cache_for_selected();
+        }
     }
 
     fn render_project_workspace(&mut self, ui: &mut egui::Ui) {
@@ -1431,8 +1921,8 @@ impl AgentKernelApp {
 
         let Some(project) = self.selected_project() else {
             card_frame().show(ui, |ui| {
-                ui.heading("Select a project");
-                ui.label("Scan common local folders or register a project from the CLI.");
+                ui.heading("选择一个项目");
+                ui.label("从左侧项目列表选择，或点击扫描刷新本地项目索引。");
             });
             return;
         };
@@ -1474,16 +1964,20 @@ impl AgentKernelApp {
                     });
                     ui.add_space(8.0);
                     ui.horizontal_wrapped(|ui| {
-                        if ui.add(secondary_button("Open Folder")).clicked() {
+                        let busy = self.is_busy();
+                        if ui.add(secondary_button("打开目录")).clicked() {
                             let _ = open::that(&project.path);
                         }
-                        if ui.add(secondary_button("Review")).clicked() {
+                        if ui.add_enabled(!busy, secondary_button("体检")).clicked() {
                             self.review_selected();
                         }
-                        if ui.add(secondary_button("Preview Evolution")).clicked() {
+                        if ui
+                            .add_enabled(!busy, secondary_button("预览进化"))
+                            .clicked()
+                        {
                             self.evolve_selected(true);
                         }
-                        if ui.add(primary_button("Evolve to Drafts")).clicked() {
+                        if ui.add_enabled(!busy, primary_button("生成候选")).clicked() {
                             self.evolve_selected(false);
                         }
                     });
@@ -1515,12 +2009,12 @@ impl AgentKernelApp {
         card_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new("Output")
+                    egui::RichText::new("操作输出")
                         .size(16.0)
                         .strong()
                         .color(palette.text),
                 );
-                ui.label(egui::RichText::new("Latest command result").color(palette.muted));
+                ui.label(egui::RichText::new("最近一次操作结果").color(palette.muted));
             });
             ui.add_space(8.0);
             egui::Frame::new()
@@ -1535,7 +2029,7 @@ impl AgentKernelApp {
                             if self.report.is_empty() {
                                 ui.label(
                                     egui::RichText::new(
-                                        "Run Review or Conversation Evolution to inspect this project.",
+                                        "点击“体检”或“生成候选”，这里会显示处理结果。",
                                     )
                                     .color(palette.muted),
                                 );
@@ -1547,7 +2041,7 @@ impl AgentKernelApp {
         });
     }
 
-    fn render_draft_inbox(&mut self, ui: &mut egui::Ui, project: &RegisteredProject) {
+    fn render_draft_inbox(&mut self, ui: &mut egui::Ui, _project: &RegisteredProject) {
         let palette = ui_palette();
         card_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -1557,23 +2051,19 @@ impl AgentKernelApp {
                         .strong()
                         .color(palette.text),
                 );
-                ui.label(
-                    egui::RichText::new("Review before enabling generated Skilllets")
-                        .color(palette.muted),
-                );
+                ui.label(egui::RichText::new("先审查，再固化为项目记忆").color(palette.muted));
             });
 
-            let drafts = match draft::load_drafts(&PathBuf::from(&project.path)) {
-                Ok(drafts) => drafts,
-                Err(err) => {
-                    ui.label(format!("Could not load drafts: {err}"));
-                    return;
-                }
+            let drafts = if let Some(ref err) = self.cache_error {
+                ui.label(format!("无法读取待审候选：{err}"));
+                return;
+            } else {
+                &self.cached_drafts
             };
 
             if drafts.is_empty() {
                 ui.add_space(8.0);
-                ui.label(egui::RichText::new("No pending drafts.").color(palette.muted));
+                ui.label(egui::RichText::new("当前没有待审候选。").color(palette.muted));
                 return;
             }
 
@@ -1590,7 +2080,7 @@ impl AgentKernelApp {
                 .max_height(260.0)
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    for draft in &drafts {
+                    for draft in drafts.iter() {
                         subtle_card_frame().show(ui, |ui| {
                             let is_editing =
                                 local_edit.as_ref().is_some_and(|e| e.draft_id == draft.id);
@@ -1599,7 +2089,7 @@ impl AgentKernelApp {
                                 let edit = local_edit.as_mut().unwrap();
                                 ui.horizontal(|ui| {
                                     ui.label(
-                                        egui::RichText::new("Editing")
+                                        egui::RichText::new("正在编辑")
                                             .size(12.0)
                                             .color(palette.accent),
                                     );
@@ -1607,35 +2097,35 @@ impl AgentKernelApp {
                                 });
                                 ui.add_space(4.0);
                                 ui.horizontal(|ui| {
-                                    ui.label("Title");
+                                    ui.label("标题");
                                     ui.add(
                                         egui::TextEdit::singleline(&mut edit.title)
-                                            .hint_text("Draft title")
+                                            .hint_text("候选标题")
                                             .desired_width(ui.available_width()),
                                     );
                                 });
                                 ui.horizontal(|ui| {
-                                    ui.label("Kind");
+                                    ui.label("类型");
                                     ui.add(
                                         egui::TextEdit::singleline(&mut edit.kind)
                                             .hint_text("preference")
                                             .desired_width(120.0),
                                     );
-                                    ui.label("Scope");
+                                    ui.label("范围");
                                     ui.add(
                                         egui::TextEdit::singleline(&mut edit.scope)
                                             .hint_text("project")
                                             .desired_width(120.0),
                                     );
                                 });
-                                ui.label("Body");
+                                ui.label("内容");
                                 ui.add(
                                     egui::TextEdit::multiline(&mut edit.body)
-                                        .hint_text("Draft body")
+                                        .hint_text("候选内容")
                                         .desired_rows(2)
                                         .desired_width(ui.available_width()),
                                 );
-                                ui.label("Targets");
+                                ui.label("目标 Agent");
                                 ui.add(
                                     egui::TextEdit::singleline(&mut edit.targets_text)
                                         .hint_text("codex, claude-code")
@@ -1643,7 +2133,10 @@ impl AgentKernelApp {
                                 );
                                 ui.add_space(4.0);
                                 ui.horizontal(|ui| {
-                                    if ui.add(primary_button(SAVE_LABEL)).clicked() {
+                                    if ui
+                                        .add_enabled(!self.is_busy(), primary_button(SAVE_LABEL))
+                                        .clicked()
+                                    {
                                         edit_action =
                                             Some(EditAction::Save(local_edit.clone().unwrap()));
                                     }
@@ -1672,7 +2165,7 @@ impl AgentKernelApp {
                                 if !draft.targets.is_empty() {
                                     ui.label(
                                         egui::RichText::new(format!(
-                                            "Targets: {}",
+                                            "目标 Agent：{}",
                                             draft.targets.join(", ")
                                         ))
                                         .size(12.0)
@@ -1706,13 +2199,21 @@ impl AgentKernelApp {
                                     );
                                 }
                                 ui.horizontal(|ui| {
-                                    if ui.add(primary_button(APPROVE_LABEL)).clicked() {
+                                    let busy = self.is_busy();
+                                    if ui
+                                        .add_enabled(!busy, primary_button(APPROVE_LABEL))
+                                        .clicked()
+                                    {
                                         decision = Some((draft.id.clone(), true));
                                     }
-                                    if ui.add(danger_button(REJECT_LABEL)).clicked() {
+                                    if ui.add_enabled(!busy, danger_button(REJECT_LABEL)).clicked()
+                                    {
                                         decision = Some((draft.id.clone(), false));
                                     }
-                                    if ui.add(secondary_button(EDIT_LABEL)).clicked() {
+                                    if ui
+                                        .add_enabled(!busy, secondary_button(EDIT_LABEL))
+                                        .clicked()
+                                    {
                                         edit_action = Some(EditAction::Start(DraftEditState {
                                             draft_id: draft.id.clone(),
                                             title: draft.title.clone(),
@@ -1750,14 +2251,13 @@ impl AgentKernelApp {
                 subtle_card_frame().show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new(format!(
-                                "{} draft{} selected",
-                                selection_count,
-                                if selection_count > 1 { "s" } else { "" }
-                            ))
-                            .color(palette.accent),
+                            egui::RichText::new(format!("已选择 {} 个候选", selection_count))
+                                .color(palette.accent),
                         );
-                        if ui.add(primary_button(MERGE_SELECTED_LABEL)).clicked() {
+                        if ui
+                            .add_enabled(!self.is_busy(), primary_button(MERGE_SELECTED_LABEL))
+                            .clicked()
+                        {
                             start_merge = true;
                         }
                         if ui.add(danger_button(MERGE_CANCEL_LABEL)).clicked() {
@@ -1773,7 +2273,7 @@ impl AgentKernelApp {
                 ui.add_space(6.0);
                 card_frame().show(ui, |ui| {
                     ui.label(
-                        egui::RichText::new("Create Merged Draft")
+                        egui::RichText::new("创建合并候选")
                             .size(14.0)
                             .strong()
                             .color(palette.text),
@@ -1788,15 +2288,15 @@ impl AgentKernelApp {
                         );
                     });
                     ui.horizontal(|ui| {
-                        ui.label("Title");
+                        ui.label("标题");
                         ui.add(
                             egui::TextEdit::singleline(&mut merge.merged_title)
-                                .hint_text("Merged Draft Title")
+                                .hint_text("合并候选标题")
                                 .desired_width(ui.available_width()),
                         );
                     });
                     ui.horizontal(|ui| {
-                        ui.label("Targets");
+                        ui.label("目标 Agent");
                         ui.add(
                             egui::TextEdit::singleline(&mut merge.targets_text)
                                 .hint_text("codex, claude-code")
@@ -1805,7 +2305,10 @@ impl AgentKernelApp {
                     });
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
-                        if ui.add(primary_button(MERGE_CONFIRM_LABEL)).clicked() {
+                        if ui
+                            .add_enabled(!self.is_busy(), primary_button(MERGE_CONFIRM_LABEL))
+                            .clicked()
+                        {
                             merge_confirm = true;
                         }
                         if ui.add(danger_button(MERGE_CANCEL_LABEL)).clicked() {
@@ -1819,10 +2322,8 @@ impl AgentKernelApp {
             if start_merge {
                 // Pre-fill merge form with defaults from selected drafts.
                 let default_targets = {
-                    let all_drafts =
-                        draft::load_drafts(&PathBuf::from(&project.path)).unwrap_or_default();
                     let mut union_targets: Vec<String> = Vec::new();
-                    for d in &all_drafts {
+                    for d in &self.cached_drafts {
                         if self.draft_selection.contains(&d.id) {
                             union_targets.extend(d.targets.clone());
                         }
@@ -1857,7 +2358,7 @@ impl AgentKernelApp {
         });
     }
 
-    fn render_catalog_store(&mut self, ui: &mut egui::Ui, project: &RegisteredProject) {
+    fn render_catalog_store(&mut self, ui: &mut egui::Ui, _project: &RegisteredProject) {
         let palette = ui_palette();
         card_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -1867,36 +2368,43 @@ impl AgentKernelApp {
                         .strong()
                         .color(palette.text),
                 );
-                ui.label(egui::RichText::new("Local App Store").color(palette.muted));
+                ui.label(egui::RichText::new("本地可安装规则包").color(palette.muted));
             });
 
-            let root = PathBuf::from(&project.path);
-            let validation = match catalog::load_or_default_catalog(&root) {
-                Ok(catalog) => catalog::validate_catalog(&catalog),
-                Err(err) => {
-                    ui.label(format!("Could not load catalog: {err}"));
+            let validation = match &self.cached_catalog_validation {
+                Some(v) => v,
+                None => {
+                    if let Some(ref err) = self.cache_error {
+                        ui.label(format!("无法读取技能商店：{err}"));
+                    } else {
+                        ui.label("无法读取技能商店校验信息。");
+                    }
                     return;
                 }
             };
             ui.label(
                 egui::RichText::new(format!(
-                    "Catalog Health: {} errors, {} warnings",
+                    "商店健康度：{} 个错误，{} 个警告",
                     validation.errors, validation.warnings
                 ))
                 .size(12.0)
                 .color(palette.muted),
             );
 
-            let status = match catalog::catalog_status(&root) {
-                Ok(status) => status,
-                Err(err) => {
-                    ui.label(format!("Could not load catalog status: {err}"));
+            let status = match &self.cached_catalog_status {
+                Some(s) => s,
+                None => {
+                    if let Some(ref err) = self.cache_error {
+                        ui.label(format!("无法读取技能商店状态：{err}"));
+                    } else {
+                        ui.label("无法读取技能商店状态。");
+                    }
                     return;
                 }
             };
 
             if status.items.is_empty() {
-                ui.label(egui::RichText::new("No catalog packages found.").color(palette.muted));
+                ui.label(egui::RichText::new("当前没有可安装的技能包。").color(palette.muted));
                 return;
             }
 
@@ -1915,9 +2423,9 @@ impl AgentKernelApp {
                                         .color(palette.text),
                                 );
                                 let status_text = if item.installed {
-                                    "installed"
+                                    "已安装"
                                 } else {
-                                    "available"
+                                    "可安装"
                                 };
                                 let status_color = if item.installed {
                                     palette.success
@@ -1940,7 +2448,7 @@ impl AgentKernelApp {
                                 egui::RichText::new(&item.package.description).color(palette.text),
                             );
                             ui.label(
-                                egui::RichText::new(format!("Source: {}", item.package.source_url))
+                                egui::RichText::new(format!("来源：{}", item.package.source_url))
                                     .size(11.0)
                                     .color(palette.muted),
                             );
@@ -1952,11 +2460,18 @@ impl AgentKernelApp {
                                 });
                             }
                             ui.horizontal(|ui| {
-                                if ui.add(secondary_button(INSTALL_CODEX_LABEL)).clicked() {
+                                let busy = self.is_busy();
+                                if ui
+                                    .add_enabled(!busy, secondary_button(INSTALL_CODEX_LABEL))
+                                    .clicked()
+                                {
                                     install =
                                         Some((item.package.id.clone(), vec!["codex".to_string()]));
                                 }
-                                if ui.add(secondary_button(INSTALL_CLAUDE_LABEL)).clicked() {
+                                if ui
+                                    .add_enabled(!busy, secondary_button(INSTALL_CLAUDE_LABEL))
+                                    .clicked()
+                                {
                                     install = Some((
                                         item.package.id.clone(),
                                         vec!["claude-code".to_string()],
@@ -1973,7 +2488,7 @@ impl AgentKernelApp {
         });
     }
 
-    fn render_skilllet_matrix(&mut self, ui: &mut egui::Ui, project: &RegisteredProject) {
+    fn render_skilllet_matrix(&mut self, ui: &mut egui::Ui, _project: &RegisteredProject) {
         let palette = ui_palette();
         card_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -1983,19 +2498,23 @@ impl AgentKernelApp {
                         .strong()
                         .color(palette.text),
                 );
-                ui.label(egui::RichText::new("Assign Skilllets per Agent").color(palette.muted));
+                ui.label(egui::RichText::new("为每个 Agent 分配 Skilllet").color(palette.muted));
             });
 
-            let matrix = match skilllet::skilllet_target_matrix(&PathBuf::from(&project.path)) {
-                Ok(matrix) => matrix,
-                Err(err) => {
-                    ui.label(format!("Could not load skilllet matrix: {err}"));
+            let matrix = match &self.cached_skilllet_matrix {
+                Some(m) => m,
+                None => {
+                    if let Some(ref err) = self.cache_error {
+                        ui.label(format!("无法读取 Agent 分配矩阵：{err}"));
+                    } else {
+                        ui.label("无法读取 Agent 分配矩阵。");
+                    }
                     return;
                 }
             };
 
             if matrix.rows.is_empty() {
-                ui.label(egui::RichText::new("No skilllets found.").color(palette.muted));
+                ui.label(egui::RichText::new("当前项目还没有 Skilllet。").color(palette.muted));
                 return;
             }
 
@@ -2035,11 +2554,11 @@ impl AgentKernelApp {
                                 for agent in &matrix.agents {
                                     let assigned = row.targets.get(agent).copied().unwrap_or(false);
                                     let button = if assigned {
-                                        primary_button("Assigned")
+                                        primary_button("已分配")
                                     } else {
-                                        secondary_button("Off")
+                                        secondary_button("未启用")
                                     };
-                                    if ui.add(button).clicked() {
+                                    if ui.add_enabled(!self.is_busy(), button).clicked() {
                                         toggle = Some((row.skilllet_id.clone(), agent.clone()));
                                     }
                                 }
