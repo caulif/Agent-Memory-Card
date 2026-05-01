@@ -130,12 +130,12 @@ pub fn import_observation_file(
         redacted: redacted != text,
         created_at: Utc::now().to_rfc3339(),
     };
-    write_observation(&root, &record)?;
+    let created = write_observation(&root, &record)?;
 
     Ok(ObservationImportReport {
-        created: 1,
-        skipped: 0,
-        observations: vec![id],
+        created: usize::from(created),
+        skipped: usize::from(!created),
+        observations: if created { vec![id] } else { Vec::new() },
     })
 }
 
@@ -279,13 +279,16 @@ fn collect_jsonl(
     Ok(())
 }
 
-fn write_observation(project_root: &Path, record: &ObservationRecord) -> Result<()> {
+fn write_observation(project_root: &Path, record: &ObservationRecord) -> Result<bool> {
     let path = observation_path(project_root, &record.id);
+    if path.exists() {
+        return Ok(false);
+    }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     fs::write(path, serde_yaml::to_string(record)?)?;
-    Ok(())
+    Ok(true)
 }
 
 fn observation_id(agent: Option<&str>, source_kind: &str, source: &str, body: &str) -> String {
@@ -397,6 +400,32 @@ mod tests {
         assert_eq!(
             observations[0].body,
             "Always use Vitest for frontend unit tests."
+        );
+    }
+
+    #[test]
+    fn import_file_skips_existing_observation() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let transcript = temp.path().join("session.jsonl");
+        fs::write(
+            &transcript,
+            r#"{"type":"user","message":"Always use Vitest for frontend unit tests."}"#,
+        )
+        .expect("write transcript");
+
+        let first =
+            import_observation_file(temp.path(), &transcript, "codex-session", Some("codex"))
+                .expect("first import");
+        let second =
+            import_observation_file(temp.path(), &transcript, "codex-session", Some("codex"))
+                .expect("second import");
+
+        assert_eq!(first.created, 1);
+        assert_eq!(second.created, 0);
+        assert_eq!(second.skipped, 1);
+        assert_eq!(
+            load_observations(temp.path()).expect("observations").len(),
+            1
         );
     }
 

@@ -214,6 +214,12 @@ v0.34 adds the first one-command evolution path:
 2. The command still stops at Draft Inbox, so the user keeps final approval control.
 3. `--dry-run` imports Observations and previews candidate counts without writing Drafts.
 
+v0.35 makes repeated evolution safer:
+
+1. Observation imports are ID-deduplicated.
+2. Re-importing the same transcript reports `skipped` instead of pretending a new Observation was created.
+3. Repeated `observe evolve` runs become easier to trust in daily use.
+
 ## Commands
 
 ```bash

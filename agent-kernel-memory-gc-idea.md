@@ -53,6 +53,7 @@
 - v0.32 范围：启动 Observation Layer，支持把本地对话文件和 Claude Code / Codex 常见 JSONL session 目录导入 `.agent-kernel/observations`，先保存原始观察记录，后续再进行 Skilllet Synthesis。
 - v0.33 范围：打通本地进化闭环第一版，`observe synthesize` 将 Observation 转成 Draft Inbox 候选，Canvas 也可以从 Observations 一键生成待审阅 Draft，但不会自动启用 Skilllet。
 - v0.34 范围：增加 `observe evolve`，一条命令完成本地 Claude Code / Codex 会话导入与 Draft 合成，仍保持“只进 Draft Inbox，不自动启用”的信任边界。
+- v0.35 范围：Observation 导入增加 ID 去重，同一会话重复导入会计入 skipped，避免每天重复 evolve 时制造虚假的新增数量。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 npm 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。
