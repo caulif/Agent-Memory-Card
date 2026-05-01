@@ -28,6 +28,8 @@ const DRAFT_SCROLL_ID: &str = "native-draft-inbox-scroll";
 const CATALOG_SCROLL_ID: &str = "native-catalog-scroll";
 const MATRIX_SCROLL_ID: &str = "native-skilllet-matrix-scroll";
 const OUTPUT_SCROLL_ID: &str = "native-output-scroll";
+const WORKSPACE_SCROLL_ID: &str = "native-project-workspace-scroll";
+const MAX_HEADER_MARKERS: usize = 3;
 
 #[derive(Debug, Clone, Copy)]
 struct UiPalette {
@@ -103,15 +105,6 @@ fn page_frame() -> egui::Frame {
         .inner_margin(egui::Margin::same(18))
 }
 
-fn sidebar_frame() -> egui::Frame {
-    let palette = ui_palette();
-    egui::Frame::new()
-        .fill(palette.sidebar)
-        .stroke(egui::Stroke::new(1.0, palette.border))
-        .corner_radius(egui::CornerRadius::same(22))
-        .inner_margin(egui::Margin::same(16))
-}
-
 fn card_frame() -> egui::Frame {
     let palette = ui_palette();
     egui::Frame::new()
@@ -164,6 +157,37 @@ fn danger_button(label: &'static str) -> egui::Button<'static> {
         ))
         .corner_radius(egui::CornerRadius::same(12))
         .min_size(egui::vec2(0.0, 34.0))
+}
+
+fn visible_header_markers(markers: &[String]) -> Vec<String> {
+    let mut visible = markers
+        .iter()
+        .take(MAX_HEADER_MARKERS)
+        .map(|marker| format!("Marker: {}", compact_marker(marker)))
+        .collect::<Vec<_>>();
+    if markers.len() > MAX_HEADER_MARKERS {
+        visible.push(format!(
+            "+{} more markers",
+            markers.len() - MAX_HEADER_MARKERS
+        ));
+    }
+    visible
+}
+
+fn compact_marker(marker: &str) -> String {
+    const MAX_MARKER_CHARS: usize = 24;
+    if marker.chars().count() <= MAX_MARKER_CHARS {
+        return marker.to_string();
+    }
+    let tail = marker
+        .chars()
+        .rev()
+        .take(MAX_MARKER_CHARS - 1)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    format!("…{tail}")
 }
 
 #[cfg(test)]
@@ -251,11 +275,40 @@ mod tests {
         assert_eq!(CATALOG_SCROLL_ID, "native-catalog-scroll");
         assert_eq!(MATRIX_SCROLL_ID, "native-skilllet-matrix-scroll");
         assert_eq!(OUTPUT_SCROLL_ID, "native-output-scroll");
+        assert_eq!(WORKSPACE_SCROLL_ID, "native-project-workspace-scroll");
 
         let palette = ui_palette();
         assert!(palette.background.r() > 235);
         assert!(palette.card.r() > palette.background.r());
         assert!(palette.accent.b() > palette.accent.r());
+    }
+
+    #[test]
+    fn native_header_markers_are_summarized_for_narrow_layouts() {
+        let markers = vec![
+            ".agent-kernel/project".to_string(),
+            "AGENTS.md".to_string(),
+            "CLAUDE.md".to_string(),
+            ".agents/skills".to_string(),
+            ".git".to_string(),
+        ];
+
+        let visible = visible_header_markers(&markers);
+
+        assert_eq!(visible.len(), 4);
+        assert_eq!(visible[3], "+2 more markers");
+        assert!(visible.iter().all(|marker| marker.chars().count() <= 40));
+    }
+
+    #[test]
+    fn compact_marker_preserves_short_paths_and_truncates_long_paths() {
+        assert_eq!(compact_marker("AGENTS.md"), "AGENTS.md");
+
+        let compacted = compact_marker(".very/long/path/that/would/wrap/in/a/header");
+
+        assert!(compacted.starts_with('…'));
+        assert!(compacted.chars().count() <= 24);
+        assert!(compacted.ends_with("wrap/in/a/header"));
     }
 
     #[test]
@@ -641,118 +694,155 @@ impl AgentKernelApp {
 
 impl eframe::App for AgentKernelApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        page_frame().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.allocate_ui_with_layout(
-                    egui::vec2(330.0, ui.available_height()),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| self.render_project_list(ui),
-                );
-                ui.add_space(14.0);
-                ui.allocate_ui_with_layout(
-                    egui::vec2(ui.available_width(), ui.available_height()),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| self.render_project_workspace(ui),
-                );
-            });
-        });
+        let palette = ui_palette();
+        ui.painter()
+            .rect_filled(ui.max_rect(), egui::CornerRadius::ZERO, palette.background);
+        ui.allocate_ui_with_layout(
+            ui.available_size(),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                page_frame().show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    self.render_app_shell(ui);
+                });
+            },
+        );
     }
 }
 
 impl AgentKernelApp {
+    fn render_app_shell(&mut self, ui: &mut egui::Ui) {
+        let shell_size = ui.available_size();
+        ui.allocate_ui_with_layout(
+            shell_size,
+            egui::Layout::left_to_right(egui::Align::Min),
+            |ui| {
+                let sidebar_width = 330.0_f32.min(shell_size.x * 0.34).max(280.0);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(sidebar_width, shell_size.y),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_min_height(shell_size.y);
+                        self.render_project_list(ui);
+                    },
+                );
+                ui.add_space(14.0);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), shell_size.y),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_min_height(shell_size.y);
+                        self.render_project_workspace(ui);
+                    },
+                );
+            },
+        );
+    }
+
     fn render_project_list(&mut self, ui: &mut egui::Ui) {
         let palette = ui_palette();
-        sidebar_frame().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new(APP_TITLE)
-                            .size(24.0)
-                            .strong()
-                            .color(palette.text),
-                    );
-                    ui.label(
-                        egui::RichText::new(APP_SUBTITLE)
-                            .size(13.0)
-                            .color(palette.muted),
-                    );
-                });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(secondary_button("Scan")).clicked() {
-                        self.refresh_with_scan();
-                    }
-                });
+        egui::Frame::new()
+            .fill(palette.sidebar)
+            .stroke(egui::Stroke::new(1.0, palette.border))
+            .corner_radius(egui::CornerRadius::same(22))
+            .inner_margin(egui::Margin::same(16))
+            .show(ui, |ui| {
+                ui.set_min_height(ui.available_height());
+                self.render_project_list_contents(ui);
             });
-            ui.add_space(14.0);
-            ui.label(
-                egui::RichText::new(format!(
-                    "Registry\n{}",
-                    project_registry::registry_path(&self.home).display()
-                ))
-                .size(11.0)
-                .color(palette.muted),
-            );
-            ui.add_space(14.0);
+    }
 
-            if self.registry.projects.is_empty() {
-                subtle_card_frame().show(ui, |ui| {
-                    ui.label(egui::RichText::new("No projects found yet.").color(palette.muted));
-                });
-                return;
-            }
-
-            egui::ScrollArea::vertical()
-                .id_salt(SIDEBAR_SCROLL_ID)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    for project in &self.registry.projects {
-                        let selected = self.selected_path.as_deref() == Some(project.path.as_str());
-                        let fill = if selected {
-                            palette.accent_soft
-                        } else {
-                            palette.card
-                        };
-                        let stroke = if selected {
-                            egui::Stroke::new(1.0, palette.accent)
-                        } else {
-                            egui::Stroke::new(1.0, palette.border)
-                        };
-                        egui::Frame::new()
-                            .fill(fill)
-                            .stroke(stroke)
-                            .corner_radius(egui::CornerRadius::same(16))
-                            .inner_margin(egui::Margin::same(12))
-                            .outer_margin(egui::Margin::symmetric(0, 5))
-                            .show(ui, |ui| {
-                                if ui
-                                    .add(
-                                        egui::Button::new(
-                                            egui::RichText::new(&project.name)
-                                                .strong()
-                                                .color(palette.text),
-                                        )
-                                        .fill(egui::Color32::TRANSPARENT)
-                                        .stroke(egui::Stroke::NONE)
-                                        .corner_radius(egui::CornerRadius::same(12)),
-                                    )
-                                    .clicked()
-                                {
-                                    self.selected_path = Some(project.path.clone());
-                                }
-                                ui.label(
-                                    egui::RichText::new(project.agents.join("  /  "))
-                                        .size(12.0)
-                                        .color(palette.accent),
-                                );
-                                ui.label(
-                                    egui::RichText::new(&project.path)
-                                        .size(11.0)
-                                        .color(palette.muted),
-                                );
-                            });
-                    }
-                });
+    fn render_project_list_contents(&mut self, ui: &mut egui::Ui) {
+        let palette = ui_palette();
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(
+                    egui::RichText::new(APP_TITLE)
+                        .size(24.0)
+                        .strong()
+                        .color(palette.text),
+                );
+                ui.label(
+                    egui::RichText::new(APP_SUBTITLE)
+                        .size(12.0)
+                        .color(palette.muted),
+                );
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.add(secondary_button("Scan")).clicked() {
+                    self.refresh_with_scan();
+                }
+            });
         });
+        ui.add_space(14.0);
+        ui.label(
+            egui::RichText::new(format!(
+                "Registry\n{}",
+                project_registry::registry_path(&self.home).display()
+            ))
+            .size(11.0)
+            .color(palette.muted),
+        );
+        ui.add_space(14.0);
+
+        if self.registry.projects.is_empty() {
+            subtle_card_frame().show(ui, |ui| {
+                ui.label(egui::RichText::new("No projects found yet.").color(palette.muted));
+            });
+            return;
+        }
+
+        egui::ScrollArea::vertical()
+            .id_salt(SIDEBAR_SCROLL_ID)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for project in &self.registry.projects {
+                    let selected = self.selected_path.as_deref() == Some(project.path.as_str());
+                    let fill = if selected {
+                        palette.accent_soft
+                    } else {
+                        palette.card
+                    };
+                    let stroke = if selected {
+                        egui::Stroke::new(1.0, palette.accent)
+                    } else {
+                        egui::Stroke::new(1.0, palette.border)
+                    };
+                    egui::Frame::new()
+                        .fill(fill)
+                        .stroke(stroke)
+                        .corner_radius(egui::CornerRadius::same(16))
+                        .inner_margin(egui::Margin::same(12))
+                        .outer_margin(egui::Margin::symmetric(0, 5))
+                        .show(ui, |ui| {
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new(&project.name)
+                                            .strong()
+                                            .color(palette.text),
+                                    )
+                                    .fill(egui::Color32::TRANSPARENT)
+                                    .stroke(egui::Stroke::NONE)
+                                    .corner_radius(egui::CornerRadius::same(12)),
+                                )
+                                .clicked()
+                            {
+                                self.selected_path = Some(project.path.clone());
+                            }
+                            ui.label(
+                                egui::RichText::new(project.agents.join("  /  "))
+                                    .size(12.0)
+                                    .color(palette.accent),
+                            );
+                            ui.label(
+                                egui::RichText::new(&project.path)
+                                    .size(11.0)
+                                    .color(palette.muted),
+                            );
+                        });
+                }
+            });
     }
 
     fn render_project_workspace(&mut self, ui: &mut egui::Ui) {
@@ -767,9 +857,10 @@ impl AgentKernelApp {
         };
 
         egui::ScrollArea::vertical()
-            .id_salt("native-project-workspace-scroll")
+            .id_salt(WORKSPACE_SCROLL_ID)
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
                 card_frame().show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
@@ -794,8 +885,8 @@ impl AgentKernelApp {
                         for agent in &project.agents {
                             Self::pill(ui, &format!("Agent: {agent}"), palette.accent_soft);
                         }
-                        for marker in &project.markers {
-                            Self::pill(ui, &format!("Marker: {marker}"), palette.card_alt);
+                        for marker in visible_header_markers(&project.markers) {
+                            Self::pill(ui, &marker, palette.card_alt);
                         }
                     });
                     ui.add_space(14.0);
@@ -827,7 +918,9 @@ impl AgentKernelApp {
                 self.render_output(ui);
             });
     }
+}
 
+impl AgentKernelApp {
     fn pill(ui: &mut egui::Ui, text: &str, fill: egui::Color32) {
         let palette = ui_palette();
         egui::Frame::new()
