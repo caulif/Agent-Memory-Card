@@ -50,6 +50,19 @@ v0.7 exposes extraction in the Canvas UI:
 2. `/api/extract` writes local heuristic candidates into Draft Inbox.
 3. Extracted drafts can be approved or rejected from the UI.
 
+v0.8 starts the Hybrid provider foundation:
+
+1. `provider init` writes `.agent-kernel/providers.yml`.
+2. `provider show` displays local-first provider config.
+3. The config includes `local` and `openai-compatible` slots plus privacy defaults.
+4. Non-local providers are config scaffolding for now; extraction remains local-only.
+
+v0.9 adds extraction preview controls:
+
+1. `extract --provider local` selects the local heuristic provider.
+2. `extract --dry-run` shows candidate drafts without writing Draft Inbox files.
+3. UI extraction supports selecting enabled Agent targets instead of hardcoding Codex.
+
 ## Commands
 
 ```bash
@@ -67,6 +80,9 @@ cargo run -- draft approve --id project:prefer-pnpm --project .
 cargo run -- draft reject --id project:prefer-pnpm --project .
 cargo run -- extract --text "Always use pnpm for package management." --target codex --project .
 cargo run -- extract --file chat.md --target codex --project .
+cargo run -- extract --text "Always run cargo test before pushing." --target codex --provider local --dry-run --project .
+cargo run -- provider init --project .
+cargo run -- provider show --project .
 ```
 
 The npm wrapper works locally after the Rust binary has been built:
@@ -109,6 +125,10 @@ cargo run -- draft approve --id project:prefer-pnpm --project .
 # 10. Extract local heuristic drafts from text or files.
 cargo run -- extract --text "Always use pnpm for package management." --target codex --project .
 cargo run -- extract --file chat.md --target codex --project .
+
+# 11. Initialize Hybrid provider config and preview extraction payloads locally.
+cargo run -- provider init --project .
+cargo run -- extract --text "Always run cargo test before pushing." --target codex --provider local --dry-run --project .
 ```
 
 The Canvas UI exposes:
@@ -123,6 +143,7 @@ The Canvas UI exposes:
 ## Generated State
 
 - `.agent-kernel/project.yml` is the declarative project config.
+- `.agent-kernel/providers.yml` stores local-first provider and privacy settings.
 - `.agent-kernel/skilllets/` contains owned lightweight Skilllet source files.
 - `.agent-kernel/drafts/` contains local Draft Inbox candidates before approval.
 - `.agent-kernel/skill-index.yml` is the imported Skill index.

@@ -142,12 +142,19 @@ async fn api_extract(
     State(state): State<AppState>,
     Json(req): Json<ExtractRequest>,
 ) -> Json<serde_json::Value> {
-    match extract::extract_text_to_drafts(state.project_root.as_ref(), &req.text, req.targets, "ui")
-    {
+    match extract::extract_text_to_drafts(
+        state.project_root.as_ref(),
+        &req.text,
+        req.targets,
+        "ui",
+        Some("local".to_string()),
+        false,
+    ) {
         Ok(report) => Json(serde_json::json!({
             "ok": true,
             "created": report.created,
             "skipped": report.skipped,
+            "candidates": report.candidates,
             "text": report.render(),
         })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
@@ -281,6 +288,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
       <section>
         <h3>Extract Drafts</h3>
         <textarea id="extract-text" placeholder="Paste a correction or session note" style="width:100%;min-height:90px;resize:vertical;border:1px solid var(--line);border-radius:7px;padding:8px"></textarea>
+        <div id="extract-targets" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
         <button class="btn" id="extract-drafts" style="margin-top:8px">Extract</button>
       </section>
       <section>
@@ -337,6 +345,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
       await renderStatus();
       renderRules();
       renderStore();
+      renderExtractTargets();
     }
 
     function renderSkills() {
@@ -454,6 +463,16 @@ const INDEX_HTML: &str = r##"<!doctype html>
       ).join("")}</ul>` : `<p>No rule files indexed.</p>`;
     }
 
+    function renderExtractTargets() {
+      const agents = Object.entries(state.project.agents || {}).filter(([, agent]) => agent.enabled);
+      document.getElementById("extract-targets").innerHTML = agents.map(([name]) => `
+        <label style="font-size:12px;color:var(--muted)">
+          <input type="checkbox" class="extract-target" value="${escapeHtml(name)}" ${name === "codex" ? "checked" : ""}>
+          ${escapeHtml(name)}
+        </label>
+      `).join("");
+    }
+
     function renderStore() {
       document.getElementById("store-grid").innerHTML = state.skill_index.skills.map(skill => `
         <div class="card">
@@ -552,10 +571,11 @@ const INDEX_HTML: &str = r##"<!doctype html>
 
     async function extractDrafts() {
       const text = document.getElementById("extract-text").value;
+      const targets = Array.from(document.querySelectorAll(".extract-target:checked")).map(input => input.value);
       const res = await fetch("/api/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, targets: ["codex"] })
+        body: JSON.stringify({ text, targets })
       });
       const result = await res.json();
       document.getElementById("build-output").textContent = result.ok ? result.text : result.error;

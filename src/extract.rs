@@ -5,19 +5,31 @@ use anyhow::{Result, anyhow};
 use regex::Regex;
 
 use crate::draft::{self, NewDraft};
+use crate::provider;
 
 #[derive(Debug)]
 pub struct ExtractReport {
     pub created: Vec<String>,
     pub skipped: Vec<String>,
+    pub candidates: Vec<ExtractCandidatePreview>,
+    pub dry_run: bool,
+    pub provider: String,
 }
 
 impl ExtractReport {
     pub fn render(&self) -> String {
         let mut out = String::new();
         out.push_str("Agent-Kernel extract report\n\n");
+        out.push_str(&format!("Provider: {}\n\n", self.provider));
         if self.created.is_empty() {
-            out.push_str("No drafts created.\n");
+            if self.dry_run && !self.candidates.is_empty() {
+                out.push_str("Draft candidates:\n");
+                for candidate in &self.candidates {
+                    out.push_str(&format!("- {}: {}\n", candidate.id, candidate.body));
+                }
+            } else {
+                out.push_str("No drafts created.\n");
+            }
         } else {
             out.push_str("Drafts created:\n");
             for id in &self.created {
@@ -34,6 +46,16 @@ impl ExtractReport {
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ExtractCandidatePreview {
+    pub id: String,
+    pub title: String,
+    pub body: String,
+    pub kind: String,
+    pub scope: String,
+    pub evidence: String,
+}
+
 #[derive(Debug, Clone)]
 struct Candidate {
     title: String,
@@ -48,6 +70,8 @@ pub fn extract_to_drafts(
     text: Option<String>,
     file: Option<PathBuf>,
     targets: Vec<String>,
+    provider_name: Option<String>,
+    dry_run: bool,
 ) -> Result<ExtractReport> {
     let (input, source) = match (text, file) {
         (Some(text), None) => (text, "inline text".to_string()),
@@ -58,7 +82,14 @@ pub fn extract_to_drafts(
         _ => return Err(anyhow!("provide exactly one of --text or --file")),
     };
 
-    extract_text_to_drafts(project_root, &input, targets, &source)
+    extract_text_to_drafts(
+        project_root,
+        &input,
+        targets,
+        &source,
+        provider_name,
+        dry_run,
+    )
 }
 
 pub fn extract_text_to_drafts(
@@ -66,8 +97,51 @@ pub fn extract_text_to_drafts(
     input: &str,
     targets: Vec<String>,
     source: &str,
+    provider_name: Option<String>,
+    dry_run: bool,
 ) -> Result<ExtractReport> {
+    let provider_name = provider_name.unwrap_or_else(|| {
+        provider::load_or_default_provider_config(project_root)
+            .map(|cfg| cfg.default)
+            .unwrap_or_else(|_| "local".to_string())
+    });
+    if provider_name != "local" && provider::provider_exists(project_root, &provider_name)? {
+        return Ok(ExtractReport {
+            created: Vec::new(),
+            skipped: vec![format!(
+                "provider `{provider_name}` is configured but not implemented yet; use `--provider local`"
+            )],
+            candidates: Vec::new(),
+            dry_run,
+            provider: provider_name,
+        });
+    }
+    if provider_name != "local" {
+        return Err(anyhow!("unknown provider `{provider_name}`"));
+    }
+
     let candidates = extract_candidates(input);
+    let previews = candidates
+        .iter()
+        .map(|candidate| ExtractCandidatePreview {
+            id: draft_id(candidate),
+            title: candidate.title.clone(),
+            body: candidate.body.clone(),
+            kind: candidate.kind.clone(),
+            scope: candidate.scope.clone(),
+            evidence: format!("{source}: {}", candidate.evidence),
+        })
+        .collect::<Vec<_>>();
+    if dry_run {
+        return Ok(ExtractReport {
+            created: Vec::new(),
+            skipped: Vec::new(),
+            candidates: previews,
+            dry_run,
+            provider: provider_name,
+        });
+    }
+
     let mut created = Vec::new();
     let mut skipped = Vec::new();
     for candidate in candidates {
@@ -89,7 +163,13 @@ pub fn extract_text_to_drafts(
             Err(error) => skipped.push(format!("{id}: {error}")),
         }
     }
-    Ok(ExtractReport { created, skipped })
+    Ok(ExtractReport {
+        created,
+        skipped,
+        candidates: previews,
+        dry_run,
+        provider: provider_name,
+    })
 }
 
 fn extract_candidates(input: &str) -> Vec<Candidate> {
@@ -239,11 +319,31 @@ mod tests {
             Some("Always use pnpm for package management.".to_string()),
             None,
             vec!["codex".to_string()],
+            Some("local".to_string()),
+            false,
         )
         .expect("extract");
 
         assert_eq!(report.created.len(), 1);
         let drafts = draft::load_drafts(temp.path()).expect("drafts");
         assert_eq!(drafts[0].targets, vec!["codex"]);
+    }
+
+    #[test]
+    fn dry_run_does_not_create_drafts() {
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        let report = extract_to_drafts(
+            temp.path(),
+            Some("Always use pnpm for package management.".to_string()),
+            None,
+            vec!["codex".to_string()],
+            Some("local".to_string()),
+            true,
+        )
+        .expect("extract");
+
+        assert_eq!(report.candidates.len(), 1);
+        assert!(draft::load_drafts(temp.path()).expect("drafts").is_empty());
     }
 }

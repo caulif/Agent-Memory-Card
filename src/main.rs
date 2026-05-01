@@ -3,6 +3,7 @@ mod config;
 mod draft;
 mod extract;
 mod fsutil;
+mod provider;
 mod scanner;
 mod skilllet;
 mod ui;
@@ -110,9 +111,23 @@ enum Commands {
         #[arg(long = "target")]
         targets: Vec<String>,
 
+        /// Extraction provider. v0.8 supports local; other providers are config scaffolding.
+        #[arg(long)]
+        provider: Option<String>,
+
+        /// Show extracted candidates without writing Draft Inbox files.
+        #[arg(long)]
+        dry_run: bool,
+
         /// Project root.
         #[arg(long, default_value = ".")]
         project: PathBuf,
+    },
+
+    /// Manage Hybrid provider configuration.
+    Provider {
+        #[command(subcommand)]
+        command: ProviderCommands,
     },
 
     /// Launch the local Canvas workspace UI.
@@ -212,6 +227,21 @@ enum DraftCommands {
     Reject {
         #[arg(long)]
         id: String,
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProviderCommands {
+    /// Write default local-first provider config.
+    Init {
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
+    /// Show provider config.
+    Show {
         #[arg(long, default_value = ".")]
         project: PathBuf,
     },
@@ -324,11 +354,24 @@ async fn main() -> Result<()> {
             text,
             file,
             targets,
+            provider,
+            dry_run,
             project,
         } => {
-            let report = extract::extract_to_drafts(&project, text, file, targets)?;
+            let report =
+                extract::extract_to_drafts(&project, text, file, targets, provider, dry_run)?;
             println!("{}", report.render());
         }
+        Commands::Provider { command } => match command {
+            ProviderCommands::Init { project } => {
+                let cfg = provider::init_provider_config(&project)?;
+                println!("{}", serde_yaml::to_string(&cfg)?);
+            }
+            ProviderCommands::Show { project } => {
+                let cfg = provider::load_or_default_provider_config(&project)?;
+                println!("{}", serde_yaml::to_string(&cfg)?);
+            }
+        },
         Commands::Ui {
             project,
             port,
