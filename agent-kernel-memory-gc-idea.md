@@ -5,14 +5,14 @@
 
 ## 0. 本轮增强后的关键结论
 
-这轮讨论后，Agent-Kernel 的定位应该再往前推一步：它不是“修补现有规则文件”的小工具，而是一个“编译型知识系统”。
+这轮讨论后，Agent-Kernel 的定位应该再往前推一步：它不是“修补现有规则文件”的小工具，而是一个面向 Claude Code 和 Codex 的“本地 Skilllet 进化引擎”。
 
 关键决策：
 
 - Rust 内核：核心解析、分类、diff、build、Rule CI、文件操作都用 Rust，保证速度、单二进制分发和工程可靠性；`npx agent-kernel` 只是跨平台安装与启动入口。
 - 可视化优先：UI 不是后期锦上添花，而是建立信任的核心产品面。用户需要在图形界面里审查冲突、确认压缩、拖拽分发 skilllets。
 - UI 双入口：第一屏采用以 Project 为中心的白板/Canvas，展示当前项目、多个 Agent、Skill、Skilllet 的关系和拖拽连接；同时提供 App Store/包管理器界面，用于浏览、安装、启用和更新 Skills/Skilllets。
-- 编译产物思维：`CLAUDE.md`、`AGENTS.md`、`.cursor/rules/*.mdc`、`.clinerules` 默认视为 build artifacts，由 `~/.agent-kernel/skilllets` 和项目 `.agent-kernel/project.yml` 全量编译生成。
+- 编译产物思维：`CLAUDE.md`、`AGENTS.md` 默认视为 build artifacts，由 `~/.agent-kernel/skilllets` 和项目 `.agent-kernel/project.yml` 全量编译生成；Cursor 等其他 Agent 保留 adapter 扩展接口，MVP 不进入默认目标。
 - 首个入口：先从用户现有规则文件和 Skills 导入，后续再通过 MCP/session log 自动提炼对话中的 Draft Skilllets。
 - Skill 管理默认引用模式：第三方或已有 Skill 保持原位置，Agent-Kernel 建立索引、启用关系、导出关系和 overlay，不直接改源文件。
 - Skill 分发默认 Mirror 模式：拖拽现有 Skill 到某个 Agent/项目时，不改源文件，而是复制/同步一份到目标 Agent 的 skills 目录，并记录 source path、hash 和同步状态。
@@ -48,13 +48,15 @@
 - v0.27 范围：将 Canvas Inspector 中的 Skilllet target matrix 从文字摘要升级为可点击矩阵表，让用户能直接按 Skilllet × Agent 维度分配能力。
 - v0.28 范围：加入 generated artifact drift 检测，基于 `project.lock.yml` 比对 `AGENTS.md`、`CLAUDE.md`、`.cursor/rules`、`.clinerules` 等编译产物是否被手改，为后续 Reverse Parse 生成 Draft 打基础。
 - v0.29 范围：实现 Reverse Parse 的本地第一版，`import --artifacts` 通过重新渲染期望产物并提取用户新增行，把手改的 build artifact 转成 Draft Inbox 候选。
+- v0.30 范围：重置 MVP 范围，默认只支持 Claude Code / Codex；Cursor 和 Cline 从默认配置与 Canvas 目标中移除，但保留通用 exporter/adapter 接口。
+- Skilllet 操作补充：用户可以把一个或多个 Skilllet 分配到某个项目或 Agent，也可以合并多个 Skilllet，还可以把 Skilllet 作为补充追加进已有 Skill。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 npm 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。
 
 ## 1. 一句话定位
 
-Agent-Kernel 是一个面向 AI 编程 Agent 的“知识编译器”：它不试图替代 Claude Code、Codex、Cursor、Cline、Aider 或 Mem0/Letta 这类 Agent/记忆系统，而是专门治理它们都会依赖的那层文件化上下文，把散落在对话、规则文件、Skill 文件和项目文档里的有效信息抽取、去重、合并、冲突仲裁，并导出到不同 Agent 能直接消费的格式。
+Agent-Kernel 是一个面向 Claude Code 和 Codex 的本地 Skilllet 进化引擎：它不试图替代 Agent runtime，而是专门治理它们依赖的文件化上下文，把散落在本地对话、规则文件、Skill 文件和项目文档里的有效信息抽取、去重、合并、冲突仲裁，并编译回对应 Agent 能直接消费的格式。
 
 更短的产品表达：
 

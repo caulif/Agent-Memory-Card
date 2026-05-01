@@ -239,7 +239,7 @@ mod matrix_tests {
             "Use Axios for frontend HTTP requests.",
             "preference",
             "project",
-            vec!["codex".to_string(), "cursor".to_string()],
+            vec!["codex".to_string(), "claude-code".to_string()],
         )
         .expect("add skilllet");
 
@@ -247,8 +247,7 @@ mod matrix_tests {
 
         assert_eq!(matrix.rows[0].skilllet_id, "project:use-axios");
         assert_eq!(matrix.rows[0].targets.get("codex"), Some(&true));
-        assert_eq!(matrix.rows[0].targets.get("cursor"), Some(&true));
-        assert_eq!(matrix.rows[0].targets.get("claude-code"), Some(&false));
+        assert_eq!(matrix.rows[0].targets.get("claude-code"), Some(&true));
     }
 }
 
@@ -304,14 +303,14 @@ mod tests {
         set_skilllet_targets(
             temp.path(),
             "project:use-axios",
-            vec!["claude-code".to_string(), "cursor".to_string()],
+            vec!["claude-code".to_string(), "codex".to_string()],
         )
         .expect("set targets");
 
         let project = config::load_or_default_project_config(temp.path()).expect("project");
         assert_eq!(
             project.skilllets.include[0].targets,
-            vec!["claude-code", "cursor"]
+            vec!["claude-code", "codex"]
         );
     }
 }

@@ -1,6 +1,6 @@
 # Agent-Kernel
 
-Agent-Kernel v0.1 is a Rust-built, project-centered workspace for managing Agent rules and Skills.
+Agent-Kernel v0.1 is a Rust-built, project-centered workspace for managing Claude Code and Codex rules and Skills.
 
 This prototype implements the first loop:
 
@@ -136,11 +136,11 @@ v0.21 adds instruction budget warnings:
 1. Build preview warns when generated Agent instruction artifacts exceed 32 KiB.
 2. The budget follows Codex-style project document constraints and helps prevent prompt bloat early.
 
-v0.22 adds the Cursor rules exporter:
+v0.22 explored the generic rules exporter:
 
-1. Agents with `rules_dir` now receive `.mdc` rule artifacts.
-2. Cursor exports write `.cursor/rules/agent-kernel.mdc` with `alwaysApply: true`.
-3. Cursor-targeted Skilllets now compile into a native Cursor Rules surface.
+1. Agents with `rules_dir` can receive generated rule artifacts.
+2. The core keeps a generic extension point for future adapters.
+3. Cursor is no longer part of the default MVP target set.
 
 v0.23 adds Agent target controls:
 
@@ -160,11 +160,11 @@ v0.25 adds a Skilllet target matrix:
 2. `/api/skilllet/matrix` exposes the matrix to the Canvas.
 3. The inspector shows a compact target summary for each Skilllet.
 
-v0.26 adds the Cline rules exporter:
+v0.26 explored a Cline-style rules exporter:
 
-1. Cline now uses a native rules directory export at `.clinerules/agent-kernel.md`.
-2. Legacy project configs that used `instructions: .clinerules` are migrated in memory to `rules_dir: .clinerules`.
-3. Cursor keeps `.mdc` frontmatter, while Cline receives plain Markdown rules.
+1. The generic rules exporter can write Markdown rules into custom agent directories.
+2. Cline is no longer part of the default MVP target set.
+3. Future non-core agents should be added through adapters instead of default project config.
 
 v0.27 improves the Canvas target matrix:
 
@@ -184,6 +184,12 @@ v0.29 starts Reverse Parse:
 2. The importer re-renders the expected artifact, extracts added lines from the edited file, and targets the draft to the owning Agent.
 3. The Canvas footer exposes the same flow through Import Artifacts.
 
+v0.30 resets the MVP scope:
+
+1. Default targets are Claude Code and Codex only.
+2. Cursor and Cline are removed from the default project config and Canvas target set.
+3. The generic `rules_dir` exporter remains as an extension interface for future adapters.
+
 ## Commands
 
 ```bash
@@ -197,7 +203,7 @@ cargo run -- status --project .
 cargo run -- sync --project .
 cargo run -- skilllet add --id project:use-axios --title "Use Axios" --body "Use Axios for frontend HTTP requests." --target codex --project .
 cargo run -- skilllet list --project .
-cargo run -- skilllet targets --id project:use-axios --target codex --target cursor --project .
+cargo run -- skilllet targets --id project:use-axios --target codex --target claude-code --project .
 cargo run -- skilllet matrix --project .
 cargo run -- draft add --id project:prefer-pnpm --title "Prefer pnpm" --body "Use pnpm for package management." --target codex --project .
 cargo run -- draft approve --id project:prefer-pnpm --project .
@@ -218,8 +224,8 @@ cargo run -- catalog init --project .
 cargo run -- catalog validate --project .
 cargo run -- catalog install --id core:rust-quality-gate --target codex --project .
 cargo run -- agent list --project .
-cargo run -- agent enable --agent cline --project .
-cargo run -- agent disable --agent cline --project .
+cargo run -- agent enable --agent claude-code --project .
+cargo run -- agent disable --agent claude-code --project .
 ```
 
 The npm wrapper works locally after the Rust binary has been built:
@@ -317,5 +323,4 @@ The Canvas UI exposes:
 - `.agent-kernel/skill-index.yml` is the imported Skill index.
 - `.agent-kernel/project.lock.yml` records generated mirror and artifact hashes.
 - `AGENTS.md`, `CLAUDE.md`, and mirrored skill folders are build artifacts.
-- `.cursor/rules/agent-kernel.mdc` is generated when Cursor rules export is enabled.
-- `.clinerules/agent-kernel.md` is generated when Cline rules export is enabled.
+- Custom future adapters can use `rules_dir` to generate Markdown rule artifacts.

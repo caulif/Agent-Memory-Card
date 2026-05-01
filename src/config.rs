@@ -173,28 +173,6 @@ pub fn default_project_config(project_root: &Path) -> ProjectConfig {
             },
         },
     );
-    agents.insert(
-        "cursor".to_string(),
-        AgentConfig {
-            enabled: true,
-            exports: AgentExports {
-                instructions: None,
-                skills_dir: None,
-                rules_dir: Some(".cursor/rules".to_string()),
-            },
-        },
-    );
-    agents.insert(
-        "cline".to_string(),
-        AgentConfig {
-            enabled: false,
-            exports: AgentExports {
-                instructions: None,
-                skills_dir: None,
-                rules_dir: Some(".clinerules".to_string()),
-            },
-        },
-    );
 
     ProjectConfig {
         version: 1,
@@ -319,13 +297,25 @@ mod agent_tests {
     fn set_agent_enabled_updates_project_config() {
         let temp = tempfile::tempdir().expect("tempdir");
 
-        set_agent_enabled(temp.path(), "cline", true).expect("enable cline");
+        set_agent_enabled(temp.path(), "claude-code", false).expect("disable claude-code");
         let enabled = load_or_default_project_config(temp.path()).expect("config");
-        assert!(enabled.agents.get("cline").expect("cline").enabled);
+        assert!(
+            !enabled
+                .agents
+                .get("claude-code")
+                .expect("claude-code")
+                .enabled
+        );
 
-        set_agent_enabled(temp.path(), "cline", false).expect("disable cline");
+        set_agent_enabled(temp.path(), "claude-code", true).expect("enable claude-code");
         let disabled = load_or_default_project_config(temp.path()).expect("config");
-        assert!(!disabled.agents.get("cline").expect("cline").enabled);
+        assert!(
+            disabled
+                .agents
+                .get("claude-code")
+                .expect("claude-code")
+                .enabled
+        );
     }
 }
 
@@ -341,22 +331,16 @@ mod tests {
         assert!(config.agents.contains_key("codex"));
         assert!(config.agents.contains_key("claude-code"));
         assert_eq!(
+            config.agents.keys().cloned().collect::<Vec<_>>(),
+            vec!["claude-code".to_string(), "codex".to_string()]
+        );
+        assert_eq!(
             config
                 .agents
                 .get("codex")
                 .and_then(|agent| agent.exports.skills_dir.as_deref()),
             Some(".agents/skills")
         );
-    }
-
-    #[test]
-    fn default_config_uses_cline_rules_directory() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let config = default_project_config(temp.path());
-        let cline = config.agents.get("cline").expect("cline");
-
-        assert_eq!(cline.exports.instructions.as_deref(), None);
-        assert_eq!(cline.exports.rules_dir.as_deref(), Some(".clinerules"));
     }
 
     #[test]

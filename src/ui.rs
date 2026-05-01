@@ -555,9 +555,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
 
     const agentPositions = {
       "codex": "codex",
-      "claude-code": "claude-code",
-      "cursor": "cursor",
-      "cline": "cline"
+      "claude-code": "claude-code"
     };
 
     async function loadState() {
@@ -993,9 +991,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
     function shortAgentLabel(value) {
       const labels = {
         "claude-code": "Claude",
-        "codex": "Codex",
-        "cursor": "Cursor",
-        "cline": "Cline"
+        "codex": "Codex"
       };
       return labels[value] || value;
     }
