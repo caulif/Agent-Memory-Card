@@ -227,6 +227,12 @@ v0.36 switches the JavaScript package wrapper to Bun:
 3. Release packaging uses `bun pm pack`, while the Rust binary remains the core implementation.
 4. This repository's own package-management Skilllet now prefers Bun.
 
+v0.37 improves Skilllet synthesis for package-manager preferences:
+
+1. Local extraction now recognizes high-confidence Bun package-management corrections.
+2. Phrases like "move from npm to Bun" normalize to `project:prefer-bun`.
+3. The generated Draft uses the stable title `Prefer Bun` and a concise machine-oriented body.
+
 ## Commands
 
 ```bash
@@ -248,6 +254,7 @@ cargo run -- draft add --id project:prefer-bun --title "Prefer Bun" --body "Use 
 cargo run -- draft approve --id project:prefer-bun --project .
 cargo run -- draft reject --id project:prefer-bun --project .
 cargo run -- extract --text "Always use Bun for JavaScript package management and scripts." --target codex --project .
+cargo run -- extract --text "以后把 npm 改为 Bun，所有 JS 脚本都用 bun run。" --target codex --dry-run --project .
 cargo run -- extract --file chat.md --target codex --project .
 cargo run -- extract --text "Always run cargo test before pushing." --target codex --provider local --dry-run --project .
 cargo run -- observe import --file chat.jsonl --agent claude-code --source-kind claude-code-session --project .

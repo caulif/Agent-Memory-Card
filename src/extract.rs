@@ -192,6 +192,10 @@ fn extract_candidates(input: &str) -> Vec<Candidate> {
         if !looks_like_rule(sentence) {
             continue;
         }
+        if let Some(candidate) = normalize_known_preference(sentence) {
+            candidates.push(candidate);
+            continue;
+        }
         let body = normalize_body(sentence);
         if body.len() < 12 {
             continue;
@@ -206,6 +210,38 @@ fn extract_candidates(input: &str) -> Vec<Candidate> {
         });
     }
     dedupe_candidates(candidates)
+}
+
+fn normalize_known_preference(sentence: &str) -> Option<Candidate> {
+    let lower = sentence.to_lowercase();
+    if mentions_bun_package_management(&lower) {
+        return Some(Candidate {
+            title: "Prefer Bun".to_string(),
+            body: "Use Bun for JavaScript package management and scripts.".to_string(),
+            kind: "preference".to_string(),
+            scope: "project".to_string(),
+            evidence: sentence.to_string(),
+        });
+    }
+    None
+}
+
+fn mentions_bun_package_management(lower: &str) -> bool {
+    lower.contains("bun")
+        && [
+            "npm",
+            "pnpm",
+            "yarn",
+            "bun run",
+            "bunx",
+            "包管理",
+            "package manager",
+            "package management",
+            "javascript package",
+            "js 脚本",
+        ]
+        .iter()
+        .any(|marker| lower.contains(marker))
 }
 
 fn split_sentences(input: &str) -> Vec<&str> {
@@ -359,6 +395,29 @@ mod tests {
 
         assert_eq!(report.candidates.len(), 1);
         assert!(draft::load_drafts(temp.path()).expect("drafts").is_empty());
+    }
+
+    #[test]
+    fn normalizes_bun_package_manager_preference() {
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        let report = extract_to_drafts(
+            temp.path(),
+            Some("以后把 npm 改为 Bun，所有 JS 脚本都用 bun run。".to_string()),
+            None,
+            vec!["codex".to_string()],
+            Some("local".to_string()),
+            true,
+        )
+        .expect("extract");
+
+        assert_eq!(report.candidates.len(), 1);
+        assert_eq!(report.candidates[0].id, "project:prefer-bun");
+        assert_eq!(report.candidates[0].title, "Prefer Bun");
+        assert_eq!(
+            report.candidates[0].body,
+            "Use Bun for JavaScript package management and scripts."
+        );
     }
 
     #[test]
