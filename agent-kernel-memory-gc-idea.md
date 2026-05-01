@@ -62,6 +62,7 @@
 - v0.41 范围：Observation dry-run 报告也返回候选 Draft ID，让 UI / CLI 在真正写入 Draft Inbox 前就能展示“将会生成哪些候选”。
 - v0.42 范围：Known Preference Registry 支持项目级 `.agent-kernel/preference-registry.yml` 扩展，并且项目模板优先于内置模板，方便高级个人开发者覆盖默认偏好文案。
 - v0.43 范围：增加 `preference list`，列出 built-in / project 来源的偏好模板，让用户能审计当前自动进化词表。
+- v0.44 范围：增加 `preference init` / `preference validate`，让项目级偏好模板库可以初始化、校验，并在错误时以非零退出码接入脚本或 CI。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 JavaScript registry 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。

@@ -121,6 +121,30 @@ mod tests {
             _ => panic!("expected preference list command"),
         }
     }
+
+    #[test]
+    fn cli_accepts_preference_init_command() {
+        let cli = Cli::parse_from(["agent-kernel", "preference", "init", "--project", "."]);
+
+        match cli.command {
+            Commands::Preference {
+                command: PreferenceCommands::Init { project },
+            } => assert_eq!(project, PathBuf::from(".")),
+            _ => panic!("expected preference init command"),
+        }
+    }
+
+    #[test]
+    fn cli_accepts_preference_validate_command() {
+        let cli = Cli::parse_from(["agent-kernel", "preference", "validate", "--project", "."]);
+
+        match cli.command {
+            Commands::Preference {
+                command: PreferenceCommands::Validate { project },
+            } => assert_eq!(project, PathBuf::from(".")),
+            _ => panic!("expected preference validate command"),
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -530,8 +554,20 @@ enum ObserveCommands {
 
 #[derive(Subcommand)]
 enum PreferenceCommands {
+    /// Write an example project preference registry.
+    Init {
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
     /// List built-in and project preference templates.
     List {
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
+    /// Validate the project preference registry.
+    Validate {
         #[arg(long, default_value = ".")]
         project: PathBuf,
     },
@@ -763,6 +799,14 @@ async fn main() -> Result<()> {
             println!("{}", report.render());
         }
         Commands::Preference { command } => match command {
+            PreferenceCommands::Init { project } => {
+                let created = extract::init_preference_registry(&project)?;
+                if created {
+                    println!("Wrote .agent-kernel/preference-registry.yml");
+                } else {
+                    println!(".agent-kernel/preference-registry.yml already exists");
+                }
+            }
             PreferenceCommands::List { project } => {
                 let templates = extract::preference_templates(&project)?;
                 if templates.is_empty() {
@@ -775,6 +819,13 @@ async fn main() -> Result<()> {
                             template.source, template.title, template.body
                         );
                     }
+                }
+            }
+            PreferenceCommands::Validate { project } => {
+                let report = extract::validate_preference_registry(&project)?;
+                println!("{}", report.render());
+                if report.errors > 0 {
+                    std::process::exit(1);
                 }
             }
         },

@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -70,6 +71,32 @@ pub struct PreferenceTemplatePreview {
     pub source: String,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PreferenceRegistryValidationReport {
+    pub errors: usize,
+    pub warnings: usize,
+    pub messages: Vec<String>,
+}
+
+impl PreferenceRegistryValidationReport {
+    pub fn render(&self) -> String {
+        let mut out = String::new();
+        out.push_str("Agent-Kernel preference registry validation\n\n");
+        if self.messages.is_empty() {
+            out.push_str("No issues found.\n");
+        } else {
+            for message in &self.messages {
+                out.push_str(&format!("- {message}\n"));
+            }
+        }
+        out.push_str(&format!(
+            "\nSummary: {} errors, {} warnings\n",
+            self.errors, self.warnings
+        ));
+        out
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Candidate {
     title: String,
@@ -88,6 +115,76 @@ pub fn preference_templates(project_root: &Path) -> Result<Vec<PreferenceTemplat
             source: preference.source,
         })
         .collect())
+}
+
+pub fn init_preference_registry(project_root: &Path) -> Result<bool> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    config::ensure_kernel_dir(&root)?;
+    let path = preference_registry_path(&root);
+    if path.exists() {
+        return Ok(false);
+    }
+    fs::write(path, DEFAULT_PREFERENCE_REGISTRY)?;
+    Ok(true)
+}
+
+pub fn validate_preference_registry(
+    project_root: &Path,
+) -> Result<PreferenceRegistryValidationReport> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    let path = preference_registry_path(&root);
+    if !path.exists() {
+        return Ok(PreferenceRegistryValidationReport {
+            errors: 0,
+            warnings: 1,
+            messages: vec![
+                "warning: .agent-kernel/preference-registry.yml does not exist".to_string(),
+            ],
+        });
+    }
+
+    let text = fs::read_to_string(&path)?;
+    let registry: ProjectPreferenceRegistry = serde_yaml::from_str(&text)?;
+    let mut report = PreferenceRegistryValidationReport {
+        errors: 0,
+        warnings: 0,
+        messages: Vec::new(),
+    };
+    let mut seen_titles = BTreeSet::new();
+    for (index, preference) in registry.preferences.iter().enumerate() {
+        let number = index + 1;
+        let title = preference.title.trim();
+        if title.is_empty() {
+            report.errors += 1;
+            report
+                .messages
+                .push(format!("error: preference #{number} has an empty title"));
+        } else if !seen_titles.insert(title.to_lowercase()) {
+            report.errors += 1;
+            report.messages.push(format!(
+                "error: preference #{number} has duplicate title `{title}`"
+            ));
+        }
+        if preference.body.trim().is_empty() {
+            report.errors += 1;
+            report
+                .messages
+                .push(format!("error: preference #{number} has an empty body"));
+        }
+        if preference.required.is_empty() {
+            report.errors += 1;
+            report.messages.push(format!(
+                "error: preference #{number} has no required markers"
+            ));
+        }
+        if preference.context.is_empty() {
+            report.warnings += 1;
+            report.messages.push(format!(
+                "warning: preference #{number} has no context markers and may match too broadly"
+            ));
+        }
+    }
+    Ok(report)
 }
 
 pub fn extract_to_drafts(
@@ -283,7 +380,9 @@ struct ProjectPreferenceRegistry {
 
 #[derive(Debug, Deserialize)]
 struct ProjectPreference {
+    #[serde(default)]
     title: String,
+    #[serde(default)]
     body: String,
     #[serde(default)]
     required: Vec<String>,
@@ -299,7 +398,7 @@ fn load_known_preferences(project_root: &Path) -> Result<Vec<KnownPreference>> {
 
 fn load_project_preferences(project_root: &Path) -> Result<Vec<KnownPreference>> {
     let root = fsutil::normalize_project_root(project_root)?;
-    let path = config::kernel_dir(&root).join("preference-registry.yml");
+    let path = preference_registry_path(&root);
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -328,6 +427,21 @@ fn load_project_preferences(project_root: &Path) -> Result<Vec<KnownPreference>>
         })
         .collect())
 }
+
+fn preference_registry_path(project_root: &Path) -> PathBuf {
+    config::kernel_dir(project_root).join("preference-registry.yml")
+}
+
+const DEFAULT_PREFERENCE_REGISTRY: &str = r#"preferences:
+  - title: Use Playwright
+    body: Use Playwright for browser automation tests.
+    required:
+      - playwright
+    context:
+      - cypress
+      - browser automation
+      - 浏览器自动化
+"#;
 
 fn built_in_preferences() -> Vec<KnownPreference> {
     vec![
@@ -691,6 +805,58 @@ mod tests {
             templates
                 .iter()
                 .any(|template| template.source == "built-in")
+        );
+    }
+
+    #[test]
+    fn init_preference_registry_writes_example() {
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        let created = init_preference_registry(temp.path()).expect("init registry");
+        let path = config::kernel_dir(temp.path()).join("preference-registry.yml");
+
+        assert!(created);
+        assert!(path.exists());
+        let text = fs::read_to_string(path).expect("registry");
+        assert!(text.contains("Use Playwright"));
+        assert!(text.contains("preferences:"));
+    }
+
+    #[test]
+    fn validate_preference_registry_reports_errors_and_warnings() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let registry_dir = temp.path().join(".agent-kernel");
+        fs::create_dir_all(&registry_dir).expect("registry dir");
+        fs::write(
+            registry_dir.join("preference-registry.yml"),
+            r#"preferences:
+  - title: Use Playwright
+    body: Use Playwright for browser automation tests.
+    required: []
+    context: []
+  - title: Use Playwright
+    body: Duplicate title.
+    required:
+      - playwright
+    context:
+      - cypress
+  - title: ""
+    body: Missing title.
+    required:
+      - vitest
+"#,
+        )
+        .expect("write registry");
+
+        let report = validate_preference_registry(temp.path()).expect("validate");
+
+        assert_eq!(report.errors, 3);
+        assert_eq!(report.warnings, 2);
+        assert!(
+            report
+                .messages
+                .iter()
+                .any(|message| message.contains("duplicate title"))
         );
     }
 

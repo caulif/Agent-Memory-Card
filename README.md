@@ -269,6 +269,12 @@ v0.43 makes preference templates discoverable:
 2. Each row includes the template source, title, and canonical body.
 3. This gives advanced users a quick way to audit the local evolution vocabulary.
 
+v0.44 makes preference registries maintainable:
+
+1. `preference init` writes an example `.agent-kernel/preference-registry.yml`.
+2. `preference validate` checks duplicate titles, empty title/body fields, missing required markers, and broad no-context templates.
+3. Validation exits non-zero when errors are present, so it can be used in local scripts or CI.
+
 ## Commands
 
 ```bash
@@ -294,7 +300,9 @@ cargo run -- extract --text "以后把 npm 改为 Bun，所有 JS 脚本都用 b
 cargo run -- extract --text "以后前端请求统一使用 Axios，不要再用 Fetch。" --target codex --dry-run --project .
 cargo run -- extract --text "以后前端单元测试默认使用 Vitest，不要再写 Jest 配置。" --target codex --dry-run --project .
 cargo run -- extract --file chat.md --target codex --project .
+cargo run -- preference init --project .
 cargo run -- preference list --project .
+cargo run -- preference validate --project .
 cargo run -- extract --text "Always run cargo test before pushing." --target codex --provider local --dry-run --project .
 cargo run -- observe import --file chat.jsonl --agent claude-code --source-kind claude-code-session --project .
 cargo run -- observe local --project .
