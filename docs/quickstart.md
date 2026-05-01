@@ -17,12 +17,28 @@ bun run test
 cargo run -- preference list --project .
 ```
 
+如果想直接体验本地编译 UI，可以先扫描项目并打开原生桌面 app：
+
+```bash
+cargo run -- project scan --root . --max-depth 4
+cargo run -- app --scan-root .
+```
+
+`app` 是 Rust/egui 编译出来的本地桌面程序，不是 Web UI。它会读取 `~/.agent-kernel/projects.yml`，在第一屏展示本地项目列表；选择项目后可以查看 Review 摘要，并一键把 Claude Code / Codex 本地历史对话整理进 Draft Inbox。
+
 ## 1. 初始化项目状态
 
 导入当前项目已有规则、Skills 和配置：
 
 ```bash
 cargo run -- import --scan-home --project .
+```
+
+把当前项目加入全局项目列表：
+
+```bash
+cargo run -- project add --path .
+cargo run -- project list
 ```
 
 查看当前 Agent 目标：
@@ -187,12 +203,16 @@ cargo run -- observe evolve --target codex --target claude-code --project .
 
 这个流程仍然不会自动启用 Skilllet。所有自动提炼的内容都会先进 Draft Inbox，由你批准。
 
+同一个动作也可以在原生 app 里完成：选择项目后点击 `Preview Conversation Evolution` 先预览，再点击 `Evolve Conversations to Drafts` 写入 Draft Inbox。
+
 ## 8. 推荐体验顺序
 
 第一次体验建议按这个顺序：
 
 ```bash
 cargo run -- preference validate --project .
+cargo run -- project scan --root . --max-depth 4
+cargo run -- project list
 cargo run -- preference list --project .
 cargo run -- preference test --text "以后前端请求统一使用 Axios，不要再用 Fetch。" --project .
 cargo run -- extract --text "以后前端请求统一使用 Axios，不要再用 Fetch。" --target codex --dry-run --project .
@@ -211,6 +231,6 @@ cargo run -- test-rules --project .
 - 不会静默启用自动提炼内容，必须先进入 Draft Inbox
 - LLM provider 仍是配置地基，本地提取器是主路径
 - Cursor / Cline 不在当前 MVP 主线
-- UI 已有基础 Canvas，但 Preference Registry 的编辑体验还主要在 CLI
+- 原生 app 已经能浏览项目、Review 和触发对话进化；更细的 Canvas 拖拽、App Store、Preference Registry 编辑体验仍会继续补强
 
 下一步最值得补的是 `preference test` 接入 UI，以及给 Draft 增加 `matched_template` / `confidence` / `reason` 字段，让审查体验更像一个可解释的进化系统。

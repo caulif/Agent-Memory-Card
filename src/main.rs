@@ -1,10 +1,12 @@
 mod build;
 mod catalog;
 mod config;
+mod desktop;
 mod draft;
 mod extract;
 mod fsutil;
 mod observation;
+mod project_registry;
 mod provider;
 mod review;
 mod rule_test;
@@ -168,10 +170,64 @@ mod tests {
             _ => panic!("expected preference test command"),
         }
     }
+
+    #[test]
+    fn cli_accepts_project_scan_command() {
+        let cli = Cli::parse_from([
+            "agent-kernel",
+            "project",
+            "scan",
+            "--root",
+            ".",
+            "--max-depth",
+            "4",
+        ]);
+
+        match cli.command {
+            Commands::Project {
+                command:
+                    ProjectCommands::Scan {
+                        roots, max_depth, ..
+                    },
+            } => {
+                assert_eq!(roots, vec![PathBuf::from(".")]);
+                assert_eq!(max_depth, 4);
+            }
+            _ => panic!("expected project scan command"),
+        }
+    }
+
+    #[test]
+    fn cli_accepts_project_add_command() {
+        let cli = Cli::parse_from(["agent-kernel", "project", "add", "--path", "."]);
+
+        match cli.command {
+            Commands::Project {
+                command: ProjectCommands::Add { path, .. },
+            } => assert_eq!(path, PathBuf::from(".")),
+            _ => panic!("expected project add command"),
+        }
+    }
+
+    #[test]
+    fn cli_accepts_native_app_command() {
+        let cli = Cli::parse_from(["agent-kernel", "app", "--scan-root", "."]);
+
+        match cli.command {
+            Commands::App { scan_roots, .. } => assert_eq!(scan_roots, vec![PathBuf::from(".")]),
+            _ => panic!("expected app command"),
+        }
+    }
 }
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Discover and manage local projects known to Agent-Kernel.
+    Project {
+        #[command(subcommand)]
+        command: ProjectCommands,
+    },
+
     /// Scan existing rules and skills, then create/update .agent-kernel state.
     Import {
         /// Import manual changes from generated Agent artifacts into Draft Inbox.
@@ -346,6 +402,57 @@ enum Commands {
         /// Do not open a browser.
         #[arg(long)]
         no_open: bool,
+    },
+
+    /// Launch the native compiled desktop app.
+    App {
+        /// Root to scan before opening the app. Repeat for multiple roots.
+        #[arg(long = "scan-root")]
+        scan_roots: Vec<PathBuf>,
+
+        /// Maximum directory depth for startup project scan.
+        #[arg(long, default_value_t = 5)]
+        max_depth: usize,
+
+        /// Home directory used for the global Agent-Kernel registry.
+        #[arg(long)]
+        home: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProjectCommands {
+    /// Scan local folders and update ~/.agent-kernel/projects.yml.
+    Scan {
+        /// Root to scan. Repeat for multiple roots. Empty scans common local project folders.
+        #[arg(long = "root")]
+        roots: Vec<PathBuf>,
+
+        /// Maximum directory depth to scan.
+        #[arg(long, default_value_t = 5)]
+        max_depth: usize,
+
+        /// Home directory used for the global Agent-Kernel registry.
+        #[arg(long)]
+        home: Option<PathBuf>,
+    },
+
+    /// List registered local projects.
+    List {
+        /// Home directory used for the global Agent-Kernel registry.
+        #[arg(long)]
+        home: Option<PathBuf>,
+    },
+
+    /// Add one project path to the global registry.
+    Add {
+        /// Project root path.
+        #[arg(long)]
+        path: PathBuf,
+
+        /// Home directory used for the global Agent-Kernel registry.
+        #[arg(long)]
+        home: Option<PathBuf>,
     },
 }
 
@@ -658,6 +765,46 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Project { command } => match command {
+            ProjectCommands::Scan {
+                roots,
+                max_depth,
+                home,
+            } => {
+                let home = home.unwrap_or_else(default_home_dir);
+                let roots = if roots.is_empty() {
+                    let cwd = std::env::current_dir()?;
+                    project_registry::default_scan_roots(&cwd)
+                } else {
+                    roots
+                };
+                let report = project_registry::scan_and_register(&home, &roots, max_depth)?;
+                println!("{}", report.render());
+            }
+            ProjectCommands::List { home } => {
+                let home = home.unwrap_or_else(default_home_dir);
+                let registry = project_registry::load_registry(&home)?;
+                if registry.projects.is_empty() {
+                    println!("No projects registered. Run `agent-kernel project scan` first.");
+                } else {
+                    println!("Agent-Kernel projects\n");
+                    for project in registry.projects {
+                        println!(
+                            "- {} [{}]\n  {}",
+                            project.name,
+                            project.agents.join(", "),
+                            project.path
+                        );
+                    }
+                }
+            }
+            ProjectCommands::Add { path, home } => {
+                let home = home.unwrap_or_else(default_home_dir);
+                let project = project_registry::add_project(&home, &path)?;
+                println!("Registered project `{}`", project.name);
+                println!("{}", project.path);
+            }
+        },
         Commands::Import {
             artifacts,
             scan_home,
@@ -1019,6 +1166,14 @@ async fn main() -> Result<()> {
             no_open,
         } => {
             ui::serve(project, port, !no_open).await?;
+        }
+        Commands::App {
+            scan_roots,
+            max_depth,
+            home,
+        } => {
+            let home = home.unwrap_or_else(default_home_dir);
+            desktop::run(home, scan_roots, max_depth)?;
         }
     }
 

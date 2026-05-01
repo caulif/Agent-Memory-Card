@@ -281,6 +281,12 @@ v0.45 makes the current prototype easier to experience:
 2. `docs/quickstart.md` documents the end-to-end local Skilllet evolution loop.
 3. The tutorial covers preference templates, Draft approval, build artifacts, and local conversation evolution.
 
+v0.46 starts the native local app direction:
+
+1. `project scan/list/add` maintains a global local project registry at `~/.agent-kernel/projects.yml`.
+2. `app` launches a compiled Rust/egui desktop UI, not a browser page or localhost web app.
+3. The native app opens on a local project console, lets users select a project, review status, and run Claude Code / Codex conversation evolution into Draft Inbox.
+
 See [docs/quickstart.md](docs/quickstart.md) for a hands-on walkthrough.
 
 ## Commands
@@ -288,6 +294,9 @@ See [docs/quickstart.md](docs/quickstart.md) for a hands-on walkthrough.
 ```bash
 cargo run -- import --scan-home --project .
 cargo run -- import --artifacts --project .
+cargo run -- project scan --root . --max-depth 4
+cargo run -- project list
+cargo run -- app --scan-root .
 cargo run -- ui --project .
 cargo run -- mirror --skill superpowers:brainstorming --agent codex --project .
 cargo run -- build --preview --project .
@@ -372,8 +381,9 @@ If none exist, it runs `cargo build` as a development fallback.
 # 1. Import existing local rules and Skills.
 cargo run -- import --scan-home --project .
 
-# 2. Open the Project-centered Canvas.
-cargo run -- ui --project .
+# 2. Register local projects and open the native desktop app.
+cargo run -- project scan --root . --max-depth 4
+cargo run -- app --scan-root .
 
 # 3. Mirror a referenced Skill to an Agent target.
 cargo run -- mirror --skill superpowers:brainstorming --agent codex --project .
@@ -419,7 +429,14 @@ cargo run -- review --json --project .
 cargo run -- review --approve-draft project:prefer-bun --project .
 ```
 
-The Canvas UI exposes:
+The native desktop app is the preferred visual entrypoint. It shows:
+
+- registered local projects from `~/.agent-kernel/projects.yml`
+- per-project Claude Code / Codex markers
+- Review status for the selected project
+- conversation evolution preview and Draft Inbox generation
+
+The legacy Canvas Web UI is still available for development and exposes:
 
 - `/api/state` for project config, imported rules, and skill index
 - `/api/mirror` for declaring a Skill mirror
@@ -446,5 +463,6 @@ The Canvas UI exposes:
 - `.agent-kernel/catalog.yml` optionally overrides the built-in local Skilllet catalog.
 - `.agent-kernel/skill-index.yml` is the imported Skill index.
 - `.agent-kernel/project.lock.yml` records generated mirror and artifact hashes.
+- `~/.agent-kernel/projects.yml` is the global local project registry used by `agent-kernel app`.
 - `AGENTS.md`, `CLAUDE.md`, and mirrored skill folders are build artifacts.
 - Custom future adapters can use `rules_dir` to generate Markdown rule artifacts.

@@ -10,8 +10,9 @@
 关键决策：
 
 - Rust 内核：核心解析、分类、diff、build、Rule CI、文件操作都用 Rust，保证速度、单二进制分发和工程可靠性；`bunx agent-kernel` 是优先的跨平台安装与启动入口。
-- 可视化优先：UI 不是后期锦上添花，而是建立信任的核心产品面。用户需要在图形界面里审查冲突、确认压缩、拖拽分发 skilllets。
-- UI 双入口：第一屏采用以 Project 为中心的白板/Canvas，展示当前项目、多个 Agent、Skill、Skilllet 的关系和拖拽连接；同时提供 App Store/包管理器界面，用于浏览、安装、启用和更新 Skills/Skilllets。
+- 可视化优先：UI 不是后期锦上添花，而是建立信任的核心产品面。当前主入口改为 Rust 编译出的本地桌面 app，不依赖浏览器或 localhost；旧 Web Canvas 保留为 legacy/dev 辅助入口。
+- Native App 第一屏：安装后优先展示本机可发现的项目列表，用户选择某个项目后再进入 Project-centered Canvas / Inspector / App Store / Draft Inbox。第一体验不是“打开某个仓库再配置”，而是“先看到我的本地 Agent 工作区地图”。
+- UI 双入口：原生 app 第一屏是 Project Console + Canvas；同时提供 App Store/包管理器界面，用于浏览、安装、启用和更新 Skills/Skilllets。Web `ui` 命令后续只作为调试和兼容入口。
 - 编译产物思维：`CLAUDE.md`、`AGENTS.md` 默认视为 build artifacts，由 `~/.agent-kernel/skilllets` 和项目 `.agent-kernel/project.yml` 全量编译生成；Cursor 等其他 Agent 保留 adapter 扩展接口，MVP 不进入默认目标。
 - 首个入口：先从用户现有规则文件和 Skills 导入，后续再通过 MCP/session log 自动提炼对话中的 Draft Skilllets。
 - Skill 管理默认引用模式：第三方或已有 Skill 保持原位置，Agent-Kernel 建立索引、启用关系、导出关系和 overlay，不直接改源文件。
@@ -64,6 +65,7 @@
 - v0.43 范围：增加 `preference list`，列出 built-in / project 来源的偏好模板，让用户能审计当前自动进化词表。
 - v0.44 范围：增加 `preference init` / `preference validate`，让项目级偏好模板库可以初始化、校验，并在错误时以非零退出码接入脚本或 CI。
 - v0.45 范围：增加 `preference test --text` 命中解释器，并提供 `docs/quickstart.md`，让用户能完整体验 Preference Registry -> Draft Inbox -> Skilllet -> Agent artifact 的闭环。
+- v0.46 范围：增加全局 Project Registry 与本地原生桌面入口。`project scan/list/add` 维护 `~/.agent-kernel/projects.yml`，`agent-kernel app` 启动 Rust/egui 编译程序，展示本地项目、项目状态，并提供 Claude Code / Codex 历史对话整理到 Draft Inbox 的一键入口。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 JavaScript registry 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。
@@ -1431,13 +1433,16 @@ v0.1 明确不做：
 - 核心概念：`skilllet`
 - 核心实现：Rust binary
 - 分发方式：Bun wrapper + GitHub Releases，后续支持 Homebrew / Cargo install
-- 子命令：`gc`、`extract`、`review`、`export`、`attach`、`ui`
+- 子命令：`project`、`app`、`gc`、`extract`、`review`、`export`、`attach`、`ui`（legacy Web Canvas）
 
 命令草案：
 
 ```bash
 bunx agent-kernel init
 bunx agent-kernel scan
+bunx agent-kernel project scan
+bunx agent-kernel project list
+bunx agent-kernel app
 bunx agent-kernel extract ./chat.md
 bunx agent-kernel gc --dry-run
 bunx agent-kernel review
@@ -1448,7 +1453,7 @@ bunx agent-kernel export --to codex
 bunx agent-kernel export --to claude
 bunx agent-kernel attach --agents codex,claude
 bunx agent-kernel install @frontend/react-best-practices
-bunx agent-kernel ui
+bunx agent-kernel ui   # legacy/dev web canvas
 bunx agent-kernel mcp
 ```
 
