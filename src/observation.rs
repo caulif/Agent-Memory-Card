@@ -35,6 +35,7 @@ pub struct ObservationSynthesisReport {
     pub created: usize,
     pub skipped: usize,
     pub candidates: usize,
+    pub drafts: Vec<String>,
     pub dry_run: bool,
 }
 
@@ -45,6 +46,7 @@ pub struct ObservationEvolveReport {
     pub drafts_created: usize,
     pub draft_candidates: usize,
     pub synthesis_skipped: usize,
+    pub drafts: Vec<String>,
     pub dry_run: bool,
 }
 
@@ -78,6 +80,12 @@ impl ObservationSynthesisReport {
         out.push_str(&format!("Drafts created: {}\n", self.created));
         out.push_str(&format!("Candidate previews: {}\n", self.candidates));
         out.push_str(&format!("Skipped observations: {}\n", self.skipped));
+        if !self.drafts.is_empty() {
+            out.push_str("\nDrafts:\n");
+            for id in &self.drafts {
+                out.push_str(&format!("- {id}\n"));
+            }
+        }
         if self.dry_run {
             out.push_str("Mode: dry run\n");
         }
@@ -94,6 +102,12 @@ impl ObservationEvolveReport {
         out.push_str(&format!("Drafts created: {}\n", self.drafts_created));
         out.push_str(&format!("Draft candidates: {}\n", self.draft_candidates));
         out.push_str(&format!("Synthesis skipped: {}\n", self.synthesis_skipped));
+        if !self.drafts.is_empty() {
+            out.push_str("\nDrafts:\n");
+            for id in &self.drafts {
+                out.push_str(&format!("- {id}\n"));
+            }
+        }
         if self.dry_run {
             out.push_str("Mode: dry run\n");
         }
@@ -195,6 +209,7 @@ pub fn synthesize_observations_to_drafts(
         created: 0,
         skipped: 0,
         candidates: 0,
+        drafts: Vec::new(),
         dry_run,
     };
 
@@ -207,10 +222,13 @@ pub fn synthesize_observations_to_drafts(
             Some("local".to_string()),
             dry_run,
         )?;
-        report.created += extracted.created.len();
+        let created_count = extracted.created.len();
+        let candidate_count = extracted.candidates.len();
+        report.created += created_count;
+        report.drafts.extend(extracted.created);
         report.skipped += extracted.skipped.len();
-        report.candidates += extracted.candidates.len();
-        if extracted.created.is_empty() && extracted.candidates.is_empty() {
+        report.candidates += candidate_count;
+        if created_count == 0 && candidate_count == 0 {
             report.skipped += 1;
         }
     }
@@ -232,6 +250,7 @@ pub fn evolve_local_conversations(
         drafts_created: synthesized.created,
         draft_candidates: synthesized.candidates,
         synthesis_skipped: synthesized.skipped,
+        drafts: synthesized.drafts,
         dry_run,
     })
 }
@@ -477,6 +496,10 @@ mod tests {
         .expect("synthesize");
 
         assert_eq!(report.created, 1);
+        assert_eq!(
+            report.drafts,
+            vec!["project:所有-rust-项目必须先运行-cargo-test-再提交"]
+        );
         let drafts = draft::load_drafts(temp.path()).expect("drafts");
         assert_eq!(drafts.len(), 1);
         assert_eq!(drafts[0].targets, vec!["codex", "claude-code"]);
@@ -535,6 +558,10 @@ mod tests {
 
         assert_eq!(report.imported, 1);
         assert_eq!(report.drafts_created, 1);
+        assert_eq!(
+            report.drafts,
+            vec!["project:always-run-cargo-clippy-before-pushing"]
+        );
         let drafts = draft::load_drafts(temp.path()).expect("drafts");
         assert!(drafts[0].body.contains("cargo clippy"));
     }

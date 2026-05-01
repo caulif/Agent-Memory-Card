@@ -245,6 +245,12 @@ v0.39 starts the Known Preference Registry:
 2. Bun, Axios, and Vitest preferences share the same stable title/body matching path.
 3. Common frontend unit-test corrections now normalize to `project:use-vitest`.
 
+v0.40 improves evolution report explainability:
+
+1. `observe synthesize` now reports the exact Draft IDs it creates.
+2. `observe evolve` carries those Draft IDs through the one-command local evolution report.
+3. CLI and JSON consumers can show "what changed" instead of only counts.
+
 ## Commands
 
 ```bash
