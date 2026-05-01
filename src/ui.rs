@@ -16,6 +16,7 @@ use crate::config;
 use crate::draft::{self, DraftRecord};
 use crate::extract;
 use crate::fsutil;
+use crate::rule_test;
 use crate::skilllet::{self, SkillletRecord};
 
 #[derive(Clone)]
@@ -66,6 +67,7 @@ pub async fn serve(project: PathBuf, port: u16, open_browser: bool) -> Result<()
         .route("/api/build/preview", post(api_build_preview))
         .route("/api/sync", post(api_sync))
         .route("/api/status", get(api_status))
+        .route("/api/rule-tests", get(api_rule_tests))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -185,6 +187,20 @@ async fn api_sync(State(state): State<AppState>) -> Json<serde_json::Value> {
     }
 }
 
+async fn api_rule_tests(State(state): State<AppState>) -> Json<serde_json::Value> {
+    match rule_test::run_rule_tests(state.project_root.as_ref()) {
+        Ok(report) => Json(serde_json::to_value(report).unwrap_or_else(
+            |error| serde_json::json!({ "passed": 0, "failed": 0, "rows": [], "error": error.to_string() }),
+        )),
+        Err(error) => Json(serde_json::json!({
+            "passed": 0,
+            "failed": 0,
+            "rows": [],
+            "error": error.to_string(),
+        })),
+    }
+}
+
 const INDEX_HTML: &str = r##"<!doctype html>
 <html lang="en">
 <head>
@@ -301,6 +317,10 @@ const INDEX_HTML: &str = r##"<!doctype html>
         <div id="mirror-status"></div>
       </section>
       <section>
+        <h3>Rule CI</h3>
+        <div id="rule-tests"></div>
+      </section>
+      <section>
         <h3>Imported Rules</h3>
         <div id="rules"></div>
       </section>
@@ -308,6 +328,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
 
     <footer>
       <button class="btn primary" id="preview">Preview Build</button>
+      <button class="btn" id="run-rule-tests">Rule CI</button>
       <button class="btn" id="sync">Sync Mirrors</button>
       <button class="btn" id="refresh">Refresh</button>
       <pre id="build-output">Ready.</pre>
@@ -344,6 +365,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
       renderCanvas();
       renderMirrors();
       await renderStatus();
+      await renderRuleTests(false);
       renderRules();
       renderStore();
       renderExtractTargets();
@@ -455,6 +477,19 @@ const INDEX_HTML: &str = r##"<!doctype html>
       document.getElementById("mirror-status").innerHTML = rows.length ? `<ul>${rows.map(row =>
         `<li><strong>${escapeHtml(row.skill)}</strong><br>${escapeHtml(row.agent)} · ${escapeHtml(row.status)}</li>`
       ).join("")}</ul>` : `<p>No mirror status yet.</p>`;
+    }
+
+    async function renderRuleTests(writeOutput) {
+      const res = await fetch("/api/rule-tests");
+      const report = await res.json();
+      const rows = report.rows || [];
+      const html = rows.length ? `<ul>${rows.map(row =>
+        `<li><strong>${escapeHtml(row.name)}</strong><br>${escapeHtml(row.status)}${row.details && row.details.length ? `<br>${row.details.map(escapeHtml).join("<br>")}` : ""}</li>`
+      ).join("")}</ul><p>${report.passed || 0} passed · ${report.failed || 0} failed</p>` : `<p>No Rule CI tests found.</p>`;
+      document.getElementById("rule-tests").innerHTML = html;
+      if (writeOutput) {
+        document.getElementById("build-output").textContent = rows.map(row => `${row.name}: ${row.status}`).join("\n") || "No Rule CI tests found.";
+      }
     }
 
     function renderRules() {
@@ -593,6 +628,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
 
     document.getElementById("search").addEventListener("input", renderSkills);
     document.getElementById("preview").addEventListener("click", previewBuild);
+    document.getElementById("run-rule-tests").addEventListener("click", () => renderRuleTests(true));
     document.getElementById("sync").addEventListener("click", syncMirrors);
     document.getElementById("extract-drafts").addEventListener("click", extractDrafts);
     document.getElementById("refresh").addEventListener("click", loadState);

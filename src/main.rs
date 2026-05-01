@@ -4,6 +4,7 @@ mod draft;
 mod extract;
 mod fsutil;
 mod provider;
+mod review;
 mod rule_test;
 mod scanner;
 mod skilllet;
@@ -133,6 +134,13 @@ enum Commands {
 
     /// Run local Rule CI assertions against generated Agent artifacts.
     TestRules {
+        /// Project root.
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
+    /// Review pending drafts, mirror status, Rule CI, and build preview.
+    Review {
         /// Project root.
         #[arg(long, default_value = ".")]
         project: PathBuf,
@@ -386,6 +394,10 @@ async fn main() -> Result<()> {
             if report.failed > 0 {
                 std::process::exit(1);
             }
+        }
+        Commands::Review { project } => {
+            let report = review::review_project(&project)?;
+            println!("{}", report.render());
         }
         Commands::Ui {
             project,

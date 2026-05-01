@@ -75,6 +75,17 @@ v0.11 starts Rule CI:
 2. `test-rules` checks include/exclude expectations without calling an LLM.
 3. This is the local foundation for future model-judged Rule CI.
 
+v0.12 brings Rule CI into the UI:
+
+1. `/api/rule-tests` returns structured Rule CI results.
+2. The Canvas inspector shows pass/fail status.
+3. The footer has a Rule CI action beside build preview and sync.
+
+v0.13 starts review mode:
+
+1. `review` aggregates Draft Inbox, Mirror Status, Rule CI, and Build Preview.
+2. This is the non-interactive foundation for the future `git add -p` style reviewer.
+
 ## Commands
 
 ```bash
@@ -97,6 +108,7 @@ cargo run -- provider init --project .
 cargo run -- provider show --project .
 cargo run -- extract --text "Always use token=supersecret123456789 before pushing." --target codex --provider local --dry-run --project .
 cargo run -- test-rules --project .
+cargo run -- review --project .
 ```
 
 The npm wrapper works locally after the Rust binary has been built:
@@ -149,6 +161,9 @@ cargo run -- extract --text "Always use token=supersecret123456789 before pushin
 
 # 13. Run local Rule CI assertions against generated artifacts.
 cargo run -- test-rules --project .
+
+# 14. Review pending changes before sync/build.
+cargo run -- review --project .
 ```
 
 The Canvas UI exposes:
@@ -159,6 +174,7 @@ The Canvas UI exposes:
 - `/api/build/preview` for build previews
 - `/api/sync` for syncing declared mirrors and generated artifacts
 - `/api/status` for synced / missing / drifted mirror state
+- `/api/rule-tests` for structured Rule CI results
 
 ## Generated State
 
