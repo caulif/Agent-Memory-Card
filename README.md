@@ -69,6 +69,12 @@ v0.10 adds a local privacy safety layer:
 2. Extract preview and Draft evidence redact common token/key shapes.
 3. Reports show when secrets were redacted.
 
+v0.11 starts Rule CI:
+
+1. `.agent-kernel/tests/*.yml` defines local assertions for generated Agent artifacts.
+2. `test-rules` checks include/exclude expectations without calling an LLM.
+3. This is the local foundation for future model-judged Rule CI.
+
 ## Commands
 
 ```bash
@@ -90,6 +96,7 @@ cargo run -- extract --text "Always run cargo test before pushing." --target cod
 cargo run -- provider init --project .
 cargo run -- provider show --project .
 cargo run -- extract --text "Always use token=supersecret123456789 before pushing." --target codex --provider local --dry-run --project .
+cargo run -- test-rules --project .
 ```
 
 The npm wrapper works locally after the Rust binary has been built:
@@ -139,6 +146,9 @@ cargo run -- extract --text "Always run cargo test before pushing." --target cod
 
 # 12. Redaction is enabled by default for extraction previews and draft evidence.
 cargo run -- extract --text "Always use token=supersecret123456789 before pushing." --target codex --provider local --dry-run --project .
+
+# 13. Run local Rule CI assertions against generated artifacts.
+cargo run -- test-rules --project .
 ```
 
 The Canvas UI exposes:
@@ -156,6 +166,7 @@ The Canvas UI exposes:
 - `.agent-kernel/providers.yml` stores local-first provider and privacy settings.
 - `.agent-kernel/skilllets/` contains owned lightweight Skilllet source files.
 - `.agent-kernel/drafts/` contains local Draft Inbox candidates before approval.
+- `.agent-kernel/tests/` contains local Rule CI assertion files.
 - `.agent-kernel/skill-index.yml` is the imported Skill index.
 - `.agent-kernel/project.lock.yml` records generated mirror and artifact hashes.
 - `AGENTS.md`, `CLAUDE.md`, and mirrored skill folders are build artifacts.

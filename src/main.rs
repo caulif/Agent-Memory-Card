@@ -4,6 +4,7 @@ mod draft;
 mod extract;
 mod fsutil;
 mod provider;
+mod rule_test;
 mod scanner;
 mod skilllet;
 mod ui;
@@ -128,6 +129,13 @@ enum Commands {
     Provider {
         #[command(subcommand)]
         command: ProviderCommands,
+    },
+
+    /// Run local Rule CI assertions against generated Agent artifacts.
+    TestRules {
+        /// Project root.
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
     },
 
     /// Launch the local Canvas workspace UI.
@@ -372,6 +380,13 @@ async fn main() -> Result<()> {
                 println!("{}", serde_yaml::to_string(&cfg)?);
             }
         },
+        Commands::TestRules { project } => {
+            let report = rule_test::run_rule_tests(&project)?;
+            println!("{}", report.render());
+            if report.failed > 0 {
+                std::process::exit(1);
+            }
+        }
         Commands::Ui {
             project,
             port,
