@@ -71,6 +71,12 @@ mod tests {
         assert!(INDEX_HTML.contains("Artifact Status"));
         assert!(INDEX_HTML.contains("artifact-status"));
     }
+
+    #[test]
+    fn canvas_html_has_import_artifacts_action() {
+        assert!(INDEX_HTML.contains("import-artifacts"));
+        assert!(INDEX_HTML.contains("Import Artifacts"));
+    }
 }
 
 #[derive(Clone)]
@@ -141,6 +147,7 @@ pub async fn serve(project: PathBuf, port: u16, open_browser: bool) -> Result<()
         .route("/api/draft/reject", post(api_draft_reject))
         .route("/api/extract", post(api_extract))
         .route("/api/build/preview", post(api_build_preview))
+        .route("/api/artifacts/import", post(api_artifacts_import))
         .route("/api/sync", post(api_sync))
         .route("/api/status", get(api_status))
         .route("/api/rule-tests", get(api_rule_tests))
@@ -279,6 +286,17 @@ async fn api_build_preview(State(state): State<AppState>) -> Json<serde_json::Va
     match build::preview_as_json(state.project_root.as_ref()) {
         Ok(value) => Json(value),
         Err(error) => Json(serde_json::json!({ "preview": true, "text": error.to_string() })),
+    }
+}
+
+async fn api_artifacts_import(State(state): State<AppState>) -> Json<serde_json::Value> {
+    match build::import_artifact_drifts(state.project_root.as_ref()) {
+        Ok(report) => Json(serde_json::json!({
+            "ok": true,
+            "text": report.render(),
+            "report": report,
+        })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "text": error.to_string() })),
     }
 }
 
@@ -514,6 +532,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
       <button class="btn primary" id="preview">Preview Build</button>
       <button class="btn" id="review-button">Review</button>
       <button class="btn" id="run-rule-tests">Rule CI</button>
+      <button class="btn" id="import-artifacts">Import Artifacts</button>
       <button class="btn" id="sync">Sync Mirrors</button>
       <button class="btn" id="refresh">Refresh</button>
       <pre id="build-output">Ready.</pre>
@@ -931,6 +950,13 @@ const INDEX_HTML: &str = r##"<!doctype html>
       await loadState();
     }
 
+    async function importArtifacts() {
+      const res = await fetch("/api/artifacts/import", { method: "POST" });
+      const result = await res.json();
+      document.getElementById("build-output").textContent = result.text;
+      await loadState();
+    }
+
     async function extractDrafts() {
       const text = document.getElementById("extract-text").value;
       const targets = Array.from(document.querySelectorAll(".extract-target:checked")).map(input => input.value);
@@ -979,6 +1005,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
     document.getElementById("review-button").addEventListener("click", () => renderReview(true));
     document.getElementById("run-rule-tests").addEventListener("click", () => renderRuleTests(true));
     document.getElementById("sync").addEventListener("click", syncMirrors);
+    document.getElementById("import-artifacts").addEventListener("click", importArtifacts);
     document.getElementById("extract-drafts").addEventListener("click", extractDrafts);
     document.getElementById("refresh").addEventListener("click", loadState);
     document.getElementById("open-store").addEventListener("click", () => document.getElementById("store").classList.add("open"));

@@ -38,12 +38,26 @@ mod tests {
 
         assert_eq!(version, "agent-kernel 0.1.0");
     }
+
+    #[test]
+    fn cli_accepts_import_artifacts_flag() {
+        let cli = Cli::parse_from(["agent-kernel", "import", "--artifacts"]);
+
+        match cli.command {
+            Commands::Import { artifacts, .. } => assert!(artifacts),
+            _ => panic!("expected import command"),
+        }
+    }
 }
 
 #[derive(Subcommand)]
 enum Commands {
     /// Scan existing rules and skills, then create/update .agent-kernel state.
     Import {
+        /// Import manual changes from generated Agent artifacts into Draft Inbox.
+        #[arg(long)]
+        artifacts: bool,
+
         /// Scan home-level skill folders such as ~/.agents/skills.
         #[arg(long)]
         scan_home: bool,
@@ -390,9 +404,22 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Import { scan_home, project } => {
-            let summary = scanner::import_project(&project, scan_home)?;
-            println!("{}", summary.render());
+        Commands::Import {
+            artifacts,
+            scan_home,
+            project,
+        } => {
+            if artifacts {
+                let report = build::import_artifact_drifts(&project)?;
+                println!("{}", report.render());
+                if scan_home {
+                    let summary = scanner::import_project(&project, scan_home)?;
+                    println!("{}", summary.render());
+                }
+            } else {
+                let summary = scanner::import_project(&project, scan_home)?;
+                println!("{}", summary.render());
+            }
         }
         Commands::Scan { scan_home, project } => {
             let report = scanner::scan_project(&project, scan_home)?;

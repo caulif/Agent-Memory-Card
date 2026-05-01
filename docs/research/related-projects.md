@@ -97,3 +97,4 @@ Agent-Kernel should avoid rebuilding mature pieces from nearby ecosystems. The v
 - Borrowed idea: user-owned source config should produce generated target files.
 - Product impact: `.agent-kernel/project.yml` is declarative source; `AGENTS.md`, `CLAUDE.md`, and mirrored Skill folders are build artifacts.
 - 2026-05-01 update: build-artifact workflows need drift detection before automatic overwrite. Agent-Kernel now records generated artifact hashes in `project.lock.yml` and surfaces manual edits as artifact drift, which sets up a future Reverse Parse flow that can ingest manual changes into Draft Inbox instead of silently discarding them.
+- 2026-05-01 update: the first Reverse Parse implementation intentionally borrows from build-tool source-map thinking rather than RAG. Agent-Kernel re-renders the expected artifact, compares it with the edited artifact, and imports added lines as reviewable Drafts tied to the owning Agent target.

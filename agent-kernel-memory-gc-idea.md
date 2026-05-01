@@ -47,6 +47,7 @@
 - v0.26 范围：实现 Cline 原生规则目录 exporter，将 Cline 目标编译为 `.clinerules/agent-kernel.md`，并兼容早期 `.clinerules` 单文件配置迁移。
 - v0.27 范围：将 Canvas Inspector 中的 Skilllet target matrix 从文字摘要升级为可点击矩阵表，让用户能直接按 Skilllet × Agent 维度分配能力。
 - v0.28 范围：加入 generated artifact drift 检测，基于 `project.lock.yml` 比对 `AGENTS.md`、`CLAUDE.md`、`.cursor/rules`、`.clinerules` 等编译产物是否被手改，为后续 Reverse Parse 生成 Draft 打基础。
+- v0.29 范围：实现 Reverse Parse 的本地第一版，`import --artifacts` 通过重新渲染期望产物并提取用户新增行，把手改的 build artifact 转成 Draft Inbox 候选。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 npm 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。

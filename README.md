@@ -178,10 +178,17 @@ v0.28 adds generated artifact drift detection:
 2. Artifacts are reported as `synced`, `missing`, or `artifact drifted`.
 3. The Canvas shows an Artifact Status panel and Review summary counts artifact drifts.
 
+v0.29 starts Reverse Parse:
+
+1. `import --artifacts` turns manual edits in generated artifacts into Draft Inbox items.
+2. The importer re-renders the expected artifact, extracts added lines from the edited file, and targets the draft to the owning Agent.
+3. The Canvas footer exposes the same flow through Import Artifacts.
+
 ## Commands
 
 ```bash
 cargo run -- import --scan-home --project .
+cargo run -- import --artifacts --project .
 cargo run -- ui --project .
 cargo run -- mirror --skill superpowers:brainstorming --agent codex --project .
 cargo run -- build --preview --project .
