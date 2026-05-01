@@ -24,6 +24,17 @@ pub struct CatalogPackage {
     pub body: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogStatus {
+    pub items: Vec<CatalogPackageStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CatalogPackageStatus {
+    pub package: CatalogPackage,
+    pub installed: bool,
+}
+
 pub fn load_or_default_catalog(project_root: &Path) -> Result<Catalog> {
     let root = fsutil::normalize_project_root(project_root)?;
     let path = catalog_path(&root);
@@ -33,6 +44,24 @@ pub fn load_or_default_catalog(project_root: &Path) -> Result<Catalog> {
     } else {
         Ok(default_catalog())
     }
+}
+
+pub fn catalog_status(project_root: &Path) -> Result<CatalogStatus> {
+    let catalog = load_or_default_catalog(project_root)?;
+    let installed = skilllet::load_skilllets(project_root)?
+        .into_iter()
+        .map(|record| record.id)
+        .collect::<std::collections::BTreeSet<_>>();
+    Ok(CatalogStatus {
+        items: catalog
+            .packages
+            .into_iter()
+            .map(|package| CatalogPackageStatus {
+                installed: installed.contains(&package.id),
+                package,
+            })
+            .collect(),
+    })
 }
 
 pub fn init_catalog(project_root: &Path) -> Result<Catalog> {
@@ -116,5 +145,24 @@ mod tests {
 
         let project = crate::config::load_or_default_project_config(temp.path()).expect("project");
         assert_eq!(project.skilllets.include[0].targets, vec!["codex"]);
+    }
+
+    #[test]
+    fn catalog_status_marks_installed_packages() {
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        let before = catalog_status(temp.path()).expect("status");
+        assert!(!before.items[0].installed);
+
+        install_catalog_package(temp.path(), "core:rust-quality-gate", Vec::new())
+            .expect("install package");
+
+        let after = catalog_status(temp.path()).expect("status");
+        let rust_gate = after
+            .items
+            .iter()
+            .find(|item| item.package.id == "core:rust-quality-gate")
+            .expect("rust gate package");
+        assert!(rust_gate.installed);
     }
 }

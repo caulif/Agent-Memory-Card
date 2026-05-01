@@ -113,6 +113,12 @@ v0.17 starts the Skilllet Catalog / App Store foundation:
 3. `catalog install --id <package>` installs a catalog package as an owned Skilllet.
 4. The Canvas App Store now separates installable Catalog Packages from mirrored Indexed Skills.
 
+v0.18 improves App Store trust feedback:
+
+1. Catalog APIs now report whether each package is already installed.
+2. `catalog list` labels packages as `available` or `installed`.
+3. The Canvas disables already-installed package buttons.
+
 ## Commands
 
 ```bash

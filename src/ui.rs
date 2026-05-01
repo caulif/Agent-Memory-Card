@@ -263,7 +263,7 @@ fn review_json_value(project_root: &std::path::Path) -> Result<serde_json::Value
 }
 
 async fn api_catalog(State(state): State<AppState>) -> Json<serde_json::Value> {
-    match catalog::load_or_default_catalog(state.project_root.as_ref()) {
+    match catalog::catalog_status(state.project_root.as_ref()) {
         Ok(catalog) => Json(serde_json::json!({ "ok": true, "catalog": catalog })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
@@ -633,13 +633,13 @@ const INDEX_HTML: &str = r##"<!doctype html>
     async function renderStore() {
       const res = await fetch("/api/catalog");
       const payload = await res.json();
-      catalogPackages = payload.ok ? payload.catalog.packages || [] : [];
+      catalogPackages = payload.ok ? payload.catalog.items || [] : [];
       const catalogCards = catalogPackages.map(item => `
         <div class="card">
-          <h4>${escapeHtml(item.id)}</h4>
-          <p>${escapeHtml(item.description || item.body)}</p>
-          <p><strong>Kind:</strong> ${escapeHtml(item.kind)} · ${escapeHtml(item.scope)}</p>
-          <button class="btn primary" onclick="installCatalogPackage('${escapeAttr(item.id)}')">Install</button>
+          <h4>${escapeHtml(item.package.id)}</h4>
+          <p>${escapeHtml(item.package.description || item.package.body)}</p>
+          <p><strong>Kind:</strong> ${escapeHtml(item.package.kind)} · ${escapeHtml(item.package.scope)}</p>
+          <button class="btn ${item.installed ? "" : "primary"}" ${item.installed ? "disabled" : ""} onclick="installCatalogPackage('${escapeAttr(item.package.id)}')">${item.installed ? "Installed" : "Install"}</button>
         </div>
       `).join("");
       const indexedSkillCards = state.skill_index.skills.map(skill => `

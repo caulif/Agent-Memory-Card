@@ -457,12 +457,21 @@ async fn main() -> Result<()> {
                 println!("{}", serde_yaml::to_string(&catalog)?);
             }
             CatalogCommands::List { project } => {
-                let catalog = catalog::load_or_default_catalog(&project)?;
-                if catalog.packages.is_empty() {
+                let status = catalog::catalog_status(&project)?;
+                if status.items.is_empty() {
                     println!("No catalog packages found.");
                 } else {
-                    for package in catalog.packages {
-                        println!("- {}: {}", package.id, package.title);
+                    for item in status.items {
+                        println!(
+                            "- {}: {} [{}]",
+                            item.package.id,
+                            item.package.title,
+                            if item.installed {
+                                "installed"
+                            } else {
+                                "available"
+                            }
+                        );
                     }
                 }
             }
