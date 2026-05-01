@@ -123,6 +123,7 @@ pub async fn serve(project: PathBuf, port: u16, open_browser: bool) -> Result<()
         .route("/api/state", get(api_state))
         .route("/api/mirror", post(api_mirror))
         .route("/api/agent/enabled", post(api_agent_enabled))
+        .route("/api/skilllet/matrix", get(api_skilllet_matrix))
         .route("/api/skilllet/targets", post(api_skilllet_targets))
         .route("/api/draft/approve", post(api_draft_approve))
         .route("/api/draft/reject", post(api_draft_reject))
@@ -207,6 +208,13 @@ async fn api_skilllet_targets(
 ) -> Json<serde_json::Value> {
     match skilllet::set_skilllet_targets(state.project_root.as_ref(), &req.id, req.targets) {
         Ok(_) => Json(serde_json::json!({ "ok": true })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+async fn api_skilllet_matrix(State(state): State<AppState>) -> Json<serde_json::Value> {
+    match skilllet::skilllet_target_matrix(state.project_root.as_ref()) {
+        Ok(matrix) => Json(serde_json::json!({ "ok": true, "matrix": matrix })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
 }
@@ -459,6 +467,10 @@ const INDEX_HTML: &str = r##"<!doctype html>
         <div id="mirrors"></div>
       </section>
       <section>
+        <h3>Target Matrix</h3>
+        <div id="target-matrix"></div>
+      </section>
+      <section>
         <h3>Review</h3>
         <div id="review"></div>
       </section>
@@ -516,6 +528,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
       renderDrafts();
       renderCanvas();
       renderMirrors();
+      await renderTargetMatrix();
       await renderStatus();
       await renderRuleTests(false);
       await renderReview(false);
@@ -631,6 +644,22 @@ const INDEX_HTML: &str = r##"<!doctype html>
       document.getElementById("mirrors").innerHTML = mirrors.length ? `<ul>${mirrors.map(m =>
         `<li><strong>${escapeHtml(m.ref)}</strong><br>${escapeHtml(m.targets.join(", "))}</li>`
       ).join("")}</ul>` : `<p>No mirrors declared yet.</p>`;
+    }
+
+    async function renderTargetMatrix() {
+      const res = await fetch("/api/skilllet/matrix");
+      const payload = await res.json();
+      if (!payload.ok) {
+        document.getElementById("target-matrix").innerHTML = `<p>${escapeHtml(payload.error)}</p>`;
+        return;
+      }
+      const matrix = payload.matrix;
+      document.getElementById("target-matrix").innerHTML = matrix.rows && matrix.rows.length ? `
+        <ul>${matrix.rows.map(row => {
+          const active = matrix.agents.filter(agent => row.targets[agent]).join(", ") || "none";
+          return `<li><strong>${escapeHtml(row.skilllet_id)}</strong><br>${escapeHtml(active)}</li>`;
+        }).join("")}</ul>
+      ` : `<p>No skilllets found.</p>`;
     }
 
     async function renderStatus() {
@@ -814,6 +843,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
       const result = await res.json();
       document.getElementById("build-output").textContent = result.ok ? `Updated targets: ${id} -> ${next.join(", ") || "none"}` : result.error;
       await loadState();
+      await renderTargetMatrix();
     }
 
     async function previewBuild() {

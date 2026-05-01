@@ -154,6 +154,12 @@ v0.24 adds Skilllet target assignment:
 2. `/api/skilllet/targets` exposes the same assignment operation to the Canvas.
 3. Skilllet cards show Agent target buttons for quick multi-agent assignment.
 
+v0.25 adds a Skilllet target matrix:
+
+1. `skilllet matrix` prints a Skilllet by Agent assignment table.
+2. `/api/skilllet/matrix` exposes the matrix to the Canvas.
+3. The inspector shows a compact target summary for each Skilllet.
+
 ## Commands
 
 ```bash
@@ -167,6 +173,7 @@ cargo run -- sync --project .
 cargo run -- skilllet add --id project:use-axios --title "Use Axios" --body "Use Axios for frontend HTTP requests." --target codex --project .
 cargo run -- skilllet list --project .
 cargo run -- skilllet targets --id project:use-axios --target codex --target cursor --project .
+cargo run -- skilllet matrix --project .
 cargo run -- draft add --id project:prefer-pnpm --title "Prefer pnpm" --body "Use pnpm for package management." --target codex --project .
 cargo run -- draft approve --id project:prefer-pnpm --project .
 cargo run -- draft reject --id project:prefer-pnpm --project .
@@ -264,6 +271,7 @@ The Canvas UI exposes:
 - `/api/mirror` for declaring a Skill mirror
 - `/api/agent/enabled` for enabling or disabling Agent targets
 - `/api/skilllet/targets` for assigning Skilllets to Agent targets
+- `/api/skilllet/matrix` for the Skilllet by Agent target matrix
 - `/api/extract` creates Draft Inbox items from pasted text
 - `/api/build/preview` for build previews
 - `/api/sync` for syncing declared mirrors and generated artifacts

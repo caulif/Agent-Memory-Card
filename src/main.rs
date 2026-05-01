@@ -257,6 +257,13 @@ enum SkillletCommands {
         #[arg(long, default_value = ".")]
         project: PathBuf,
     },
+
+    /// Show a Skilllet by Agent target matrix.
+    Matrix {
+        /// Project root.
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -443,6 +450,10 @@ async fn main() -> Result<()> {
             } => {
                 skilllet::set_skilllet_targets(&project, &id, targets)?;
                 println!("Updated targets for skilllet `{id}`");
+            }
+            SkillletCommands::Matrix { project } => {
+                let matrix = skilllet::skilllet_target_matrix(&project)?;
+                println!("{}", matrix.render());
             }
         },
         Commands::Agent { command } => match command {

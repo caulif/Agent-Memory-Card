@@ -19,6 +19,52 @@ pub struct SkillletRecord {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillletTargetMatrix {
+    pub agents: Vec<String>,
+    pub rows: Vec<SkillletTargetMatrixRow>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillletTargetMatrixRow {
+    pub skilllet_id: String,
+    pub title: String,
+    pub targets: std::collections::BTreeMap<String, bool>,
+}
+
+impl SkillletTargetMatrix {
+    pub fn render(&self) -> String {
+        let mut out = String::new();
+        out.push_str("Agent-Kernel Skilllet Target Matrix\n\n");
+        if self.rows.is_empty() {
+            out.push_str("No skilllets found.\n");
+            return out;
+        }
+        out.push_str(&format!("Skilllet | {}\n", self.agents.join(" | ")));
+        out.push_str(&format!(
+            "{}\n",
+            std::iter::repeat_n("---", self.agents.len() + 1)
+                .collect::<Vec<_>>()
+                .join(" | ")
+        ));
+        for row in &self.rows {
+            let cells = self
+                .agents
+                .iter()
+                .map(|agent| {
+                    if row.targets.get(agent).copied().unwrap_or(false) {
+                        "yes"
+                    } else {
+                        "no"
+                    }
+                })
+                .collect::<Vec<_>>();
+            out.push_str(&format!("{} | {}\n", row.skilllet_id, cells.join(" | ")));
+        }
+        out
+    }
+}
+
 pub fn add_skilllet(
     project_root: &Path,
     id: &str,
@@ -135,6 +181,75 @@ pub fn skilllet_map(
         .into_iter()
         .map(|record| (record.id.clone(), record))
         .collect())
+}
+
+pub fn skilllet_target_matrix(project_root: &Path) -> Result<SkillletTargetMatrix> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    let project = config::load_or_default_project_config(&root)?;
+    let skilllets = load_skilllets(&root)?;
+    let agents = project.agents.keys().cloned().collect::<Vec<_>>();
+    let refs = project
+        .skilllets
+        .include
+        .iter()
+        .map(|item| (item.id.clone(), item.targets.clone()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+
+    let rows = skilllets
+        .into_iter()
+        .map(|record| {
+            let explicit_targets = refs.get(&record.id).cloned().unwrap_or_default();
+            let targets = agents
+                .iter()
+                .map(|agent| {
+                    let assigned = if explicit_targets.is_empty() {
+                        project
+                            .agents
+                            .get(agent)
+                            .map(|agent| agent.enabled)
+                            .unwrap_or(false)
+                    } else {
+                        explicit_targets.iter().any(|target| target == agent)
+                    };
+                    (agent.clone(), assigned)
+                })
+                .collect();
+            SkillletTargetMatrixRow {
+                skilllet_id: record.id,
+                title: record.title,
+                targets,
+            }
+        })
+        .collect();
+
+    Ok(SkillletTargetMatrix { agents, rows })
+}
+
+#[cfg(test)]
+mod matrix_tests {
+    use super::*;
+
+    #[test]
+    fn skilllet_target_matrix_marks_assigned_agents() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        add_skilllet(
+            temp.path(),
+            "project:use-axios",
+            "Use Axios",
+            "Use Axios for frontend HTTP requests.",
+            "preference",
+            "project",
+            vec!["codex".to_string(), "cursor".to_string()],
+        )
+        .expect("add skilllet");
+
+        let matrix = skilllet_target_matrix(temp.path()).expect("matrix");
+
+        assert_eq!(matrix.rows[0].skilllet_id, "project:use-axios");
+        assert_eq!(matrix.rows[0].targets.get("codex"), Some(&true));
+        assert_eq!(matrix.rows[0].targets.get("cursor"), Some(&true));
+        assert_eq!(matrix.rows[0].targets.get("claude-code"), Some(&false));
+    }
 }
 
 fn skilllet_path(project_root: &Path, id: &str) -> PathBuf {
