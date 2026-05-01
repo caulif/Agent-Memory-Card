@@ -3,8 +3,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
 use regex::Regex;
+use serde::Deserialize;
 
+use crate::config;
 use crate::draft::{self, NewDraft};
+use crate::fsutil;
 use crate::provider;
 
 #[derive(Debug)]
@@ -132,7 +135,8 @@ pub fn extract_text_to_drafts(
         input.to_string()
     };
     let redacted = redacted_input != input;
-    let candidates = extract_candidates(&redacted_input);
+    let preferences = load_known_preferences(project_root)?;
+    let candidates = extract_candidates_with_preferences(&redacted_input, &preferences);
     let previews = candidates
         .iter()
         .map(|candidate| ExtractCandidatePreview {
@@ -186,13 +190,22 @@ pub fn extract_text_to_drafts(
     })
 }
 
+#[cfg(test)]
 fn extract_candidates(input: &str) -> Vec<Candidate> {
+    let preferences = built_in_preferences();
+    extract_candidates_with_preferences(input, &preferences)
+}
+
+fn extract_candidates_with_preferences(
+    input: &str,
+    preferences: &[KnownPreference],
+) -> Vec<Candidate> {
     let mut candidates = Vec::new();
     for sentence in split_sentences(input) {
         if !looks_like_rule(sentence) {
             continue;
         }
-        if let Some(candidate) = normalize_known_preference(sentence) {
+        if let Some(candidate) = normalize_known_preference(sentence, preferences) {
             candidates.push(candidate);
             continue;
         }
@@ -212,14 +225,17 @@ fn extract_candidates(input: &str) -> Vec<Candidate> {
     dedupe_candidates(candidates)
 }
 
-fn normalize_known_preference(sentence: &str) -> Option<Candidate> {
+fn normalize_known_preference(
+    sentence: &str,
+    preferences: &[KnownPreference],
+) -> Option<Candidate> {
     let lower = sentence.to_lowercase();
-    known_preferences()
+    preferences
         .iter()
         .find(|preference| preference.matches(&lower))
         .map(|preference| Candidate {
-            title: preference.title.to_string(),
-            body: preference.body.to_string(),
+            title: preference.title.clone(),
+            body: preference.body.clone(),
             kind: "preference".to_string(),
             scope: "project".to_string(),
             evidence: sentence.to_string(),
@@ -227,26 +243,79 @@ fn normalize_known_preference(sentence: &str) -> Option<Candidate> {
 }
 
 struct KnownPreference {
-    title: &'static str,
-    body: &'static str,
-    required: &'static [&'static str],
-    context: &'static [&'static str],
+    title: String,
+    body: String,
+    required: Vec<String>,
+    context: Vec<String>,
 }
 
 impl KnownPreference {
     fn matches(&self, lower: &str) -> bool {
         self.required.iter().all(|marker| lower.contains(marker))
-            && self.context.iter().any(|marker| lower.contains(marker))
+            && (self.context.is_empty() || self.context.iter().any(|marker| lower.contains(marker)))
     }
 }
 
-fn known_preferences() -> &'static [KnownPreference] {
-    &[
+#[derive(Debug, Default, Deserialize)]
+struct ProjectPreferenceRegistry {
+    #[serde(default)]
+    preferences: Vec<ProjectPreference>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProjectPreference {
+    title: String,
+    body: String,
+    #[serde(default)]
+    required: Vec<String>,
+    #[serde(default)]
+    context: Vec<String>,
+}
+
+fn load_known_preferences(project_root: &Path) -> Result<Vec<KnownPreference>> {
+    let mut preferences = load_project_preferences(project_root)?;
+    preferences.extend(built_in_preferences());
+    Ok(preferences)
+}
+
+fn load_project_preferences(project_root: &Path) -> Result<Vec<KnownPreference>> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    let path = config::kernel_dir(&root).join("preference-registry.yml");
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let text = fs::read_to_string(&path)?;
+    let registry: ProjectPreferenceRegistry = serde_yaml::from_str(&text)?;
+    Ok(registry
+        .preferences
+        .into_iter()
+        .filter(|preference| {
+            !preference.title.trim().is_empty() && !preference.body.trim().is_empty()
+        })
+        .map(|preference| KnownPreference {
+            title: preference.title,
+            body: preference.body,
+            required: preference
+                .required
+                .into_iter()
+                .map(|marker| marker.to_lowercase())
+                .collect(),
+            context: preference
+                .context
+                .into_iter()
+                .map(|marker| marker.to_lowercase())
+                .collect(),
+        })
+        .collect())
+}
+
+fn built_in_preferences() -> Vec<KnownPreference> {
+    vec![
         KnownPreference {
-            title: "Prefer Bun",
-            body: "Use Bun for JavaScript package management and scripts.",
-            required: &["bun"],
-            context: &[
+            title: "Prefer Bun".to_string(),
+            body: "Use Bun for JavaScript package management and scripts.".to_string(),
+            required: strings(&["bun"]),
+            context: strings(&[
                 "npm",
                 "pnpm",
                 "yarn",
@@ -257,13 +326,13 @@ fn known_preferences() -> &'static [KnownPreference] {
                 "package management",
                 "javascript package",
                 "js 脚本",
-            ],
+            ]),
         },
         KnownPreference {
-            title: "Use Axios",
-            body: "Use Axios for frontend HTTP requests.",
-            required: &["axios"],
-            context: &[
+            title: "Use Axios".to_string(),
+            body: "Use Axios for frontend HTTP requests.".to_string(),
+            required: strings(&["axios"]),
+            context: strings(&[
                 "fetch",
                 "http",
                 "request",
@@ -272,13 +341,13 @@ fn known_preferences() -> &'static [KnownPreference] {
                 "前端请求",
                 "请求",
                 "接口",
-            ],
+            ]),
         },
         KnownPreference {
-            title: "Use Vitest",
-            body: "Use Vitest for frontend unit tests.",
-            required: &["vitest"],
-            context: &[
+            title: "Use Vitest".to_string(),
+            body: "Use Vitest for frontend unit tests.".to_string(),
+            required: strings(&["vitest"]),
+            context: strings(&[
                 "jest",
                 "unit test",
                 "unit tests",
@@ -286,9 +355,13 @@ fn known_preferences() -> &'static [KnownPreference] {
                 "frontend tests",
                 "单元测试",
                 "测试",
-            ],
+            ]),
         },
     ]
+}
+
+fn strings(values: &[&str]) -> Vec<String> {
+    values.iter().map(|value| value.to_string()).collect()
 }
 
 fn split_sentences(input: &str) -> Vec<&str> {
@@ -489,6 +562,83 @@ mod tests {
         assert_eq!(
             report.candidates[0].body,
             "Use Vitest for frontend unit tests."
+        );
+    }
+
+    #[test]
+    fn uses_project_preference_registry() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let registry_dir = temp.path().join(".agent-kernel");
+        fs::create_dir_all(&registry_dir).expect("registry dir");
+        fs::write(
+            registry_dir.join("preference-registry.yml"),
+            r#"preferences:
+  - title: Use Playwright
+    body: Use Playwright for browser automation tests.
+    required:
+      - playwright
+    context:
+      - cypress
+      - browser automation
+      - 浏览器自动化
+"#,
+        )
+        .expect("write registry");
+
+        let report = extract_to_drafts(
+            temp.path(),
+            Some("以后浏览器自动化测试统一使用 Playwright，不要再用 Cypress。".to_string()),
+            None,
+            vec!["codex".to_string()],
+            Some("local".to_string()),
+            true,
+        )
+        .expect("extract");
+
+        assert_eq!(report.candidates.len(), 1);
+        assert_eq!(report.candidates[0].id, "project:use-playwright");
+        assert_eq!(report.candidates[0].title, "Use Playwright");
+        assert_eq!(
+            report.candidates[0].body,
+            "Use Playwright for browser automation tests."
+        );
+    }
+
+    #[test]
+    fn project_preference_registry_overrides_built_ins() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let registry_dir = temp.path().join(".agent-kernel");
+        fs::create_dir_all(&registry_dir).expect("registry dir");
+        fs::write(
+            registry_dir.join("preference-registry.yml"),
+            r#"preferences:
+  - title: Use Bun Runtime
+    body: Use Bun for package management, scripts, and JavaScript runtime tasks.
+    required:
+      - bun
+    context:
+      - npm
+      - package management
+"#,
+        )
+        .expect("write registry");
+
+        let report = extract_to_drafts(
+            temp.path(),
+            Some("Always use Bun instead of npm for package management.".to_string()),
+            None,
+            vec!["codex".to_string()],
+            Some("local".to_string()),
+            true,
+        )
+        .expect("extract");
+
+        assert_eq!(report.candidates.len(), 1);
+        assert_eq!(report.candidates[0].id, "project:use-bun-runtime");
+        assert_eq!(report.candidates[0].title, "Use Bun Runtime");
+        assert_eq!(
+            report.candidates[0].body,
+            "Use Bun for package management, scripts, and JavaScript runtime tasks."
         );
     }
 

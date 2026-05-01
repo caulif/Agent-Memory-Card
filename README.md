@@ -257,6 +257,12 @@ v0.41 improves dry-run evolution previews:
 2. One-command local evolution dry-runs carry the same candidate Draft IDs.
 3. This makes preview/review flows suitable for UI confirmation before Draft Inbox writes.
 
+v0.42 makes Known Preference Registry project-configurable:
+
+1. Projects can add `.agent-kernel/preference-registry.yml` to define custom high-confidence extraction templates.
+2. Project templates use `title`, `body`, `required`, and `context` fields.
+3. Project templates are matched before built-ins, so advanced users can override default Bun/Axios/Vitest wording.
+
 ## Commands
 
 ```bash
@@ -305,6 +311,20 @@ cargo run -- catalog install --id core:rust-quality-gate --target codex --projec
 cargo run -- agent list --project .
 cargo run -- agent enable --agent claude-code --project .
 cargo run -- agent disable --agent claude-code --project .
+```
+
+Example project preference registry:
+
+```yaml
+preferences:
+  - title: Use Playwright
+    body: Use Playwright for browser automation tests.
+    required:
+      - playwright
+    context:
+      - cypress
+      - browser automation
+      - 浏览器自动化
 ```
 
 The Bun wrapper works locally after the Rust binary has been built:
