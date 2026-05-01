@@ -10,6 +10,7 @@ use crate::rule_test;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::skilllet;
 
     #[test]
     fn review_report_serializes_pending_drafts() {
@@ -63,12 +64,35 @@ mod tests {
         assert_eq!(result[0].status, "applied");
         assert!(draft::load_drafts(temp.path()).expect("drafts").is_empty());
     }
+
+    #[test]
+    fn review_summary_counts_artifact_drifts() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        skilllet::add_skilllet(
+            temp.path(),
+            "project:codex-rule",
+            "Codex Rule",
+            "Use pnpm for package management.",
+            "preference",
+            "project",
+            vec!["codex".to_string()],
+        )
+        .expect("add skilllet");
+        build::sync_project(temp.path()).expect("sync");
+        std::fs::write(temp.path().join("AGENTS.md"), "manual edit").expect("manual edit");
+
+        let report = review_project(temp.path()).expect("review");
+        let value = serde_json::to_value(report).expect("json");
+
+        assert_eq!(value["summary"]["artifact_drifts"], 1);
+    }
 }
 
 #[derive(Debug, Serialize)]
 pub struct ReviewSummary {
     pub drafts_pending: usize,
     pub rule_tests_failed: usize,
+    pub artifact_drifts: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -133,6 +157,7 @@ pub fn review_project(project_root: &Path) -> Result<ReviewReport> {
         summary: ReviewSummary {
             drafts_pending: drafts.len(),
             rule_tests_failed: rule_ci.failed,
+            artifact_drifts: mirror_status.artifact_drift_count(),
         },
         drafts,
         mirror_status,

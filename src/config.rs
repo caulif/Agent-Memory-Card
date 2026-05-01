@@ -258,6 +258,15 @@ pub fn save_lock(project_root: &Path, lock: &ProjectLock) -> Result<()> {
     fs::write(lock_path(project_root), text).context("write project.lock.yml")
 }
 
+pub fn load_lock(project_root: &Path) -> Result<ProjectLock> {
+    let path = lock_path(project_root);
+    if !path.exists() {
+        return Ok(ProjectLock::default());
+    }
+    let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    serde_yaml::from_str(&text).with_context(|| format!("parse {}", path.display()))
+}
+
 pub fn add_mirror(project_root: &Path, skill_id: &str, agent: &str) -> Result<()> {
     let root = fsutil::normalize_project_root(project_root)?;
     let index = load_skill_index(&root)?;

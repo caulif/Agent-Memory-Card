@@ -65,6 +65,12 @@ mod tests {
         assert!(INDEX_HTML.contains("target-matrix-table"));
         assert!(INDEX_HTML.contains("matrix-cell assigned"));
     }
+
+    #[test]
+    fn canvas_html_has_artifact_status_panel() {
+        assert!(INDEX_HTML.contains("Artifact Status"));
+        assert!(INDEX_HTML.contains("artifact-status"));
+    }
 }
 
 #[derive(Clone)]
@@ -279,9 +285,9 @@ async fn api_build_preview(State(state): State<AppState>) -> Json<serde_json::Va
 async fn api_status(State(state): State<AppState>) -> Json<serde_json::Value> {
     match build::status_project(state.project_root.as_ref()) {
         Ok(report) => Json(serde_json::to_value(report).unwrap_or_else(
-            |error| serde_json::json!({ "rows": [], "warnings": [error.to_string()] }),
+            |error| serde_json::json!({ "rows": [], "artifact_rows": [], "warnings": [error.to_string()] }),
         )),
-        Err(error) => Json(serde_json::json!({ "rows": [], "warnings": [error.to_string()] })),
+        Err(error) => Json(serde_json::json!({ "rows": [], "artifact_rows": [], "warnings": [error.to_string()] })),
     }
 }
 
@@ -491,6 +497,10 @@ const INDEX_HTML: &str = r##"<!doctype html>
         <div id="mirror-status"></div>
       </section>
       <section>
+        <h3>Artifact Status</h3>
+        <div id="artifact-status"></div>
+      </section>
+      <section>
         <h3>Rule CI</h3>
         <div id="rule-tests"></div>
       </section>
@@ -698,6 +708,10 @@ const INDEX_HTML: &str = r##"<!doctype html>
       document.getElementById("mirror-status").innerHTML = rows.length ? `<ul>${rows.map(row =>
         `<li><strong>${escapeHtml(row.skill)}</strong><br>${escapeHtml(row.agent)} · ${escapeHtml(row.status)}</li>`
       ).join("")}</ul>` : `<p>No mirror status yet.</p>`;
+      const artifactRows = status.artifact_rows || [];
+      document.getElementById("artifact-status").innerHTML = artifactRows.length ? `<ul>${artifactRows.map(row =>
+        `<li><strong>${escapeHtml(row.path)}</strong><br>${escapeHtml(row.kind)} · <span class="${row.status === "synced" ? "ok" : "bad"}">${escapeHtml(row.status)}</span></li>`
+      ).join("")}</ul>` : `<p>No generated artifacts recorded yet.</p>`;
     }
 
     async function renderRuleTests(writeOutput) {
@@ -725,11 +739,13 @@ const INDEX_HTML: &str = r##"<!doctype html>
       const summary = report.summary || {};
       const failed = Number(summary.rule_tests_failed || 0);
       const pending = Number(summary.drafts_pending || 0);
+      const artifactDrifts = Number(summary.artifact_drifts || 0);
       const actions = report.build_preview?.actions || [];
       document.getElementById("review").innerHTML = `
         <div class="review-grid">
           <div class="metric"><strong>${pending}</strong><span>Pending drafts</span></div>
           <div class="metric"><strong class="${failed ? "bad" : "ok"}">${failed}</strong><span>Rule CI failures</span></div>
+          <div class="metric"><strong class="${artifactDrifts ? "bad" : "ok"}">${artifactDrifts}</strong><span>Artifact drifts</span></div>
         </div>
         <p>${actions.length} build actions · ${(report.mirror_status?.warnings || []).length} warnings</p>
       `;
@@ -737,6 +753,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
         document.getElementById("build-output").textContent = [
           `Drafts pending: ${pending}`,
           `Rule CI failures: ${failed}`,
+          `Artifact drifts: ${artifactDrifts}`,
           `Build actions: ${actions.length}`
         ].join("\n");
       }

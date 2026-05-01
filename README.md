@@ -172,6 +172,12 @@ v0.27 improves the Canvas target matrix:
 2. Matrix cells show assigned or unassigned state at a glance.
 3. Clicking a cell updates that Skilllet's Agent targets through the existing assignment API.
 
+v0.28 adds generated artifact drift detection:
+
+1. `status` now checks generated instruction/rules artifacts recorded in `project.lock.yml`.
+2. Artifacts are reported as `synced`, `missing`, or `artifact drifted`.
+3. The Canvas shows an Artifact Status panel and Review summary counts artifact drifts.
+
 ## Commands
 
 ```bash

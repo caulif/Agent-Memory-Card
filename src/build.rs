@@ -23,6 +23,7 @@ pub struct BuildReport {
 #[derive(Debug, serde::Serialize)]
 pub struct StatusReport {
     rows: Vec<StatusRow>,
+    artifact_rows: Vec<ArtifactStatusRow>,
     warnings: Vec<String>,
 }
 
@@ -31,6 +32,13 @@ struct StatusRow {
     skill: String,
     agent: String,
     target: String,
+    status: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ArtifactStatusRow {
+    path: String,
+    kind: String,
     status: String,
 }
 
@@ -77,6 +85,13 @@ impl BuildReport {
 }
 
 impl StatusReport {
+    pub fn artifact_drift_count(&self) -> usize {
+        self.artifact_rows
+            .iter()
+            .filter(|row| row.status == "artifact drifted")
+            .count()
+    }
+
     pub fn render(&self) -> String {
         let mut out = String::new();
         out.push_str("Agent-Kernel status\n\n");
@@ -88,6 +103,12 @@ impl StatusReport {
                     "- {} -> {}: {} ({})\n",
                     row.skill, row.agent, row.status, row.target
                 ));
+            }
+        }
+        if !self.artifact_rows.is_empty() {
+            out.push_str("\nArtifacts:\n");
+            for row in &self.artifact_rows {
+                out.push_str(&format!("- {}: {} ({})\n", row.path, row.status, row.kind));
             }
         }
         if !self.warnings.is_empty() {
@@ -367,6 +388,7 @@ pub fn status_project(project_root: &Path) -> Result<StatusReport> {
         .collect::<BTreeMap<_, _>>();
 
     let mut rows = Vec::new();
+    let mut artifact_rows = Vec::new();
     let mut warnings = Vec::new();
 
     for mirror in &config.skills.mirrors {
@@ -415,7 +437,33 @@ pub fn status_project(project_root: &Path) -> Result<StatusReport> {
         }
     }
 
-    Ok(StatusReport { rows, warnings })
+    let lock = config::load_lock(&root)?;
+    for artifact in lock.artifacts {
+        let path = root.join(&artifact.path);
+        let status = if !path.exists() {
+            "missing".to_string()
+        } else {
+            let text = fs::read_to_string(&path)
+                .with_context(|| format!("read artifact {}", path.display()))?;
+            let current_hash = fsutil::sha256_text(&text);
+            if current_hash == artifact.hash {
+                "synced".to_string()
+            } else {
+                "artifact drifted".to_string()
+            }
+        };
+        artifact_rows.push(ArtifactStatusRow {
+            path: fsutil::path_to_slash(&path),
+            kind: artifact.kind,
+            status,
+        });
+    }
+
+    Ok(StatusReport {
+        rows,
+        artifact_rows,
+        warnings,
+    })
 }
 
 pub fn mirror(project_root: &Path, skill_id: &str, agent: &str) -> Result<()> {
@@ -601,5 +649,39 @@ mod tests {
         let text = fs::read_to_string(rule_path).expect("cline rule");
         assert!(text.contains("# Agent Kernel Rules"));
         assert!(text.contains("Keep Cline task handoffs short"));
+    }
+
+    #[test]
+    fn status_reports_generated_artifact_drift() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        skilllet::add_skilllet(
+            temp.path(),
+            "project:codex-rule",
+            "Codex Rule",
+            "Use pnpm for package management.",
+            "preference",
+            "project",
+            vec!["codex".to_string()],
+        )
+        .expect("add skilllet");
+
+        sync_project(temp.path()).expect("sync");
+        let synced = status_project(temp.path()).expect("status");
+        assert!(
+            synced
+                .artifact_rows
+                .iter()
+                .any(|row| row.path.ends_with("AGENTS.md") && row.status == "synced")
+        );
+
+        fs::write(temp.path().join("AGENTS.md"), "manual edit").expect("manual edit");
+        let drifted = status_project(temp.path()).expect("status");
+
+        assert!(
+            drifted
+                .artifact_rows
+                .iter()
+                .any(|row| row.path.ends_with("AGENTS.md") && row.status == "artifact drifted")
+        );
     }
 }
