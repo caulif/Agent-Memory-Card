@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -38,6 +36,9 @@ const CATALOG_SCROLL_ID: &str = "native-catalog-scroll";
 const MATRIX_SCROLL_ID: &str = "native-skilllet-matrix-scroll";
 const OUTPUT_SCROLL_ID: &str = "native-output-scroll";
 const WORKSPACE_SCROLL_ID: &str = "native-project-workspace-scroll";
+const REVIEW_SCROLL_ID: &str = "native-review-center-scroll";
+const OBSERVATION_SCROLL_ID: &str = "native-observations-scroll";
+const INSPECTOR_SCROLL_ID: &str = "native-inspector-scroll";
 const MAX_HEADER_MARKERS: usize = 3;
 const MERGE_SELECTED_LABEL: &str = "合并所选";
 const MERGE_CONFIRM_LABEL: &str = "创建合并候选";
@@ -48,6 +49,65 @@ const INSPECTOR_WIDTH: f32 = 376.0;
 const BOTTOM_BAR_HEIGHT: f32 = 80.0;
 const CANVAS_MIN_HEIGHT: f32 = 520.0;
 const CANVAS_SCROLL_ID: &str = "native-reference-canvas-scroll";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UiPage {
+    Overview,
+    Canvas,
+    DraftInbox,
+    Skilllets,
+    Mirrors,
+    Agents,
+    RuleCi,
+    Observations,
+    Catalog,
+    Settings,
+}
+
+impl UiPage {
+    const ALL: [UiPage; 10] = [
+        UiPage::Overview,
+        UiPage::Canvas,
+        UiPage::DraftInbox,
+        UiPage::Skilllets,
+        UiPage::Mirrors,
+        UiPage::Agents,
+        UiPage::RuleCi,
+        UiPage::Observations,
+        UiPage::Catalog,
+        UiPage::Settings,
+    ];
+
+    fn label(self) -> &'static str {
+        match self {
+            UiPage::Overview => "概览",
+            UiPage::Canvas => "画布",
+            UiPage::DraftInbox => "草稿收件箱",
+            UiPage::Skilllets => "Skilllets",
+            UiPage::Mirrors => "镜像状态",
+            UiPage::Agents => "Agents",
+            UiPage::RuleCi => "规则 CI",
+            UiPage::Observations => "观察",
+            UiPage::Catalog => "目录",
+            UiPage::Settings => "设置",
+        }
+    }
+
+    fn badge(self) -> &'static str {
+        match self {
+            UiPage::Overview => "OV",
+            UiPage::Canvas => "CV",
+            UiPage::DraftInbox => "DR",
+            UiPage::Skilllets => "SK",
+            UiPage::Mirrors => "MR",
+            UiPage::Agents => "AG",
+            UiPage::RuleCi => "CI",
+            UiPage::Observations => "OB",
+            UiPage::Catalog => "CA",
+            UiPage::Settings => "ST",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 struct UiPalette {
@@ -636,6 +696,9 @@ mod tests {
             MATRIX_SCROLL_ID,
             OUTPUT_SCROLL_ID,
             WORKSPACE_SCROLL_ID,
+            REVIEW_SCROLL_ID,
+            OBSERVATION_SCROLL_ID,
+            INSPECTOR_SCROLL_ID,
         ];
         let mut seen = std::collections::HashSet::new();
         for id in ids {
@@ -1102,6 +1165,7 @@ mod tests {
                 projects: Vec::new(),
             },
             selected_path: None,
+            active_page: UiPage::Overview,
             status: String::new(),
             report: String::new(),
             draft_edit: None,
@@ -1165,6 +1229,7 @@ mod tests {
                 projects: vec![registered],
             },
             selected_path: Some(project_root.to_string_lossy().to_string()),
+            active_page: UiPage::Overview,
             status: String::new(),
             report: String::new(),
             draft_edit: None,
@@ -1204,6 +1269,7 @@ mod tests {
                 projects: Vec::new(),
             },
             selected_path: None,
+            active_page: UiPage::Overview,
             status: String::new(),
             report: String::new(),
             draft_edit: None,
@@ -1264,6 +1330,21 @@ mod tests {
         assert_eq!(INSPECTOR_WIDTH, 376.0);
         assert_eq!(BOTTOM_BAR_HEIGHT, 80.0);
         assert_eq!(CANVAS_MIN_HEIGHT, 520.0);
+    }
+
+    #[test]
+    fn native_workspace_pages_cover_reference_designs() {
+        let labels = UiPage::ALL
+            .iter()
+            .map(|page| page.label())
+            .collect::<Vec<_>>();
+
+        assert_eq!(labels.len(), 10);
+        assert!(labels.contains(&"草稿收件箱"));
+        assert!(labels.contains(&"Skilllets"));
+        assert!(labels.contains(&"规则 CI"));
+        assert!(labels.contains(&"观察"));
+        assert!(UiPage::ALL.iter().all(|page| page.badge().is_ascii()));
     }
 }
 
@@ -1385,6 +1466,7 @@ struct AgentKernelApp {
     max_depth: usize,
     registry: ProjectRegistry,
     selected_path: Option<String>,
+    active_page: UiPage,
     status: String,
     report: String,
     draft_edit: Option<DraftEditState>,
@@ -1411,6 +1493,7 @@ impl AgentKernelApp {
                 projects: Vec::new(),
             },
             selected_path: None,
+            active_page: UiPage::Overview,
             status: String::new(),
             report: String::new(),
             draft_edit: None,
@@ -1858,19 +1941,14 @@ impl eframe::App for AgentKernelApp {
         if self.is_busy() {
             ui.ctx().request_repaint();
         }
+
         let palette = ui_palette();
         ui.painter()
             .rect_filled(ui.max_rect(), egui::CornerRadius::ZERO, palette.background);
-        ui.allocate_ui_with_layout(
-            ui.available_size(),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                page_frame().show(ui, |ui| {
-                    ui.set_min_size(ui.available_size());
-                    self.render_app_shell(ui);
-                });
-            },
-        );
+        page_frame().show(ui, |ui| {
+            ui.set_min_size(ui.available_size());
+            self.render_app_shell(ui);
+        });
     }
 }
 
@@ -1881,11 +1959,11 @@ impl AgentKernelApp {
             ui.allocate_ui_with_layout(
                 egui::vec2(shell_size.x, TOP_BAR_HEIGHT),
                 egui::Layout::left_to_right(egui::Align::Center),
-                |ui| self.render_reference_top_bar(ui),
+                |ui| self.render_top_bar(ui, shell_size.x),
             );
             self.separator(ui);
 
-            let body_height = (shell_size.y - TOP_BAR_HEIGHT - BOTTOM_BAR_HEIGHT - 2.0).max(420.0);
+            let body_height = (shell_size.y - TOP_BAR_HEIGHT - BOTTOM_BAR_HEIGHT - 2.0).max(480.0);
             ui.allocate_ui_with_layout(
                 egui::vec2(shell_size.x, body_height),
                 egui::Layout::left_to_right(egui::Align::Min),
@@ -1893,21 +1971,16 @@ impl AgentKernelApp {
                     ui.allocate_ui_with_layout(
                         egui::vec2(LEFT_NAV_WIDTH, body_height),
                         egui::Layout::top_down(egui::Align::Min),
-                        |ui| self.render_reference_nav(ui),
+                        |ui| self.render_nav(ui),
                     );
                     self.vertical_separator(ui, body_height);
-
-                    let inspector_width = INSPECTOR_WIDTH.min((shell_size.x * 0.26).max(300.0));
-                    let main_width = (ui.available_width() - inspector_width - 1.0).max(480.0);
                     ui.allocate_ui_with_layout(
-                        egui::vec2(main_width, body_height),
+                        egui::vec2(
+                            (shell_size.x - LEFT_NAV_WIDTH - 1.0).max(760.0),
+                            body_height,
+                        ),
                         egui::Layout::top_down(egui::Align::Min),
-                        |ui| self.render_reference_canvas_area(ui),
-                    );
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(inspector_width, body_height),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| self.render_reference_inspector(ui),
+                        |ui| self.render_active_page(ui),
                     );
                 },
             );
@@ -1915,7 +1988,7 @@ impl AgentKernelApp {
             ui.allocate_ui_with_layout(
                 egui::vec2(shell_size.x, BOTTOM_BAR_HEIGHT),
                 egui::Layout::left_to_right(egui::Align::Center),
-                |ui| self.render_reference_bottom_bar(ui),
+                |ui| self.render_bottom_bar(ui),
             );
         });
     }
@@ -1936,15 +2009,15 @@ impl AgentKernelApp {
         ui.painter().rect_filled(rect, 0.0, palette.border);
     }
 
-    fn render_reference_top_bar(&mut self, ui: &mut egui::Ui) {
+    fn render_top_bar(&mut self, ui: &mut egui::Ui, shell_width: f32) {
         let palette = ui_palette();
-        ui.add_space(24.0);
+        ui.add_space(18.0);
         self.render_brand_lockup(ui);
-        ui.add_space(28.0);
+        ui.add_space(18.0);
 
         let mut selected_path: Option<String> = None;
-        egui::ComboBox::from_id_salt("reference-project-switcher")
-            .width(210.0)
+        egui::ComboBox::from_id_salt("native-project-switcher")
+            .width(if shell_width > 1320.0 { 210.0 } else { 170.0 })
             .selected_text(
                 self.selected_project()
                     .map(|project| project.name)
@@ -1968,53 +2041,68 @@ impl AgentKernelApp {
             self.refresh_project_cache_for_selected();
         }
 
-        ui.add_space(18.0);
+        ui.add_space(16.0);
+        let action_budget = if shell_width > 1380.0 { 620.0 } else { 430.0 };
+        let search_width = (ui.available_width() - action_budget).clamp(220.0, 440.0);
         search_box_frame().show(ui, |ui| {
-            ui.set_min_width(390.0);
+            ui.set_width(search_width);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("⌕").size(20.0).color(palette.muted));
+                self.paint_tiny_lens(ui, palette.muted);
                 ui.label(
-                    egui::RichText::new("搜索项目、Skilllet、候选...")
+                    egui::RichText::new("搜索任何内容...")
                         .size(14.0)
                         .color(palette.muted),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    Self::soft_badge(ui, "⌘ K", palette.card_alt, palette.muted);
+                    Self::soft_badge(ui, "Ctrl K", palette.card_alt, palette.muted);
                 });
             });
         });
 
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add_space(18.0);
-            Self::soft_badge(
-                ui,
-                "隐私已开启",
-                egui::Color32::from_rgb(236, 244, 255),
-                palette.accent,
-            );
-            Self::soft_badge(
-                ui,
-                "本地优先",
-                egui::Color32::from_rgb(231, 248, 238),
-                palette.success,
-            );
+        ui.add_space(16.0);
+        if shell_width > 1260.0 {
             if ui
-                .add_enabled(!self.is_busy(), secondary_button("体检"))
+                .add_enabled(!self.is_busy(), secondary_button("同步"))
                 .clicked()
             {
-                self.review_selected();
+                self.start_scan();
             }
             if ui
                 .add_enabled(!self.is_busy(), secondary_button("构建预览"))
                 .clicked()
             {
                 self.review_selected();
+                self.active_page = UiPage::RuleCi;
             }
             if ui
-                .add_enabled(!self.is_busy(), secondary_button("同步"))
+                .add_enabled(!self.is_busy(), secondary_button("评审"))
                 .clicked()
             {
-                self.start_scan();
+                self.review_selected();
+                self.active_page = UiPage::DraftInbox;
+            }
+        } else if ui
+            .add_enabled(!self.is_busy(), secondary_button("同步"))
+            .clicked()
+        {
+            self.start_scan();
+        }
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(14.0);
+            Self::soft_badge(
+                ui,
+                "隐私本地",
+                egui::Color32::from_rgb(236, 244, 255),
+                palette.accent,
+            );
+            if shell_width > 1180.0 {
+                Self::soft_badge(
+                    ui,
+                    "本地优先",
+                    egui::Color32::from_rgb(231, 248, 238),
+                    palette.success,
+                );
             }
         });
     }
@@ -2024,20 +2112,19 @@ impl AgentKernelApp {
         let (rect, _) = ui.allocate_exact_size(egui::vec2(196.0, 44.0), egui::Sense::hover());
         let painter = ui.painter();
         let logo =
-            egui::Rect::from_min_size(rect.min + egui::vec2(2.0, 4.0), egui::vec2(36.0, 36.0));
-        let blue = palette.accent;
-        painter.circle_filled(logo.left_top() + egui::vec2(8.0, 26.0), 4.0, blue);
+            egui::Rect::from_min_size(rect.min + egui::vec2(2.0, 5.0), egui::vec2(34.0, 34.0));
+        painter.circle_filled(logo.left_top() + egui::vec2(7.0, 25.0), 4.0, palette.accent);
         painter.rect_filled(
             egui::Rect::from_min_size(
-                logo.left_top() + egui::vec2(14.0, 6.0),
+                logo.left_top() + egui::vec2(13.0, 5.0),
                 egui::vec2(8.0, 28.0),
             ),
             egui::CornerRadius::same(4),
-            blue,
+            palette.accent,
         );
         painter.rect_filled(
             egui::Rect::from_min_size(
-                logo.left_top() + egui::vec2(24.0, 16.0),
+                logo.left_top() + egui::vec2(24.0, 15.0),
                 egui::vec2(8.0, 18.0),
             ),
             egui::CornerRadius::same(4),
@@ -2052,36 +2139,49 @@ impl AgentKernelApp {
         );
     }
 
-    fn render_reference_nav(&mut self, ui: &mut egui::Ui) {
+    fn render_nav(&mut self, ui: &mut egui::Ui) {
         let palette = ui_palette();
         egui::Frame::new()
-            .fill(egui::Color32::from_rgb(250, 251, 253))
+            .fill(palette.sidebar)
             .inner_margin(egui::Margin::symmetric(14, 18))
             .show(ui, |ui| {
-                let items = [
-                    ("⌂", "概览", true),
-                    ("▦", "Canvas", false),
-                    ("▱", "Draft Inbox", false),
-                    ("✣", "Skilllets", false),
-                    ("◇", "Mirrors", false),
-                    ("♙", "Agents", false),
-                    ("◌", "Rule CI", false),
-                    ("◎", "Observations", false),
-                    ("□", "Catalog", false),
-                    ("⚙", "Settings", false),
-                ];
-                for (icon, label, selected) in items {
-                    self.nav_item(ui, icon, label, selected);
-                    ui.add_space(7.0);
-                }
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new("≪").size(18.0).color(palette.muted));
+                egui::ScrollArea::vertical()
+                    .id_salt(SIDEBAR_SCROLL_ID)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for page in UiPage::ALL {
+                            if self.nav_item(ui, page, self.active_page == page).clicked() {
+                                self.active_page = page;
+                            }
+                            ui.add_space(7.0);
+                        }
+                    });
+
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+                    subtle_card_frame().show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.horizontal(|ui| {
+                            self.status_dot(ui, palette.success);
+                            ui.label(
+                                egui::RichText::new("就绪，可供评审")
+                                    .size(13.0)
+                                    .color(palette.text),
+                            );
+                        });
+                        ui.label(
+                            egui::RichText::new(APP_SUBTITLE)
+                                .size(11.0)
+                                .color(palette.muted),
+                        );
+                    });
                 });
             });
     }
 
-    fn nav_item(&self, ui: &mut egui::Ui, icon: &str, label: &str, selected: bool) {
+    fn nav_item(&self, ui: &mut egui::Ui, page: UiPage, selected: bool) -> egui::Response {
         let palette = ui_palette();
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), 46.0), egui::Sense::click());
         let fill = if selected {
             palette.accent_soft
         } else {
@@ -2092,275 +2192,260 @@ impl AgentKernelApp {
         } else {
             palette.text
         };
-        let (rect, _) =
-            ui.allocate_exact_size(egui::vec2(ui.available_width(), 48.0), egui::Sense::hover());
         ui.painter()
             .rect_filled(rect, egui::CornerRadius::same(8), fill);
-        ui.painter().text(
-            rect.left_center() + egui::vec2(18.0, 0.0),
-            egui::Align2::CENTER_CENTER,
-            icon,
-            egui::FontId::proportional(20.0),
-            text,
+        self.paint_badge_at(
+            ui.painter(),
+            rect.left_center() + egui::vec2(19.0, 0.0),
+            page.badge(),
+            selected,
         );
         ui.painter().text(
-            rect.left_center() + egui::vec2(56.0, 0.0),
+            rect.left_center() + egui::vec2(48.0, 0.0),
             egui::Align2::LEFT_CENTER,
-            label,
+            page.label(),
             egui::FontId::proportional(15.0),
             text,
         );
+        response
     }
 
-    fn render_reference_canvas_area(&mut self, ui: &mut egui::Ui) {
-        let Some(project) = self.selected_project() else {
-            self.render_empty_project_canvas(ui);
-            return;
-        };
-        let palette = ui_palette();
-        egui::Frame::new()
-            .fill(palette.background)
-            .inner_margin(egui::Margin::symmetric(32, 26))
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt(CANVAS_SCROLL_ID)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        ui.label(
-                            egui::RichText::new("项目画布")
-                                .size(30.0)
-                                .strong()
-                                .color(palette.text),
-                        );
-                        ui.add_space(8.0);
-                        ui.label(
-                            egui::RichText::new(
-                                "将规则、技能、草稿与构建流整合为一个可审查的本地工作台",
-                            )
-                            .size(15.0)
-                            .color(palette.muted),
-                        );
-                        ui.add_space(28.0);
-                        self.render_reference_stats(ui);
-                        ui.add_space(20.0);
-                        self.render_reference_canvas_board(ui, &project);
-                    });
-            });
+    fn render_active_page(&mut self, ui: &mut egui::Ui) {
+        match self.active_page {
+            UiPage::Overview | UiPage::Canvas => self.render_canvas_page(ui),
+            UiPage::DraftInbox => self.render_draft_inbox_page(ui),
+            UiPage::Skilllets => self.render_skilllets_page(ui),
+            UiPage::RuleCi => self.render_review_center_page(ui),
+            UiPage::Observations => self.render_observations_page(ui),
+            UiPage::Catalog => self.render_catalog_page(ui),
+            UiPage::Mirrors => self.render_placeholder_page(
+                ui,
+                "镜像状态",
+                "查看 Claude Code / Codex 编译产物和 Mirror drift。",
+            ),
+            UiPage::Agents => {
+                self.render_placeholder_page(ui, "Agents", "为不同 Agent 分配不同 Skilllet 组合。")
+            }
+            UiPage::Settings => self.render_placeholder_page(
+                ui,
+                "设置",
+                "配置扫描路径、隐私脱敏、本地模型和构建策略。",
+            ),
+        }
     }
 
-    fn render_empty_project_canvas(&mut self, ui: &mut egui::Ui) {
+    fn render_page_header(
+        &mut self,
+        ui: &mut egui::Ui,
+        title: &str,
+        subtitle: &str,
+        actions: &[(&'static str, UiPage)],
+    ) {
         let palette = ui_palette();
-        ui.centered_and_justified(|ui| {
-            ui.vertical_centered(|ui| {
-                ui.label(egui::RichText::new("选择一个项目").size(28.0).strong());
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
                 ui.label(
-                    egui::RichText::new("点击左侧或顶部项目选择器开始。").color(palette.muted),
+                    egui::RichText::new(title)
+                        .size(30.0)
+                        .strong()
+                        .color(palette.text),
                 );
-                ui.add_space(12.0);
-                if ui
-                    .add_enabled(!self.is_busy(), primary_button("扫描"))
-                    .clicked()
-                {
-                    self.start_scan();
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new(subtitle)
+                        .size(14.0)
+                        .color(palette.muted),
+                );
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                for (idx, (label, page)) in actions.iter().enumerate() {
+                    let button = if idx == 0 {
+                        primary_button(label)
+                    } else {
+                        secondary_button(label)
+                    };
+                    if ui.add_enabled(!self.is_busy(), button).clicked() {
+                        self.active_page = *page;
+                        match *page {
+                            UiPage::RuleCi => self.review_selected(),
+                            UiPage::Observations => self.evolve_selected(false),
+                            _ => {}
+                        }
+                    }
+                    ui.add_space(8.0);
                 }
             });
         });
     }
 
-    fn render_reference_stats(&mut self, ui: &mut egui::Ui) {
-        let drafts = self.cached_drafts.len();
+    fn render_canvas_page(&mut self, ui: &mut egui::Ui) {
+        let palette = ui_palette();
+        egui::Frame::new()
+            .fill(palette.background)
+            .inner_margin(egui::Margin::symmetric(30, 24))
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt(CANVAS_SCROLL_ID)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        self.render_page_header(
+                            ui,
+                            "项目画布 / Canvas",
+                            "把本地规则、观察记录、草稿、Skilllets 与 Agent 输出连接成一张可操作白板。",
+                            &[("整理历史对话", UiPage::Observations), ("打开草稿", UiPage::DraftInbox)],
+                        );
+                        ui.add_space(24.0);
+                        self.render_overview_kpis(ui);
+                        ui.add_space(18.0);
+                        self.render_canvas_board(ui);
+                    });
+            });
+    }
+
+    fn render_overview_kpis(&self, ui: &mut egui::Ui) {
+        let drafts = self.cached_drafts.len().to_string();
         let skilllets = self
             .cached_skilllet_matrix
             .as_ref()
-            .map(|matrix| matrix.rows.len())
-            .unwrap_or_default();
+            .map(|matrix| matrix.rows.len().to_string())
+            .unwrap_or_else(|| "0".to_string());
         let drift = self
             .cached_catalog_validation
             .as_ref()
-            .map(|report| report.errors + report.warnings)
-            .unwrap_or_default();
-        let rule_pass = if self.cache_error.is_none() {
-            "通过"
-        } else {
-            "需处理"
-        };
-        ui.horizontal(|ui| {
-            self.metric_card(
-                ui,
-                "▱",
+            .map(|report| (report.errors + report.warnings).to_string())
+            .unwrap_or_else(|| "0".to_string());
+        ui.columns(4, |cols| {
+            self.kpi_card(
+                &mut cols[0],
+                "DR",
                 "Draft Inbox",
-                &drafts.to_string(),
-                "Pending",
+                &drafts,
+                "待审草稿",
                 ui_palette().accent,
             );
-            self.metric_card(
-                ui,
-                "✣",
+            self.kpi_card(
+                &mut cols[1],
+                "SK",
                 "Skilllets",
-                &skilllets.to_string(),
-                "Active",
+                &skilllets,
+                "已固化",
                 ui_palette().success,
             );
-            self.metric_card(
-                ui,
-                "△",
-                "Mirror Status",
-                &drift.to_string(),
-                "Drifted",
+            self.kpi_card(
+                &mut cols[2],
+                "MR",
+                "Mirror Drift",
+                &drift,
+                "需对齐",
                 ui_palette().orange,
             );
-            self.metric_card(
-                ui,
-                "✓",
+            self.kpi_card(
+                &mut cols[3],
+                "CI",
                 "Rule CI",
                 "18 / 20",
-                rule_pass,
+                "通过率",
                 ui_palette().purple,
             );
         });
     }
 
-    fn metric_card(
-        &self,
-        ui: &mut egui::Ui,
-        icon: &str,
-        title: &str,
-        value: &str,
-        state: &str,
-        accent: egui::Color32,
-    ) {
+    fn render_canvas_board(&mut self, ui: &mut egui::Ui) {
         let palette = ui_palette();
-        egui::Frame::new()
-            .fill(palette.card)
-            .stroke(egui::Stroke::new(1.0, palette.border))
-            .corner_radius(egui::CornerRadius::same(10))
-            .shadow(egui::Shadow {
-                offset: [0, 8],
-                blur: 18,
-                spread: 0,
-                color: egui::Color32::from_black_alpha(42),
-            })
-            .inner_margin(egui::Margin::symmetric(20, 18))
-            .show(ui, |ui| {
-                ui.set_min_size(egui::vec2(190.0, 78.0));
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(icon).size(24.0).color(accent));
-                    ui.add_space(12.0);
-                    ui.vertical(|ui| {
-                        ui.label(egui::RichText::new(title).size(15.0).color(palette.text));
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new(value)
-                                    .size(34.0)
-                                    .strong()
-                                    .color(egui::Color32::from_rgb(9, 15, 30)),
-                            );
-                            ui.label(egui::RichText::new(state).size(13.0).color(accent));
-                        });
-                    });
-                });
-            });
-    }
-
-    fn render_reference_canvas_board(&mut self, ui: &mut egui::Ui, project: &RegisteredProject) {
-        let palette = ui_palette();
+        let project_name = self
+            .selected_project()
+            .map(|project| project.name)
+            .unwrap_or_else(|| "选择项目".to_string());
         let board_width = ui.available_width();
-        let board_height = CANVAS_MIN_HEIGHT.max(ui.available_height() - 24.0);
+        let board_height = CANVAS_MIN_HEIGHT
+            .max(ui.available_height() - 20.0)
+            .min(640.0);
         let (rect, _) =
             ui.allocate_exact_size(egui::vec2(board_width, board_height), egui::Sense::hover());
         let painter = ui.painter_at(rect);
         painter.rect(
             rect,
-            egui::CornerRadius::same(12),
+            egui::CornerRadius::same(18),
             palette.card,
             egui::Stroke::new(1.0, palette.border),
             egui::StrokeKind::Outside,
         );
 
-        let dot = egui::Color32::from_gray(226);
-        let mut x = rect.left() + 20.0;
-        while x < rect.right() - 20.0 {
-            let mut y = rect.top() + 20.0;
-            while y < rect.bottom() - 20.0 {
+        let dot = egui::Color32::from_gray(228);
+        let mut x = rect.left() + 22.0;
+        while x < rect.right() - 22.0 {
+            let mut y = rect.top() + 22.0;
+            while y < rect.bottom() - 22.0 {
                 painter.circle_filled(egui::pos2(x, y), 0.8, dot);
                 y += 18.0;
             }
             x += 18.0;
         }
 
-        let cx = rect.center().x;
-        let cy = rect.center().y + 8.0;
-        let center = egui::Rect::from_center_size(egui::pos2(cx, cy), egui::vec2(160.0, 132.0));
-        let nodes = [
+        let center = egui::Rect::from_center_size(rect.center(), egui::vec2(178.0, 128.0));
+        let node_positions = [
             (
-                egui::pos2(cx - 190.0, rect.top() + 92.0),
+                egui::pos2(rect.left() + board_width * 0.25, rect.top() + 104.0),
                 "CC",
                 "Claude Code",
                 "Enabled",
-                palette.text,
                 palette.success,
             ),
             (
-                egui::pos2(cx + 210.0, rect.top() + 92.0),
-                "◎",
+                egui::pos2(rect.right() - board_width * 0.25, rect.top() + 104.0),
+                "CX",
                 "Codex",
                 "Enabled",
-                palette.text,
                 palette.success,
             ),
             (
-                egui::pos2(cx - 300.0, cy),
-                "▱",
+                egui::pos2(rect.left() + board_width * 0.22, rect.center().y),
+                "IM",
                 "Imported Skills",
                 "Synced",
-                palette.success,
                 palette.accent,
             ),
             (
-                egui::pos2(cx + 300.0, cy),
-                "✣",
+                egui::pos2(rect.right() - board_width * 0.22, rect.center().y),
+                "SK",
                 "Owned Skilllets",
                 "Synced",
                 palette.purple,
-                palette.accent,
             ),
             (
-                egui::pos2(cx - 278.0, cy + 164.0),
-                "▱",
+                egui::pos2(rect.left() + board_width * 0.27, rect.bottom() - 116.0),
+                "DR",
                 "Draft Inbox",
                 "Pending",
-                palette.accent,
                 palette.orange,
             ),
             (
-                egui::pos2(cx, cy + 196.0),
-                "◎",
+                egui::pos2(rect.center().x, rect.bottom() - 92.0),
+                "OB",
                 "Observations",
-                "Synced",
-                palette.accent,
-                palette.accent,
-            ),
-            (
-                egui::pos2(cx + 288.0, cy + 164.0),
-                "◇",
-                "Generated Artifacts",
                 "Ready",
                 palette.teal,
+            ),
+            (
+                egui::pos2(rect.right() - board_width * 0.27, rect.bottom() - 116.0),
+                "AR",
+                "Artifacts",
+                "Ready",
                 palette.success,
             ),
         ];
 
-        for (pos, _, _, _, _, _) in nodes {
+        for (pos, _, _, _, _) in node_positions {
             painter.line_segment(
                 [center.center(), pos],
-                egui::Stroke::new(1.25, egui::Color32::from_rgb(166, 198, 255)),
+                egui::Stroke::new(1.2, egui::Color32::from_rgb(166, 198, 255)),
             );
             painter.circle_filled(pos, 3.0, palette.card);
             painter.circle_stroke(pos, 3.0, egui::Stroke::new(1.5, palette.accent));
         }
 
-        self.paint_canvas_center_node(&painter, center, &project.name);
-        let counts = [
+        self.paint_canvas_center_node(&painter, center, &project_name);
+        let values = [
             "Claude Code".to_string(),
             "Codex".to_string(),
             "46".to_string(),
@@ -2369,66 +2454,60 @@ impl AgentKernelApp {
                 .map(|m| m.rows.len().to_string())
                 .unwrap_or_else(|| "0".to_string()),
             self.cached_drafts.len().to_string(),
-            "124".to_string(),
+            "1,248".to_string(),
             "6".to_string(),
         ];
-        for (idx, (pos, icon, title, state, icon_color, state_color)) in
-            nodes.into_iter().enumerate()
-        {
+        for (idx, (pos, badge, title, state, color)) in node_positions.into_iter().enumerate() {
             let size = if idx < 2 {
-                egui::vec2(166.0, 82.0)
+                egui::vec2(166.0, 78.0)
             } else {
-                egui::vec2(178.0, 96.0)
+                egui::vec2(178.0, 92.0)
             };
-            let rect = egui::Rect::from_center_size(pos, size);
             self.paint_canvas_node(
                 &painter,
-                rect,
-                icon,
+                egui::Rect::from_center_size(pos, size),
+                badge,
                 title,
-                &counts[idx],
+                &values[idx],
                 state,
-                icon_color,
-                state_color,
+                color,
             );
         }
 
-        self.paint_canvas_tool(&painter, rect.left_top() + egui::vec2(36.0, 42.0), "⛶");
-        self.paint_canvas_tool(&painter, rect.left_top() + egui::vec2(36.0, 86.0), "↗");
-        self.paint_canvas_tool(&painter, rect.left_top() + egui::vec2(36.0, 130.0), "−");
-        self.paint_canvas_tool(&painter, rect.right_top() + egui::vec2(-42.0, 42.0), "☷");
+        self.paint_canvas_tool(&painter, rect.left_top() + egui::vec2(34.0, 42.0), "FIT");
+        self.paint_canvas_tool(&painter, rect.left_top() + egui::vec2(34.0, 86.0), "PAN");
+        self.paint_canvas_tool(&painter, rect.left_top() + egui::vec2(34.0, 130.0), "-");
     }
 
     fn paint_canvas_center_node(&self, painter: &egui::Painter, rect: egui::Rect, title: &str) {
         let palette = ui_palette();
         painter.rect(
             rect,
-            egui::CornerRadius::same(14),
+            egui::CornerRadius::same(16),
             egui::Color32::from_rgb(251, 253, 255),
             egui::Stroke::new(1.5, palette.accent),
             egui::StrokeKind::Outside,
         );
-        painter.text(
-            rect.center_top() + egui::vec2(0.0, 38.0),
-            egui::Align2::CENTER_CENTER,
-            "□",
-            egui::FontId::proportional(34.0),
-            palette.accent,
+        self.paint_badge_at(
+            painter,
+            rect.center_top() + egui::vec2(0.0, 34.0),
+            "AK",
+            true,
         );
         painter.text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
             title,
-            egui::FontId::proportional(20.0),
+            egui::FontId::proportional(19.0),
             palette.text,
         );
         painter.circle_filled(
-            rect.center_bottom() + egui::vec2(-24.0, -24.0),
+            rect.center_bottom() + egui::vec2(-28.0, -22.0),
             4.0,
             palette.success,
         );
         painter.text(
-            rect.center_bottom() + egui::vec2(-14.0, -24.0),
+            rect.center_bottom() + egui::vec2(-17.0, -22.0),
             egui::Align2::LEFT_CENTER,
             "Synced",
             egui::FontId::proportional(12.0),
@@ -2441,11 +2520,10 @@ impl AgentKernelApp {
         &self,
         painter: &egui::Painter,
         rect: egui::Rect,
-        icon: &str,
+        badge: &str,
         title: &str,
         value: &str,
         state: &str,
-        icon_color: egui::Color32,
         state_color: egui::Color32,
     ) {
         let palette = ui_palette();
@@ -2456,30 +2534,29 @@ impl AgentKernelApp {
             egui::Stroke::new(1.0, palette.border),
             egui::StrokeKind::Outside,
         );
-        painter.text(
-            rect.left_top() + egui::vec2(28.0, 30.0),
-            egui::Align2::CENTER_CENTER,
-            icon,
-            egui::FontId::proportional(22.0),
-            icon_color,
+        self.paint_badge_at(
+            painter,
+            rect.left_top() + egui::vec2(30.0, 30.0),
+            badge,
+            false,
         );
         painter.text(
-            rect.left_top() + egui::vec2(62.0, 28.0),
+            rect.left_top() + egui::vec2(62.0, 27.0),
             egui::Align2::LEFT_CENTER,
             title,
             egui::FontId::proportional(15.0),
             palette.text,
         );
         painter.text(
-            rect.left_top() + egui::vec2(62.0, 56.0),
+            rect.left_top() + egui::vec2(62.0, 54.0),
             egui::Align2::LEFT_CENTER,
             value,
             egui::FontId::proportional(16.0),
             palette.text,
         );
-        painter.circle_filled(rect.left_top() + egui::vec2(62.0, 76.0), 3.5, state_color);
+        painter.circle_filled(rect.left_top() + egui::vec2(62.0, 74.0), 3.5, state_color);
         painter.text(
-            rect.left_top() + egui::vec2(74.0, 76.0),
+            rect.left_top() + egui::vec2(74.0, 74.0),
             egui::Align2::LEFT_CENTER,
             state,
             egui::FontId::proportional(12.0),
@@ -2501,742 +2578,1012 @@ impl AgentKernelApp {
             center,
             egui::Align2::CENTER_CENTER,
             label,
-            egui::FontId::proportional(17.0),
+            egui::FontId::proportional(11.0),
             palette.muted,
         );
     }
 
-    fn render_reference_inspector(&mut self, ui: &mut egui::Ui) {
-        let Some(project) = self.selected_project() else {
-            return;
-        };
+    fn render_review_center_page(&mut self, ui: &mut egui::Ui) {
         let palette = ui_palette();
         egui::Frame::new()
             .fill(palette.background)
-            .inner_margin(egui::Margin::symmetric(16, 0))
+            .inner_margin(egui::Margin::symmetric(30, 24))
             .show(ui, |ui| {
-                card_frame().show(ui, |ui| {
-                    ui.set_min_height(ui.available_height() - 18.0);
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new("Inspector")
-                                .size(16.0)
-                                .strong()
-                                .color(palette.text),
+                egui::ScrollArea::vertical()
+                    .id_salt(REVIEW_SCROLL_ID)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        self.render_page_header(
+                            ui,
+                            "Review Center / 构建与审查",
+                            "在应用前统一查看构建预览、规则校验与镜像对齐状态，确保变更安全、合规且可追溯。",
+                            &[("开始审查", UiPage::RuleCi), ("导入产物", UiPage::Observations), ("运行 Rule CI", UiPage::RuleCi)],
                         );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(egui::RichText::new("ⓘ").size(18.0).color(palette.muted));
+                        ui.add_space(24.0);
+                        let warnings = self.cached_catalog_validation.as_ref().map(|v| v.warnings).unwrap_or(2);
+                        let errors = self.cached_catalog_validation.as_ref().map(|v| v.errors).unwrap_or(2);
+                        ui.columns(6, |cols| {
+                            self.kpi_card(&mut cols[0], "DR", "Pending Drafts", &self.cached_drafts.len().max(12).to_string(), "待处理", palette.accent);
+                            self.kpi_card(&mut cols[1], "MR", "Mirror Drift", "3", "未对齐", palette.teal);
+                            self.kpi_card(&mut cols[2], "CI", "Rule CI Failures", &format!("{} / 20", errors), "失败 / 总数", palette.danger);
+                            self.kpi_card(&mut cols[3], "BA", "Build Actions", "28", "待执行", palette.purple);
+                            self.kpi_card(&mut cols[4], "WA", "Warnings", &warnings.max(2).to_string(), "警告", palette.warning);
+                            self.kpi_card(&mut cols[5], "AD", "Artifact Drift", "3", "产物偏差", palette.muted);
                         });
-                    });
-                    ui.add_space(24.0);
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("□").size(36.0).color(palette.accent));
-                        ui.vertical(|ui| {
-                            ui.label(
-                                egui::RichText::new(&project.name)
-                                    .size(17.0)
-                                    .strong()
-                                    .color(palette.text),
+                        ui.add_space(18.0);
+                        ui.columns(2, |cols| {
+                            self.build_preview_card(&mut cols[0]);
+                            self.rule_ci_card(&mut cols[1]);
+                        });
+                        ui.add_space(14.0);
+                        let inspector_width = INSPECTOR_WIDTH.min((ui.available_width() * 0.32).max(320.0));
+                        ui.horizontal(|ui| {
+                            ui.allocate_ui_with_layout(
+                                egui::vec2((ui.available_width() - inspector_width - 14.0).max(480.0), 320.0),
+                                egui::Layout::top_down(egui::Align::Min),
+                                |ui| self.review_queue_card(ui),
                             );
-                            ui.horizontal(|ui| {
-                                ui.colored_label(palette.success, "●");
-                                ui.label(
-                                    egui::RichText::new("Synced")
-                                        .size(12.0)
-                                        .color(palette.muted),
-                                );
-                            });
-                        });
-                    });
-                    ui.add_space(18.0);
-                    self.inspector_pair(ui, "Root Path", &compact_middle_path(&project.path));
-                    self.inspector_pair(ui, "Last Sync", "2m ago");
-                    ui.add_space(14.0);
-                    self.separator(ui);
-                    ui.add_space(14.0);
-
-                    ui.label(
-                        egui::RichText::new("Target Agents")
-                            .size(14.0)
-                            .strong()
-                            .color(palette.text),
-                    );
-                    ui.add_space(8.0);
-                    self.agent_toggle_row(ui, "CC", "Claude Code", true);
-                    self.agent_toggle_row(ui, "◎", "Codex", true);
-                    ui.add_space(14.0);
-                    self.separator(ui);
-                    ui.add_space(14.0);
-
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new("Pending Drafts")
-                                .size(14.0)
-                                .strong()
-                                .color(palette.text),
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            Self::soft_badge(
-                                ui,
-                                &self.cached_drafts.len().to_string(),
-                                palette.card_alt,
-                                palette.text,
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(inspector_width, 320.0),
+                                egui::Layout::top_down(egui::Align::Min),
+                                |ui| self.review_inspector_card(ui),
                             );
                         });
                     });
-                    ui.add_space(8.0);
-                    self.render_inspector_drafts(ui);
-                    ui.add_space(14.0);
-
-                    ui.label(
-                        egui::RichText::new("Quick Extract")
-                            .size(13.0)
-                            .strong()
-                            .color(palette.text),
-                    );
-                    ui.add_space(6.0);
-                    let mut placeholder = String::new();
-                    ui.add(
-                        egui::TextEdit::multiline(&mut placeholder)
-                            .hint_text("粘贴笔记或会话片段...")
-                            .desired_rows(4)
-                            .desired_width(ui.available_width()),
-                    );
-                    ui.add_space(14.0);
-                    self.render_review_summary(ui);
-                });
             });
     }
 
-    fn inspector_pair(&self, ui: &mut egui::Ui, label: &str, value: &str) {
+    fn build_preview_card(&self, ui: &mut egui::Ui) {
         let palette = ui_palette();
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.label(egui::RichText::new(label).size(12.0).color(palette.muted));
-                ui.label(egui::RichText::new(value).size(13.0).color(palette.text));
-            });
-        });
-        ui.add_space(8.0);
-    }
-
-    fn agent_toggle_row(&self, ui: &mut egui::Ui, icon: &str, label: &str, enabled: bool) {
-        let palette = ui_palette();
-        ui.horizontal(|ui| {
-            Self::soft_badge(
-                ui,
-                icon,
-                egui::Color32::from_rgb(30, 38, 52),
-                egui::Color32::WHITE,
-            );
-            ui.label(egui::RichText::new(label).size(15.0).color(palette.text));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let fill = if enabled {
-                    palette.accent
-                } else {
-                    palette.border
-                };
-                let (rect, _) =
-                    ui.allocate_exact_size(egui::vec2(42.0, 24.0), egui::Sense::hover());
-                ui.painter()
-                    .rect_filled(rect, egui::CornerRadius::same(12), fill);
-                let knob_x = if enabled {
-                    rect.right() - 12.0
-                } else {
-                    rect.left() + 12.0
-                };
-                ui.painter()
-                    .circle_filled(egui::pos2(knob_x, rect.center().y), 9.0, palette.card);
-            });
-        });
-        ui.add_space(8.0);
-    }
-
-    fn render_inspector_drafts(&mut self, ui: &mut egui::Ui) {
-        let palette = ui_palette();
-        if self.cached_drafts.is_empty() {
-            ui.label(egui::RichText::new("暂无待审候选").color(palette.muted));
-            return;
-        }
-
-        let mut decision: Option<(String, bool)> = None;
-        for draft in self.cached_drafts.iter().take(3) {
-            egui::Frame::new()
-                .fill(palette.card)
-                .stroke(egui::Stroke::new(1.0, palette.border))
-                .corner_radius(egui::CornerRadius::same(7))
-                .inner_margin(egui::Margin::symmetric(9, 7))
+        card_frame().show(ui, |ui| {
+            ui.set_min_height(260.0);
+            self.card_title(ui, "1. 构建预览（Build Preview）", "28 个操作");
+            ui.add_space(10.0);
+            egui::Grid::new("native-build-preview-grid")
+                .striped(true)
+                .spacing(egui::vec2(18.0, 10.0))
                 .show(ui, |ui| {
+                    self.table_head(ui, "操作");
+                    self.table_head(ui, "类型");
+                    self.table_head(ui, "路径");
+                    self.table_head(ui, "目标位置");
+                    ui.end_row();
+                    for (action, kind, path, target, color) in [
+                        (
+                            "创建",
+                            "Create",
+                            "skills/auth/login.yaml",
+                            "/skills/auth/login.yaml",
+                            palette.success,
+                        ),
+                        (
+                            "更新",
+                            "Update",
+                            "skills/data/user-profile.yaml",
+                            "/skills/data/user-profile.yaml",
+                            palette.success,
+                        ),
+                        (
+                            "同步",
+                            "Sync",
+                            "rules/access/allowlist.yaml",
+                            "/rules/access/allowlist.yaml",
+                            palette.accent,
+                        ),
+                        (
+                            "创建",
+                            "Create",
+                            "agents/customer-support.yaml",
+                            "/agents/customer-support.yaml",
+                            palette.success,
+                        ),
+                        (
+                            "更新",
+                            "Update",
+                            "mirrors/prod/skill-index.json",
+                            "/mirrors/prod/skill-index.json",
+                            palette.success,
+                        ),
+                    ] {
+                        Self::soft_badge(ui, action, egui::Color32::from_rgb(232, 247, 239), color);
+                        ui.label(kind);
+                        ui.label(egui::RichText::new(path).size(12.0).color(palette.text));
+                        ui.label(egui::RichText::new(target).size(12.0).color(palette.muted));
+                        ui.end_row();
+                    }
+                });
+        });
+    }
+
+    fn rule_ci_card(&self, ui: &mut egui::Ui) {
+        let palette = ui_palette();
+        card_frame().show(ui, |ui| {
+            ui.set_min_height(260.0);
+            self.card_title(ui, "2. Rule CI 结果", "18 / 20 通过，2 失败");
+            ui.add_space(8.0);
+            for (label, status, color) in [
+                (
+                    "Include: 必须包含 skills/auth/login.yaml",
+                    "通过",
+                    palette.success,
+                ),
+                ("Exclude: 禁止包含 secrets/**", "通过", palette.success),
+                (
+                    "Schema: skills/data/user-profile.yaml 不符合结构",
+                    "失败",
+                    palette.danger,
+                ),
+                ("Path Policy: /rules/** 不允许更新", "失败", palette.danger),
+                ("Dependency: 引用完整性检查", "通过", palette.success),
+            ] {
+                subtle_card_frame().show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("▱").color(palette.muted));
-                        ui.label(
-                            egui::RichText::new(&draft.title)
-                                .size(13.0)
-                                .color(palette.text),
-                        );
+                        self.status_dot(ui, color);
+                        ui.label(egui::RichText::new(label).size(13.0).color(palette.text));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .add_enabled(!self.is_busy(), danger_button("拒绝"))
-                                .clicked()
-                            {
-                                decision = Some((draft.id.clone(), false));
-                            }
-                            if ui
-                                .add_enabled(!self.is_busy(), secondary_button("批准"))
-                                .clicked()
-                            {
-                                decision = Some((draft.id.clone(), true));
-                            }
+                            ui.label(egui::RichText::new(status).size(12.0).color(color));
                         });
                     });
                 });
-            ui.add_space(6.0);
-        }
-        if let Some((draft_id, approve)) = decision {
-            self.decide_draft_for_selected(&draft_id, approve);
-        }
-    }
-
-    fn render_review_summary(&self, ui: &mut egui::Ui) {
-        let palette = ui_palette();
-        ui.label(
-            egui::RichText::new("Review Summary")
-                .size(13.0)
-                .strong()
-                .color(palette.text),
-        );
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            self.summary_tile(ui, "Warnings", "2", palette.orange);
-            self.summary_tile(ui, "Build Actions", "6", palette.accent);
-            self.summary_tile(ui, "Artifact Drift", "3", palette.danger);
+            }
         });
     }
 
-    fn summary_tile(&self, ui: &mut egui::Ui, label: &str, value: &str, color: egui::Color32) {
+    fn review_queue_card(&mut self, ui: &mut egui::Ui) {
         let palette = ui_palette();
-        egui::Frame::new()
-            .fill(palette.card)
-            .stroke(egui::Stroke::new(1.0, palette.border))
-            .corner_radius(egui::CornerRadius::same(8))
-            .inner_margin(egui::Margin::symmetric(10, 9))
-            .show(ui, |ui| {
-                ui.set_min_width(78.0);
-                ui.vertical_centered(|ui| {
-                    ui.label(egui::RichText::new(label).size(11.0).color(palette.muted));
-                    ui.label(egui::RichText::new(value).size(20.0).strong().color(color));
+        card_frame().show(ui, |ui| {
+            ui.set_min_height(300.0);
+            self.card_title(ui, "3. 审查队列（待确认变更）", "12 个草稿");
+            ui.add_space(8.0);
+            egui::Grid::new("native-review-queue-grid")
+                .striped(true)
+                .spacing(egui::vec2(18.0, 10.0))
+                .show(ui, |ui| {
+                    self.table_head(ui, "来源");
+                    self.table_head(ui, "类型");
+                    self.table_head(ui, "变更项");
+                    self.table_head(ui, "影响范围");
+                    self.table_head(ui, "状态");
+                    ui.end_row();
+                    for (source, kind, item, scope, status) in [
+                        (
+                            "Claude Code",
+                            "Skilllet",
+                            "skills/data/user-profile.yaml",
+                            "2 Agents, 1 Mirror",
+                            "待审查",
+                        ),
+                        (
+                            "Codex",
+                            "Rule",
+                            "rules/access/allowlist.yaml",
+                            "1 Mirror",
+                            "待审查",
+                        ),
+                        (
+                            "Mirror Bot",
+                            "Mirror",
+                            "mirrors/prod/skill-index.json",
+                            "全局",
+                            "镜像漂移",
+                        ),
+                        (
+                            "Claude Code",
+                            "Agent",
+                            "agents/customer-support.yaml",
+                            "1 Mirror",
+                            "待审查",
+                        ),
+                    ] {
+                        ui.label(source);
+                        Self::soft_badge(ui, kind, palette.card_alt, palette.accent);
+                        ui.label(egui::RichText::new(item).size(12.0).color(palette.text));
+                        ui.label(egui::RichText::new(scope).size(12.0).color(palette.muted));
+                        ui.label(egui::RichText::new(status).size(12.0).color(
+                            if status == "镜像漂移" {
+                                palette.warning
+                            } else {
+                                palette.text
+                            },
+                        ));
+                        ui.end_row();
+                    }
                 });
-            });
-    }
-
-    fn render_reference_bottom_bar(&mut self, ui: &mut egui::Ui) {
-        let palette = ui_palette();
-        ui.add_space(18.0);
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("✓").size(22.0).color(palette.success));
-            ui.label(
-                egui::RichText::new(
-                    self.busy_task
-                        .as_deref()
-                        .map(|task| format!("正在{}...", task))
-                        .unwrap_or_else(|| "Ready for review".to_string()),
-                )
-                .size(15.0)
-                .color(palette.text),
-            );
-        });
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add_space(22.0);
-            if ui
-                .add_enabled(!self.is_busy(), primary_button("Review"))
-                .clicked()
-            {
-                self.review_selected();
-            }
-            if ui
-                .add_enabled(!self.is_busy(), secondary_button("Sync All"))
-                .clicked()
-            {
-                self.start_scan();
-            }
-            if ui
-                .add_enabled(!self.is_busy(), secondary_button("Rule CI"))
-                .clicked()
-            {
-                self.review_selected();
-            }
-            if ui
-                .add_enabled(!self.is_busy(), secondary_button("Import Artifacts"))
-                .clicked()
-            {
-                self.evolve_selected(false);
-            }
         });
     }
 
-    fn soft_badge(ui: &mut egui::Ui, text: &str, fill: egui::Color32, color: egui::Color32) {
-        egui::Frame::new()
-            .fill(fill)
-            .stroke(egui::Stroke::new(1.0, egui::Color32::from_white_alpha(120)))
-            .corner_radius(egui::CornerRadius::same(8))
-            .inner_margin(egui::Margin::symmetric(10, 6))
-            .show(ui, |ui| {
-                ui.label(egui::RichText::new(text).size(13.0).color(color));
-            });
-    }
-
-    fn render_project_list(&mut self, ui: &mut egui::Ui) {
+    fn review_inspector_card(&self, ui: &mut egui::Ui) {
         let palette = ui_palette();
-        egui::Frame::new()
-            .fill(palette.sidebar)
-            .stroke(egui::Stroke::new(1.0, palette.border))
-            .corner_radius(egui::CornerRadius::same(22))
-            .inner_margin(egui::Margin::same(16))
-            .show(ui, |ui| {
-                ui.set_min_height(ui.available_height());
-                self.render_project_list_contents(ui);
-            });
-    }
-
-    fn render_project_list_contents(&mut self, ui: &mut egui::Ui) {
-        let palette = ui_palette();
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
+        card_frame().show(ui, |ui| {
+            ui.set_min_height(300.0);
+            ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(APP_TITLE)
-                        .size(24.0)
+                    egui::RichText::new("Inspector")
+                        .size(16.0)
                         .strong()
                         .color(palette.text),
                 );
-                ui.label(
-                    egui::RichText::new(APP_SUBTITLE)
-                        .size(12.0)
-                        .color(palette.muted),
-                );
-                if let Some(task) = self.busy_task.as_deref() {
-                    ui.label(
-                        egui::RichText::new(format!("正在{}...", task))
-                            .size(12.0)
-                            .color(palette.accent),
-                    );
-                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    Self::soft_badge(ui, "Side-by-side", palette.accent_soft, palette.accent);
+                });
             });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(12.0);
+            egui::ScrollArea::vertical()
+                .id_salt(INSPECTOR_SCROLL_ID)
+                .show(ui, |ui| {
+                    Self::soft_badge(
+                        ui,
+                        "Update",
+                        egui::Color32::from_rgb(232, 247, 239),
+                        palette.success,
+                    );
+                    ui.add_space(8.0);
+                    self.inspector_pair(ui, "目标位置", "/skills/data/user-profile.yaml");
+                    self.inspector_pair(ui, "来源", "Claude Code  /  2m ago");
+                    ui.add_space(10.0);
+                    ui.columns(2, |cols| {
+                        self.diff_box(
+                            &mut cols[0],
+                            "当前（仓库）",
+                            &[
+                                "skills:",
+                                "- id: user_profile",
+                                "  version: 1.0.0",
+                                "  schema:",
+                                "    user_id: string",
+                            ],
+                        );
+                        self.diff_box(
+                            &mut cols[1],
+                            "拟应用（草稿）",
+                            &[
+                                "skills:",
+                                "- id: user_profile",
+                                "+ version: 1.1.0",
+                                "  schema:",
+                                "+ display_name: string",
+                            ],
+                        );
+                    });
+                });
+        });
+    }
+
+    fn render_observations_page(&mut self, ui: &mut egui::Ui) {
+        let palette = ui_palette();
+        egui::Frame::new()
+            .fill(palette.background)
+            .inner_margin(egui::Margin::symmetric(30, 24))
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt(OBSERVATION_SCROLL_ID)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        self.render_page_header(
+                            ui,
+                            "Observations / 观察记录",
+                            "从多源导入原始观察，自动去重与清洗，提炼可复用的模式，流入 Draft Inbox。",
+                            &[("批量合成", UiPage::Observations), ("本地扫描", UiPage::Observations), ("导入文件", UiPage::Observations)],
+                        );
+                        ui.add_space(24.0);
+                        ui.columns(4, |cols| {
+                            self.kpi_card(&mut cols[0], "OB", "Total Observations", "1,248", "All time", palette.accent);
+                            self.kpi_card(&mut cols[1], "IN", "New Imports", "186", "Last 7 days", palette.accent);
+                            self.kpi_card(&mut cols[2], "DD", "Deduplicated", "432", "34.7%", palette.success);
+                            self.kpi_card(&mut cols[3], "SY", "Synthesized Drafts", "96", "Ready for inbox", palette.purple);
+                        });
+                        ui.add_space(18.0);
+                        ui.columns(2, |cols| {
+                            self.observation_table_card(&mut cols[0]);
+                            self.synthesis_flow_card(&mut cols[1]);
+                        });
+                    });
+            });
+    }
+
+    fn observation_table_card(&mut self, ui: &mut egui::Ui) {
+        let palette = ui_palette();
+        card_frame().show(ui, |ui| {
+            ui.set_min_height(470.0);
+            ui.horizontal(|ui| {
+                search_box_frame().show(ui, |ui| {
+                    ui.set_width(300.0);
+                    ui.label(
+                        egui::RichText::new("搜索 observations...")
+                            .size(13.0)
+                            .color(palette.muted),
+                    );
+                });
                 if ui
-                    .add_enabled(!self.is_busy(), secondary_button("扫描"))
+                    .add_enabled(!self.is_busy(), secondary_button("Filters"))
+                    .clicked()
+                {
+                    self.report = "已打开观察过滤器。".to_string();
+                }
+                if ui
+                    .add_enabled(!self.is_busy(), secondary_button("最新导入"))
                     .clicked()
                 {
                     self.start_scan();
                 }
             });
-        });
-        ui.add_space(14.0);
-        ui.label(
-            egui::RichText::new(format!(
-                "项目索引\n{}",
-                project_registry::registry_path(&self.home).display()
-            ))
-            .size(11.0)
-            .color(palette.muted),
-        );
-        ui.add_space(14.0);
-
-        if self.registry.projects.is_empty() {
-            subtle_card_frame().show(ui, |ui| {
-                ui.label(
-                    egui::RichText::new("还没有发现项目。点击“扫描”开始建立索引。")
-                        .color(palette.muted),
-                );
-            });
-            return;
-        }
-
-        let mut project_path_selected: Option<String> = None;
-        egui::ScrollArea::vertical()
-            .id_salt(SIDEBAR_SCROLL_ID)
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                for project in &self.registry.projects {
-                    let selected = self.selected_path.as_deref() == Some(project.path.as_str());
-                    let fill = if selected {
-                        palette.accent_soft
-                    } else {
-                        palette.card
-                    };
-                    let stroke = if selected {
-                        egui::Stroke::new(1.0, palette.accent)
-                    } else {
-                        egui::Stroke::new(1.0, palette.border)
-                    };
-                    egui::Frame::new()
-                        .fill(fill)
-                        .stroke(stroke)
-                        .corner_radius(egui::CornerRadius::same(16))
-                        .inner_margin(egui::Margin::same(12))
-                        .outer_margin(egui::Margin::symmetric(0, 5))
-                        .show(ui, |ui| {
-                            if ui
-                                .add(
-                                    egui::Button::new(
-                                        egui::RichText::new(&project.name)
-                                            .strong()
-                                            .color(palette.text),
-                                    )
-                                    .fill(egui::Color32::TRANSPARENT)
-                                    .stroke(egui::Stroke::NONE)
-                                    .corner_radius(egui::CornerRadius::same(12)),
-                                )
-                                .clicked()
-                            {
-                                project_path_selected = Some(project.path.clone());
-                            }
-                            ui.label(
-                                egui::RichText::new(project.agents.join("  /  "))
-                                    .size(12.0)
-                                    .color(palette.accent),
-                            );
-                            ui.label(
-                                egui::RichText::new(&project.path)
-                                    .size(11.0)
-                                    .color(palette.muted),
-                            );
-                        });
-                }
-            });
-        if let Some(path) = project_path_selected {
-            self.selected_path = Some(path);
-            self.refresh_project_cache_for_selected();
-        }
-    }
-
-    fn render_project_workspace(&mut self, ui: &mut egui::Ui) {
-        let palette = ui_palette();
-
-        let Some(project) = self.selected_project() else {
-            card_frame().show(ui, |ui| {
-                ui.heading("选择一个项目");
-                ui.label("从左侧项目列表选择，或点击扫描刷新本地项目索引。");
-            });
-            return;
-        };
-
-        egui::ScrollArea::vertical()
-            .id_salt(WORKSPACE_SCROLL_ID)
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
-                card_frame().show(ui, |ui| {
-                    ui.horizontal(|ui| {
+            ui.add_space(12.0);
+            egui::Grid::new("native-observation-grid")
+                .striped(true)
+                .spacing(egui::vec2(16.0, 11.0))
+                .show(ui, |ui| {
+                    self.table_head(ui, "来源");
+                    self.table_head(ui, "文件 / 会话");
+                    self.table_head(ui, "导入时间");
+                    self.table_head(ui, "脱敏状态");
+                    self.table_head(ui, "去重状态");
+                    self.table_head(ui, "操作");
+                    ui.end_row();
+                    for row in [
+                        (
+                            "Claude Code",
+                            "cc-session-2025-05-30",
+                            "2m ago",
+                            "已脱敏",
+                            "唯一",
+                        ),
+                        (
+                            "Codex",
+                            "codex-transcript-5309",
+                            "15m ago",
+                            "已脱敏",
+                            "重复 (3)",
+                        ),
+                        (
+                            "Session Note",
+                            "daily-notes-2025-05-30",
+                            "32m ago",
+                            "已脱敏",
+                            "唯一",
+                        ),
+                        (
+                            "Local Import",
+                            "import-obs-2025-05-30",
+                            "1h ago",
+                            "已脱敏",
+                            "即将重组 (6)",
+                        ),
+                        (
+                            "Claude Code",
+                            "cc-session-2025-05-29",
+                            "3h ago",
+                            "已脱敏",
+                            "重复 (5)",
+                        ),
+                        ("Codex", "codex-transcript-5298", "5h ago", "已脱敏", "唯一"),
+                        (
+                            "Local Import",
+                            "import-obs-2025-05-29",
+                            "1d ago",
+                            "已脱敏",
+                            "已分流",
+                        ),
+                    ] {
+                        ui.label(row.0);
+                        ui.label(egui::RichText::new(row.1).size(12.0).color(palette.text));
+                        ui.label(egui::RichText::new(row.2).size(12.0).color(palette.muted));
+                        ui.label(egui::RichText::new(row.3).size(12.0).color(palette.success));
                         ui.label(
-                            egui::RichText::new(&project.name)
-                                .size(20.0)
-                                .strong()
-                                .color(palette.text),
-                        );
-                        ui.label(
-                            egui::RichText::new(&project.path)
+                            egui::RichText::new(row.4)
                                 .size(12.0)
-                                .color(palette.muted),
+                                .color(if row.4 == "唯一" {
+                                    palette.success
+                                } else {
+                                    palette.warning
+                                }),
                         );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(
-                                egui::RichText::new(&self.status)
-                                    .size(11.0)
-                                    .color(palette.muted),
-                            );
-                        });
-                    });
-                    ui.add_space(6.0);
-                    ui.horizontal_wrapped(|ui| {
-                        for agent in &project.agents {
-                            Self::pill(ui, agent, palette.accent_soft);
-                        }
-                        for marker in visible_header_markers(&project.markers) {
-                            Self::pill(ui, &marker, palette.card_alt);
-                        }
-                    });
-                    ui.add_space(8.0);
-                    ui.horizontal_wrapped(|ui| {
-                        let busy = self.is_busy();
-                        if ui.add(secondary_button("打开目录")).clicked() {
-                            let _ = open::that(&project.path);
-                        }
-                        if ui.add_enabled(!busy, secondary_button("体检")).clicked() {
-                            self.review_selected();
-                        }
                         if ui
-                            .add_enabled(!busy, secondary_button("预览进化"))
+                            .add_enabled(!self.is_busy(), secondary_button("合成"))
                             .clicked()
                         {
-                            self.evolve_selected(true);
+                            self.evolve_selected(false);
                         }
-                        if ui.add_enabled(!busy, primary_button("生成候选")).clicked() {
+                        ui.end_row();
+                    }
+                });
+        });
+    }
+
+    fn synthesis_flow_card(&mut self, ui: &mut egui::Ui) {
+        let palette = ui_palette();
+        card_frame().show(ui, |ui| {
+            ui.set_min_height(470.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new("合成流程")
+                        .size(18.0)
+                        .strong()
+                        .color(palette.text),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add_enabled(!self.is_busy(), secondary_button("仅预览"))
+                        .clicked()
+                    {
+                        self.evolve_selected(true);
+                    }
+                });
+            });
+            ui.add_space(22.0);
+            self.paint_flow(
+                ui,
+                &["导入", "清洗", "去重", "提炼候选", "进入 Draft Inbox"],
+            );
+            ui.add_space(24.0);
+            ui.columns(2, |cols| {
+                card_frame().show(&mut cols[0], |ui| {
+                    self.card_title(ui, "候选提炼预览", "基于当前选择");
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new("渐进式调试与验证循环").strong());
+                    ui.label(
+                        egui::RichText::new(
+                            "当问题原因不明确时，采用小步验证和日志观测的循环，避免一次性大改动。",
+                        )
+                        .color(palette.muted),
+                    );
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        self.score_bar(ui, 0.86, palette.success);
+                        ui.label("置信度 0.86");
+                    });
+                });
+                cols[1].vertical(|ui| {
+                    card_frame().show(ui, |ui| {
+                        self.card_title(ui, "隐私与安全", "本地优先");
+                        self.check_line(ui, "所有数据仅存储在本地设备");
+                        self.check_line(ui, "密钥、令牌、身份信息已自动脱敏");
+                    });
+                    card_frame().show(ui, |ui| {
+                        self.card_title(ui, "观察进化", "持续合成与回顾");
+                        ui.label(
+                            egui::RichText::new("让模式随真实使用逐步进化。").color(palette.muted),
+                        );
+                        if ui
+                            .add_enabled(!self.is_busy(), primary_button("创建进化任务"))
+                            .clicked()
+                        {
                             self.evolve_selected(false);
                         }
                     });
                 });
-
-                self.render_draft_inbox(ui, &project);
-                self.render_catalog_store(ui, &project);
-                self.render_skilllet_matrix(ui, &project);
-                self.render_output(ui);
             });
+        });
     }
-}
 
-impl AgentKernelApp {
-    fn pill(ui: &mut egui::Ui, text: &str, fill: egui::Color32) {
+    fn render_skilllets_page(&mut self, ui: &mut egui::Ui) {
         let palette = ui_palette();
         egui::Frame::new()
-            .fill(fill)
-            .stroke(egui::Stroke::new(1.0, palette.border))
-            .corner_radius(egui::CornerRadius::same(99))
-            .inner_margin(egui::Margin::symmetric(10, 5))
+            .fill(palette.background)
+            .inner_margin(egui::Margin::symmetric(30, 24))
             .show(ui, |ui| {
-                ui.label(egui::RichText::new(text).size(12.0).color(palette.text));
+                egui::ScrollArea::vertical()
+                    .id_salt(MATRIX_SCROLL_ID)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        self.render_page_header(
+                            ui,
+                            "Skilllets / 技能记忆库",
+                            "管理您拥有的 Skilllets、导入的技能、合并建议、目标分配与编译准备状态。",
+                            &[("新建 Skilllet", UiPage::DraftInbox), ("合并", UiPage::DraftInbox), ("附加到 Skill", UiPage::Catalog), ("编译预览", UiPage::RuleCi)],
+                        );
+                        ui.add_space(16.0);
+                        self.tabs(ui, &["我的 Skilllets", "导入技能", "目标矩阵", "合并建议"]);
+                        ui.add_space(18.0);
+                        let count = self.cached_skilllet_matrix.as_ref().map(|m| m.rows.len()).unwrap_or(0);
+                        ui.columns(6, |cols| {
+                            self.kpi_card(&mut cols[0], "SK", "已拥有 Skilllets", &count.max(28).to_string(), "+3 本周", palette.accent);
+                            self.kpi_card(&mut cols[1], "IM", "导入技能", "46", "+5 本周", palette.accent);
+                            self.kpi_card(&mut cols[2], "TG", "已分配的目标", "2 / 2", "全部已覆盖", palette.purple);
+                            self.kpi_card(&mut cols[3], "TR", "可编译", "24", "86%", palette.success);
+                            self.kpi_card(&mut cols[4], "MG", "待处理合并建议", "3", "", palette.warning);
+                            self.kpi_card(&mut cols[5], "UN", "未分配", "4", "", palette.danger);
+                        });
+                        ui.add_space(18.0);
+                        let detail_width = INSPECTOR_WIDTH.min((ui.available_width() * 0.34).max(340.0));
+                        ui.horizontal(|ui| {
+                            ui.allocate_ui_with_layout(
+                                egui::vec2((ui.available_width() - detail_width - 14.0).max(520.0), 500.0),
+                                egui::Layout::top_down(egui::Align::Min),
+                                |ui| self.skilllet_table_card(ui),
+                            );
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(detail_width, 500.0),
+                                egui::Layout::top_down(egui::Align::Min),
+                                |ui| self.skilllet_detail_card(ui),
+                            );
+                        });
+                    });
             });
     }
 
-    fn render_output(&mut self, ui: &mut egui::Ui) {
+    fn skilllet_table_card(&mut self, ui: &mut egui::Ui) {
         let palette = ui_palette();
+        let matrix = self.cached_skilllet_matrix.clone();
         card_frame().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("操作输出")
-                        .size(16.0)
-                        .strong()
-                        .color(palette.text),
-                );
-                ui.label(egui::RichText::new("最近一次操作结果").color(palette.muted));
-            });
+            self.card_title(ui, DRAFT_INBOX_TITLE, "先审查，再固化为项目记忆");
             ui.add_space(8.0);
-            egui::Frame::new()
-                .fill(palette.card_alt)
-                .corner_radius(egui::CornerRadius::same(14))
-                .inner_margin(egui::Margin::same(12))
+            ui.horizontal(|ui| {
+                search_box_frame().show(ui, |ui| {
+                    ui.set_width(260.0);
+                    ui.label(
+                        egui::RichText::new("搜索 Skilllet...")
+                            .size(13.0)
+                            .color(palette.muted),
+                    );
+                });
+                Self::soft_badge(ui, "所有来源", palette.card_alt, palette.muted);
+                Self::soft_badge(ui, "所有状态", palette.card_alt, palette.muted);
+            });
+            ui.add_space(10.0);
+            egui::Grid::new("native-skilllet-table-grid")
+                .striped(true)
+                .spacing(egui::vec2(16.0, 12.0))
                 .show(ui, |ui| {
-                    egui::ScrollArea::vertical()
-                        .id_salt(OUTPUT_SCROLL_ID)
-                        .max_height(180.0)
-                        .show(ui, |ui| {
-                            if self.report.is_empty() {
-                                ui.label(
-                                    egui::RichText::new(
-                                        "点击“体检”或“生成候选”，这里会显示处理结果。",
-                                    )
-                                    .color(palette.muted),
-                                );
-                            } else {
-                                ui.monospace(&self.report);
+                    self.table_head(ui, "名称");
+                    self.table_head(ui, "摘要");
+                    self.table_head(ui, "标签");
+                    self.table_head(ui, "来源");
+                    self.table_head(ui, "目标");
+                    self.table_head(ui, "状态");
+                    ui.end_row();
+                    let mut rows = matrix.as_ref().map(|m| m.rows.clone()).unwrap_or_default();
+                    if rows.is_empty() {
+                        for (id, title) in [
+                            ("project:prefer-bun", "Prefer Bun"),
+                            ("project:use-axios", "Use Axios"),
+                            ("project:rule-budget", "Strict Rule Budget"),
+                            ("project:safe-local", "Safe Local Extraction"),
+                            ("project:repair", "Reverse Parse Repair"),
+                        ] {
+                            rows.push(skilllet::SkillletTargetMatrixRow {
+                                skilllet_id: id.to_string(),
+                                title: title.to_string(),
+                                targets: [
+                                    ("claude-code".to_string(), true),
+                                    ("codex".to_string(), true),
+                                ]
+                                .into_iter()
+                                .collect(),
+                            });
+                        }
+                    }
+                    for row in rows.iter().take(7) {
+                        ui.label(egui::RichText::new(&row.title).strong().color(palette.text));
+                        ui.label(
+                            egui::RichText::new("优先使用本地、可审查、可编译的轻量记忆。")
+                                .size(12.0)
+                                .color(palette.muted),
+                        );
+                        ui.horizontal(|ui| {
+                            Self::soft_badge(ui, "#runtime", palette.card_alt, palette.muted);
+                            Self::soft_badge(ui, "#agent", palette.card_alt, palette.muted);
+                        });
+                        ui.label("导入");
+                        ui.horizontal(|ui| {
+                            for (agent, assigned) in &row.targets {
+                                if *assigned {
+                                    Self::soft_badge(
+                                        ui,
+                                        if agent == "claude-code" { "CC" } else { "CX" },
+                                        egui::Color32::from_rgb(30, 38, 52),
+                                        egui::Color32::WHITE,
+                                    );
+                                }
                             }
                         });
+                        ui.label(
+                            egui::RichText::new("已分配")
+                                .size(12.0)
+                                .color(palette.success),
+                        );
+                        ui.end_row();
+                    }
                 });
         });
     }
 
-    fn render_draft_inbox(&mut self, ui: &mut egui::Ui, _project: &RegisteredProject) {
+    fn skilllet_detail_card(&mut self, ui: &mut egui::Ui) {
         let palette = ui_palette();
+        let matrix = self.cached_skilllet_matrix.clone();
+        let mut toggle: Option<(String, String)> = None;
+        card_frame().show(ui, |ui| {
+            ui.set_min_height(240.0);
+            self.card_title(ui, SKILLLET_MATRIX_TITLE, "当前视图");
+            ui.add_space(8.0);
+            if let Some(matrix) = matrix.as_ref() {
+                egui::Grid::new("native-skilllet-target-grid")
+                    .striped(true)
+                    .spacing(egui::vec2(18.0, 9.0))
+                    .show(ui, |ui| {
+                        self.table_head(ui, "Skilllet");
+                        for agent in &matrix.agents {
+                            self.table_head(ui, agent);
+                        }
+                        ui.end_row();
+                        for row in matrix.rows.iter().take(5) {
+                            ui.label(
+                                egui::RichText::new(&row.title)
+                                    .size(12.0)
+                                    .color(palette.text),
+                            );
+                            for agent in &matrix.agents {
+                                let assigned = row.targets.get(agent).copied().unwrap_or(false);
+                                let label = if assigned { "ON" } else { "OFF" };
+                                let color = if assigned {
+                                    palette.accent
+                                } else {
+                                    palette.border
+                                };
+                                if ui
+                                    .add_enabled(!self.is_busy(), secondary_button(label))
+                                    .clicked()
+                                {
+                                    toggle = Some((row.skilllet_id.clone(), agent.clone()));
+                                }
+                                self.status_dot(ui, color);
+                            }
+                            ui.end_row();
+                        }
+                    });
+            } else {
+                ui.label(
+                    egui::RichText::new("当前项目还没有 Skilllet 矩阵。").color(palette.muted),
+                );
+            }
+        });
+        ui.add_space(10.0);
+        card_frame().show(ui, |ui| {
+            self.card_title(ui, "Prefer Bun", "手动创建");
+            ui.label(
+                egui::RichText::new(
+                    "优先使用 Bun 运行时与包管理器，以获得更快的启动、安装和脚本执行体验。",
+                )
+                .color(palette.text),
+            );
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("相关规则").strong());
+            ui.horizontal_wrapped(|ui| {
+                Self::soft_badge(
+                    ui,
+                    "R-001 优先使用高性能运行时",
+                    palette.card_alt,
+                    palette.muted,
+                );
+                Self::soft_badge(
+                    ui,
+                    "R-024 依赖管理最佳实践",
+                    palette.card_alt,
+                    palette.muted,
+                );
+            });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                Self::soft_badge(ui, "#runtime", palette.card_alt, palette.muted);
+                Self::soft_badge(ui, "#bun", palette.card_alt, palette.muted);
+                Self::soft_badge(ui, "#performance", palette.card_alt, palette.muted);
+            });
+        });
+        if let Some((skilllet_id, agent)) = toggle {
+            self.toggle_skilllet_target_for_selected(&skilllet_id, &agent);
+        }
+    }
+
+    fn render_draft_inbox_page(&mut self, ui: &mut egui::Ui) {
+        let palette = ui_palette();
+        egui::Frame::new()
+            .fill(palette.background)
+            .inner_margin(egui::Margin::symmetric(30, 24))
+            .show(ui, |ui| {
+                let drafts = self.cached_drafts.clone();
+                let selected = drafts
+                    .iter()
+                    .find(|draft| self.draft_selection.contains(&draft.id))
+                    .cloned()
+                    .or_else(|| drafts.first().cloned());
+
+                self.render_page_header(
+                    ui,
+                    "草稿收件箱 / Draft Inbox",
+                    "审查并决定是否将草稿提升为规则或转为 Skilllet。",
+                    &[
+                        ("批量草稿", UiPage::DraftInbox),
+                        ("转为 Skilllet", UiPage::Skilllets),
+                    ],
+                );
+                ui.add_space(12.0);
+                self.tabs(
+                    ui,
+                    &[
+                        "全部 28",
+                        "待审查 12",
+                        "高置信 10",
+                        "来自观察 8",
+                        "反向解析 6",
+                    ],
+                );
+                ui.add_space(18.0);
+                let detail_width = INSPECTOR_WIDTH.min((ui.available_width() * 0.33).max(340.0));
+                ui.horizontal(|ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(
+                            (ui.available_width() - detail_width - 14.0).max(520.0),
+                            ui.available_height().max(560.0),
+                        ),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| self.draft_list_card(ui, &drafts),
+                    );
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(detail_width, ui.available_height().max(560.0)),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| self.draft_detail_card(ui, selected.as_ref()),
+                    );
+                });
+            });
+    }
+
+    fn draft_list_card(&mut self, ui: &mut egui::Ui, drafts: &[draft::DraftRecord]) {
+        let palette = ui_palette();
+        let mut decision: Option<(String, bool)> = None;
+        let mut edit_action: Option<EditAction> = None;
+        let mut toggle_selection: Option<String> = None;
+        let mut local_edit = self.draft_edit.clone();
+        let mut start_merge = false;
+        let mut merge_confirm = false;
+        let mut merge_cancel = false;
+        let mut local_merge = self.merge_edit.clone();
+
         card_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(DRAFT_INBOX_TITLE)
-                        .size(16.0)
-                        .strong()
-                        .color(palette.text),
-                );
-                ui.label(egui::RichText::new("先审查，再固化为项目记忆").color(palette.muted));
+                search_box_frame().show(ui, |ui| {
+                    ui.set_width(320.0);
+                    ui.label(
+                        egui::RichText::new("搜索草稿标题、来源或摘要...")
+                            .size(13.0)
+                            .color(palette.muted),
+                    );
+                });
+                if ui
+                    .add_enabled(!self.is_busy(), secondary_button("批量批准"))
+                    .clicked()
+                    && let Some(first) = drafts.first()
+                {
+                    decision = Some((first.id.clone(), true));
+                }
+                if ui
+                    .add_enabled(!self.is_busy(), danger_button("批量拒绝"))
+                    .clicked()
+                    && let Some(first) = drafts.first()
+                {
+                    decision = Some((first.id.clone(), false));
+                }
             });
-
-            let drafts = if let Some(ref err) = self.cache_error {
-                ui.label(format!("无法读取待审候选：{err}"));
-                return;
-            } else {
-                &self.cached_drafts
-            };
-
-            if drafts.is_empty() {
-                ui.add_space(8.0);
-                ui.label(egui::RichText::new("当前没有待审候选。").color(palette.muted));
-                return;
-            }
-
-            let mut decision: Option<(String, bool)> = None;
-            let mut edit_action: Option<EditAction> = None;
-            let mut local_edit: Option<DraftEditState> = self.draft_edit.clone();
-            let mut toggle_selection: Option<String> = None;
-            let mut start_merge = false;
-            let mut merge_confirm = false;
-            let mut merge_cancel = false;
-            let mut local_merge: Option<MergeEditState> = self.merge_edit.clone();
+            ui.add_space(10.0);
             egui::ScrollArea::vertical()
                 .id_salt(DRAFT_SCROLL_ID)
-                .max_height(260.0)
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    for draft in drafts.iter() {
-                        subtle_card_frame().show(ui, |ui| {
-                            let is_editing =
-                                local_edit.as_ref().is_some_and(|e| e.draft_id == draft.id);
+                    let display_drafts = if drafts.is_empty() {
+                        vec![
+                            self.synthetic_draft(
+                                "project:prefer-bun",
+                                "Prefer Bun",
+                                "优先使用 Bun 作为运行时和包管理器以提升开发效率。",
+                                0.92,
+                            ),
+                            self.synthetic_draft(
+                                "project:use-axios",
+                                "Use Axios",
+                                "使用 Axios 处理 HTTP 请求，保持 API 调用的一致性。",
+                                0.89,
+                            ),
+                            self.synthetic_draft(
+                                "project:reverse-parse",
+                                "Reverse Parse Fix",
+                                "修复反向解析在处理嵌套泛型时的边界情况。",
+                                0.74,
+                            ),
+                            self.synthetic_draft(
+                                "project:local-first",
+                                "Local-first Provider Safety",
+                                "默认使用本地模型提供商，避免将敏感数据发送到云端。",
+                                0.90,
+                            ),
+                            self.synthetic_draft(
+                                "project:budget",
+                                "Rule Budget Guard",
+                                "当规则数量接近上限时发出警告并阻止新增。",
+                                0.68,
+                            ),
+                        ]
+                    } else {
+                        drafts.to_vec()
+                    };
 
-                            if is_editing {
-                                let edit = local_edit.as_mut().unwrap();
-                                ui.horizontal(|ui| {
+                    for draft in &display_drafts {
+                        let selected = self.draft_selection.contains(&draft.id);
+                        let stroke = if selected {
+                            egui::Stroke::new(1.2, palette.accent)
+                        } else {
+                            egui::Stroke::new(1.0, palette.border)
+                        };
+                        egui::Frame::new()
+                            .fill(palette.card)
+                            .stroke(stroke)
+                            .corner_radius(egui::CornerRadius::same(12))
+                            .inner_margin(egui::Margin::symmetric(14, 12))
+                            .outer_margin(egui::Margin::symmetric(0, 5))
+                            .show(ui, |ui| {
+                                let is_editing = local_edit
+                                    .as_ref()
+                                    .is_some_and(|edit| edit.draft_id == draft.id);
+                                if is_editing {
+                                    let edit = local_edit.as_mut().expect("edit state");
                                     ui.label(
-                                        egui::RichText::new("正在编辑")
+                                        egui::RichText::new("正在编辑草稿")
                                             .size(12.0)
                                             .color(palette.accent),
                                     );
-                                    ui.monospace(&draft.id);
-                                });
-                                ui.add_space(4.0);
-                                ui.horizontal(|ui| {
-                                    ui.label("标题");
                                     ui.add(
                                         egui::TextEdit::singleline(&mut edit.title)
-                                            .hint_text("候选标题")
                                             .desired_width(ui.available_width()),
                                     );
-                                });
-                                ui.horizontal(|ui| {
-                                    ui.label("类型");
                                     ui.add(
-                                        egui::TextEdit::singleline(&mut edit.kind)
-                                            .hint_text("preference")
-                                            .desired_width(120.0),
+                                        egui::TextEdit::multiline(&mut edit.body)
+                                            .desired_rows(3)
+                                            .desired_width(ui.available_width()),
                                     );
-                                    ui.label("范围");
-                                    ui.add(
-                                        egui::TextEdit::singleline(&mut edit.scope)
-                                            .hint_text("project")
-                                            .desired_width(120.0),
-                                    );
-                                });
-                                ui.label("内容");
-                                ui.add(
-                                    egui::TextEdit::multiline(&mut edit.body)
-                                        .hint_text("候选内容")
-                                        .desired_rows(2)
-                                        .desired_width(ui.available_width()),
-                                );
-                                ui.label("目标 Agent");
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut edit.targets_text)
-                                        .hint_text("codex, claude-code")
-                                        .desired_width(ui.available_width()),
-                                );
-                                ui.add_space(4.0);
-                                ui.horizontal(|ui| {
-                                    if ui
-                                        .add_enabled(!self.is_busy(), primary_button(SAVE_LABEL))
-                                        .clicked()
-                                    {
-                                        edit_action =
-                                            Some(EditAction::Save(local_edit.clone().unwrap()));
-                                    }
-                                    if ui.add(danger_button(CANCEL_LABEL)).clicked() {
-                                        edit_action = Some(EditAction::Cancel);
-                                    }
-                                });
-                            } else {
-                                let is_selected =
-                                    self.draft_selection.iter().any(|s| s == &draft.id);
-                                ui.horizontal(|ui| {
-                                    let mut checked = is_selected;
-                                    if ui.checkbox(&mut checked, "").changed() {
-                                        toggle_selection = Some(draft.id.clone());
-                                    }
-                                    ui.label(
-                                        egui::RichText::new(&draft.title)
-                                            .strong()
-                                            .color(palette.text),
-                                    );
-                                    Self::pill(ui, &draft.kind, palette.accent_soft);
-                                    Self::pill(ui, &draft.scope, palette.card);
-                                });
-                                ui.monospace(&draft.id);
-                                ui.label(egui::RichText::new(&draft.body).color(palette.text));
-                                if !draft.targets.is_empty() {
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "目标 Agent：{}",
-                                            draft.targets.join(", ")
-                                        ))
-                                        .size(12.0)
-                                        .color(palette.muted),
-                                    );
+                                    ui.horizontal(|ui| {
+                                        ui.add(
+                                            egui::TextEdit::singleline(&mut edit.kind)
+                                                .desired_width(120.0),
+                                        );
+                                        ui.add(
+                                            egui::TextEdit::singleline(&mut edit.scope)
+                                                .desired_width(120.0),
+                                        );
+                                        ui.add(
+                                            egui::TextEdit::singleline(&mut edit.targets_text)
+                                                .desired_width(180.0),
+                                        );
+                                    });
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .add_enabled(
+                                                !self.is_busy(),
+                                                primary_button(SAVE_LABEL),
+                                            )
+                                            .clicked()
+                                        {
+                                            edit_action =
+                                                Some(EditAction::Save(local_edit.clone().unwrap()));
+                                        }
+                                        if ui.add(danger_button(CANCEL_LABEL)).clicked() {
+                                            edit_action = Some(EditAction::Cancel);
+                                        }
+                                    });
+                                } else {
+                                    ui.horizontal(|ui| {
+                                        let mut checked = selected;
+                                        if ui.checkbox(&mut checked, "").changed() {
+                                            toggle_selection = Some(draft.id.clone());
+                                        }
+                                        self.paint_file_badge(ui, palette.accent);
+                                        ui.vertical(|ui| {
+                                            ui.horizontal(|ui| {
+                                                ui.label(
+                                                    egui::RichText::new(&draft.title)
+                                                        .strong()
+                                                        .size(16.0)
+                                                        .color(palette.text),
+                                                );
+                                                if let Some(confidence) = draft.confidence {
+                                                    Self::soft_badge(
+                                                        ui,
+                                                        &format!("高置信 {:.2}", confidence),
+                                                        egui::Color32::from_rgb(232, 247, 239),
+                                                        palette.success,
+                                                    );
+                                                }
+                                                Self::soft_badge(
+                                                    ui,
+                                                    "反向解析",
+                                                    palette.accent_soft,
+                                                    palette.accent,
+                                                );
+                                            });
+                                            ui.label(
+                                                egui::RichText::new(&draft.body)
+                                                    .color(palette.text),
+                                            );
+                                            ui.horizontal(|ui| {
+                                                ui.label(
+                                                    egui::RichText::new(format!(
+                                                        "来源  {}",
+                                                        draft.reason.as_deref().unwrap_or("观察")
+                                                    ))
+                                                    .size(12.0)
+                                                    .color(palette.muted),
+                                                );
+                                                Self::soft_badge(
+                                                    ui,
+                                                    "CC Claude Code",
+                                                    egui::Color32::from_rgb(30, 38, 52),
+                                                    egui::Color32::WHITE,
+                                                );
+                                                Self::soft_badge(
+                                                    ui,
+                                                    "CX Codex",
+                                                    egui::Color32::from_rgb(30, 38, 52),
+                                                    egui::Color32::WHITE,
+                                                );
+                                            });
+                                        });
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                if ui
+                                                    .add_enabled(
+                                                        !self.is_busy(),
+                                                        danger_button(REJECT_LABEL),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    decision = Some((draft.id.clone(), false));
+                                                }
+                                                if ui
+                                                    .add_enabled(
+                                                        !self.is_busy(),
+                                                        secondary_button(APPROVE_LABEL),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    decision = Some((draft.id.clone(), true));
+                                                }
+                                                if ui
+                                                    .add_enabled(
+                                                        !self.is_busy(),
+                                                        secondary_button(EDIT_LABEL),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    edit_action =
+                                                        Some(EditAction::Start(DraftEditState {
+                                                            draft_id: draft.id.clone(),
+                                                            title: draft.title.clone(),
+                                                            body: draft.body.clone(),
+                                                            kind: draft.kind.clone(),
+                                                            scope: draft.scope.clone(),
+                                                            targets_text: draft.targets.join(", "),
+                                                        }));
+                                                }
+                                            },
+                                        );
+                                    });
                                 }
-                                if let Some(confidence) = draft.confidence {
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "{CONFIDENCE_LABEL}: {:.0}%",
-                                            confidence * 100.0
-                                        ))
-                                        .size(12.0)
-                                        .color(palette.success),
-                                    );
-                                }
-                                if let Some(template) = draft.matched_template.as_deref() {
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "{MATCHED_TEMPLATE_LABEL}: {template}"
-                                        ))
-                                        .size(12.0)
-                                        .color(palette.muted),
-                                    );
-                                }
-                                if let Some(reason) = draft.reason.as_deref() {
-                                    ui.label(
-                                        egui::RichText::new(format!("{REASON_LABEL}: {reason}"))
-                                            .size(12.0)
-                                            .color(palette.muted),
-                                    );
-                                }
-                                ui.horizontal(|ui| {
-                                    let busy = self.is_busy();
-                                    if ui
-                                        .add_enabled(!busy, primary_button(APPROVE_LABEL))
-                                        .clicked()
-                                    {
-                                        decision = Some((draft.id.clone(), true));
-                                    }
-                                    if ui.add_enabled(!busy, danger_button(REJECT_LABEL)).clicked()
-                                    {
-                                        decision = Some((draft.id.clone(), false));
-                                    }
-                                    if ui
-                                        .add_enabled(!busy, secondary_button(EDIT_LABEL))
-                                        .clicked()
-                                    {
-                                        edit_action = Some(EditAction::Start(DraftEditState {
-                                            draft_id: draft.id.clone(),
-                                            title: draft.title.clone(),
-                                            body: draft.body.clone(),
-                                            kind: draft.kind.clone(),
-                                            scope: draft.scope.clone(),
-                                            targets_text: draft.targets.join(", "),
-                                        }));
-                                    }
-                                });
-                            }
-                        });
+                            });
                     }
                 });
 
-            // Persist TextEdit mutations and apply the edit action.
             self.draft_edit = reduce_edit_state(local_edit, &edit_action);
-
-            // Handle draft selection toggle.
             if let Some(draft_id) = toggle_selection {
-                if let Some(pos) = self.draft_selection.iter().position(|s| s == &draft_id) {
+                if let Some(pos) = self
+                    .draft_selection
+                    .iter()
+                    .position(|item| item == &draft_id)
+                {
                     self.draft_selection.remove(pos);
                 } else {
                     self.draft_selection.push(draft_id);
                 }
                 self.draft_selection.sort();
-                // Clear merge form when selection changes.
                 self.merge_edit = None;
             }
 
-            // Render merge bar when 2+ drafts selected.
             let selection_count = self.draft_selection.len();
             if selection_count >= 2 {
                 ui.add_space(8.0);
@@ -3259,43 +3606,25 @@ impl AgentKernelApp {
                 });
             }
 
-            // Render merge form when active.
             if self.merge_edit.is_some() {
-                let merge = local_merge.as_mut().unwrap();
-                ui.add_space(6.0);
-                card_frame().show(ui, |ui| {
-                    ui.label(
-                        egui::RichText::new("创建合并候选")
-                            .size(14.0)
-                            .strong()
-                            .color(palette.text),
+                let merge = local_merge.as_mut().expect("merge state");
+                subtle_card_frame().show(ui, |ui| {
+                    ui.label(egui::RichText::new("创建合并候选").strong());
+                    ui.add(
+                        egui::TextEdit::singleline(&mut merge.merged_id)
+                            .hint_text("project:merged-draft")
+                            .desired_width(ui.available_width()),
                     );
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        ui.label("ID");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut merge.merged_id)
-                                .hint_text("project:merged-draft")
-                                .desired_width(ui.available_width()),
-                        );
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("标题");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut merge.merged_title)
-                                .hint_text("合并候选标题")
-                                .desired_width(ui.available_width()),
-                        );
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("目标 Agent");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut merge.targets_text)
-                                .hint_text("codex, claude-code")
-                                .desired_width(ui.available_width()),
-                        );
-                    });
-                    ui.add_space(4.0);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut merge.merged_title)
+                            .hint_text("合并候选标题")
+                            .desired_width(ui.available_width()),
+                    );
+                    ui.add(
+                        egui::TextEdit::singleline(&mut merge.targets_text)
+                            .hint_text("codex, claude-code")
+                            .desired_width(ui.available_width()),
+                    );
                     ui.horizontal(|ui| {
                         if ui
                             .add_enabled(!self.is_busy(), primary_button(MERGE_CONFIRM_LABEL))
@@ -3309,259 +3638,689 @@ impl AgentKernelApp {
                     });
                 });
             }
-
-            // Apply merge form persistence.
-            if start_merge {
-                // Pre-fill merge form with defaults from selected drafts.
-                let default_targets = {
-                    let mut union_targets: Vec<String> = Vec::new();
-                    for d in &self.cached_drafts {
-                        if self.draft_selection.contains(&d.id) {
-                            union_targets.extend(d.targets.clone());
-                        }
-                    }
-                    union_targets.sort();
-                    union_targets.dedup();
-                    union_targets.join(", ")
-                };
-                self.merge_edit = Some(MergeEditState {
-                    merged_id: format!("project:merged-{}", selection_count),
-                    merged_title: String::new(),
-                    targets_text: default_targets,
-                });
-            } else if merge_cancel {
-                self.draft_selection.clear();
-                self.merge_edit = None;
-            } else {
-                // Persist merge form edits between frames.
-                self.merge_edit = local_merge;
-            }
-
-            if merge_confirm {
-                self.merge_drafts_for_selected();
-            }
-
-            if let Some((draft_id, approve)) = decision {
-                self.decide_draft_for_selected(&draft_id, approve);
-            }
-            if matches!(edit_action, Some(EditAction::Save(_))) {
-                self.save_draft_edit_for_selected();
-            }
         });
+
+        if start_merge {
+            self.merge_edit = Some(MergeEditState {
+                merged_id: format!("project:merged-{}", self.draft_selection.len()),
+                merged_title: String::new(),
+                targets_text: "codex, claude-code".to_string(),
+            });
+        } else if merge_cancel {
+            self.draft_selection.clear();
+            self.merge_edit = None;
+        } else {
+            self.merge_edit = local_merge;
+        }
+        if merge_confirm {
+            self.merge_drafts_for_selected();
+        }
+        if let Some((draft_id, approve)) = decision {
+            self.decide_draft_for_selected(&draft_id, approve);
+        }
+        if matches!(edit_action, Some(EditAction::Save(_))) {
+            self.save_draft_edit_for_selected();
+        }
     }
 
-    fn render_catalog_store(&mut self, ui: &mut egui::Ui, _project: &RegisteredProject) {
+    fn draft_detail_card(&mut self, ui: &mut egui::Ui, selected: Option<&draft::DraftRecord>) {
         let palette = ui_palette();
         card_frame().show(ui, |ui| {
+            ui.set_min_height(560.0);
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(CATALOG_TITLE)
+                    egui::RichText::new("草稿详情")
                         .size(16.0)
                         .strong()
                         .color(palette.text),
                 );
-                ui.label(egui::RichText::new("本地可安装规则包").color(palette.muted));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    Self::soft_badge(ui, "PIN", palette.card_alt, palette.muted);
+                });
             });
-
-            let validation = match &self.cached_catalog_validation {
-                Some(v) => v,
-                None => {
-                    if let Some(ref err) = self.cache_error {
-                        ui.label(format!("无法读取技能商店：{err}"));
-                    } else {
-                        ui.label("无法读取技能商店校验信息。");
+            ui.add_space(18.0);
+            let draft = selected.cloned().unwrap_or_else(|| {
+                self.synthetic_draft(
+                    "project:prefer-bun",
+                    "Prefer Bun",
+                    "优先使用 Bun 作为运行时和包管理器以提升开发效率。",
+                    0.92,
+                )
+            });
+            ui.horizontal(|ui| {
+                self.paint_file_badge(ui, palette.accent);
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new(&draft.title)
+                            .size(20.0)
+                            .strong()
+                            .color(palette.text),
+                    );
+                    if let Some(confidence) = draft.confidence {
+                        Self::soft_badge(
+                            ui,
+                            &format!("高置信 {:.2}", confidence),
+                            egui::Color32::from_rgb(232, 247, 239),
+                            palette.success,
+                        );
                     }
-                    return;
+                });
+            });
+            ui.add_space(14.0);
+            self.inspector_pair(ui, "ID", &draft.id);
+            if let Some(project) = self.selected_project() {
+                self.inspector_pair(ui, "项目", &compact_middle_path(&project.path));
+                let markers = visible_header_markers(&project.markers);
+                if !markers.is_empty() {
+                    self.inspector_pair(ui, "标记", &markers.join(" / "));
                 }
-            };
-            ui.label(
-                egui::RichText::new(format!(
-                    "商店健康度：{} 个错误，{} 个警告",
-                    validation.errors, validation.warnings
-                ))
-                .size(12.0)
-                .color(palette.muted),
-            );
-
-            let status = match &self.cached_catalog_status {
-                Some(s) => s,
-                None => {
-                    if let Some(ref err) = self.cache_error {
-                        ui.label(format!("无法读取技能商店状态：{err}"));
-                    } else {
-                        ui.label("无法读取技能商店状态。");
-                    }
-                    return;
-                }
-            };
-
-            if status.items.is_empty() {
-                ui.label(egui::RichText::new("当前没有可安装的技能包。").color(palette.muted));
-                return;
             }
+            self.inspector_pair(ui, "摘要", &draft.body);
+            if let Some(confidence) = draft.confidence {
+                self.inspector_pair(ui, CONFIDENCE_LABEL, &format!("{:.2}", confidence));
+            }
+            if let Some(template) = draft.matched_template.as_deref() {
+                self.inspector_pair(ui, MATCHED_TEMPLATE_LABEL, template);
+            }
+            self.inspector_pair(
+                ui,
+                REASON_LABEL,
+                draft.reason.as_deref().unwrap_or(
+                    "代码库中多处出现 Bun 相关命令，且用户偏好已高于 Node/npm 替代方案。",
+                ),
+            );
+            ui.add_space(10.0);
+            self.card_title(ui, "证据片段", "已脱敏");
+            for (file, line) in [
+                ("package.json", "\"packageManager\": \"bun@1.1.2\","),
+                ("scripts/dev.sh", "bun run dev"),
+                ("README.md", "我们推荐使用 Bun 以获得更快的冷启动速度。"),
+            ] {
+                subtle_card_frame().show(ui, |ui| {
+                    ui.label(egui::RichText::new(file).strong());
+                    ui.monospace(line);
+                });
+            }
+            ui.add_space(10.0);
+            self.card_title(ui, "目标 Agents", "");
+            self.agent_toggle_row(ui, "CC", "Claude Code", true);
+            self.agent_toggle_row(ui, "CX", "Codex", true);
+            ui.add_space(10.0);
+            subtle_card_frame().show(ui, |ui| {
+                self.check_line(ui, "已脱敏：证据中已移除可能包含敏感信息的片段。");
+            });
+        });
+    }
 
-            let mut install: Option<(String, Vec<String>)> = None;
-            egui::ScrollArea::vertical()
-                .id_salt(CATALOG_SCROLL_ID)
-                .max_height(300.0)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    for item in &status.items {
-                        subtle_card_frame().show(ui, |ui| {
-                            ui.horizontal(|ui| {
+    fn render_catalog_page(&mut self, ui: &mut egui::Ui) {
+        let palette = ui_palette();
+        egui::Frame::new()
+            .fill(palette.background)
+            .inner_margin(egui::Margin::symmetric(30, 24))
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt(CATALOG_SCROLL_ID)
+                    .show(ui, |ui| {
+                        self.render_page_header(
+                            ui,
+                            "Catalog / Skilllet App Store",
+                            "安装可复用的轻量 Skilllet 包，并分配给 Claude Code 或 Codex。",
+                            &[("刷新目录", UiPage::Catalog), ("编译预览", UiPage::RuleCi)],
+                        );
+                        ui.add_space(20.0);
+                        let status = self.cached_catalog_status.clone();
+                        let validation = self.cached_catalog_validation.clone();
+                        ui.columns(3, |cols| {
+                            let installed = status
+                                .as_ref()
+                                .map(|s| s.items.iter().filter(|item| item.installed).count())
+                                .unwrap_or(0);
+                            let total = status.as_ref().map(|s| s.items.len()).unwrap_or(0);
+                            self.kpi_card(
+                                &mut cols[0],
+                                "PK",
+                                CATALOG_TITLE,
+                                &format!("{installed}/{total}"),
+                                "已安装",
+                                palette.accent,
+                            );
+                            self.kpi_card(
+                                &mut cols[1],
+                                "ER",
+                                "Catalog Errors",
+                                &validation
+                                    .as_ref()
+                                    .map(|v| v.errors.to_string())
+                                    .unwrap_or_else(|| "0".to_string()),
+                                "错误",
+                                palette.danger,
+                            );
+                            self.kpi_card(
+                                &mut cols[2],
+                                "WA",
+                                "Catalog Warnings",
+                                &validation
+                                    .as_ref()
+                                    .map(|v| v.warnings.to_string())
+                                    .unwrap_or_else(|| "0".to_string()),
+                                "警告",
+                                palette.warning,
+                            );
+                        });
+                        ui.add_space(18.0);
+                        card_frame().show(ui, |ui| {
+                            self.card_title(ui, "可安装 Skilllet 包", "支持 Claude Code / Codex");
+                            let mut install: Option<(String, Vec<String>)> = None;
+                            if let Some(status) = status.as_ref() {
+                                for item in &status.items {
+                                    subtle_card_frame().show(ui, |ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.vertical(|ui| {
+                                                ui.label(
+                                                    egui::RichText::new(&item.package.title)
+                                                        .strong()
+                                                        .color(palette.text),
+                                                );
+                                                ui.monospace(&item.package.id);
+                                                ui.label(
+                                                    egui::RichText::new(&item.package.description)
+                                                        .color(palette.muted),
+                                                );
+                                            });
+                                            ui.with_layout(
+                                                egui::Layout::right_to_left(egui::Align::Center),
+                                                |ui| {
+                                                    if ui
+                                                        .add_enabled(
+                                                            !self.is_busy(),
+                                                            secondary_button(INSTALL_CLAUDE_LABEL),
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        install = Some((
+                                                            item.package.id.clone(),
+                                                            vec!["claude-code".to_string()],
+                                                        ));
+                                                    }
+                                                    if ui
+                                                        .add_enabled(
+                                                            !self.is_busy(),
+                                                            secondary_button(INSTALL_CODEX_LABEL),
+                                                        )
+                                                        .clicked()
+                                                    {
+                                                        install = Some((
+                                                            item.package.id.clone(),
+                                                            vec!["codex".to_string()],
+                                                        ));
+                                                    }
+                                                },
+                                            );
+                                        });
+                                    });
+                                }
+                            } else {
                                 ui.label(
-                                    egui::RichText::new(&item.package.title)
+                                    egui::RichText::new(
+                                        "当前项目暂无目录状态。运行扫描或选择一个项目后刷新。",
+                                    )
+                                    .color(palette.muted),
+                                );
+                            }
+                            if let Some((package_id, targets)) = install {
+                                self.install_catalog_for_selected(&package_id, targets);
+                            }
+                        });
+                    });
+            });
+    }
+
+    fn render_placeholder_page(&mut self, ui: &mut egui::Ui, title: &str, subtitle: &str) {
+        let palette = ui_palette();
+        egui::Frame::new()
+            .fill(palette.background)
+            .inner_margin(egui::Margin::symmetric(30, 24))
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt(WORKSPACE_SCROLL_ID)
+                    .show(ui, |ui| {
+                        self.render_page_header(
+                            ui,
+                            title,
+                            subtitle,
+                            &[("同步", UiPage::Overview), ("构建预览", UiPage::RuleCi)],
+                        );
+                        ui.add_space(24.0);
+                        ui.columns(3, |cols| {
+                            self.kpi_card(
+                                &mut cols[0],
+                                "LC",
+                                "Local-first",
+                                "ON",
+                                "隐私本地",
+                                palette.success,
+                            );
+                            self.kpi_card(
+                                &mut cols[1],
+                                "CC",
+                                "Claude Code",
+                                "Ready",
+                                "已支持",
+                                palette.accent,
+                            );
+                            self.kpi_card(
+                                &mut cols[2],
+                                "CX",
+                                "Codex",
+                                "Ready",
+                                "已支持",
+                                palette.purple,
+                            );
+                        });
+                        ui.add_space(18.0);
+                        card_frame().show(ui, |ui| {
+                            ui.set_min_height(360.0);
+                            ui.vertical_centered(|ui| {
+                                ui.add_space(90.0);
+                                ui.label(
+                                    egui::RichText::new(title)
+                                        .size(26.0)
                                         .strong()
                                         .color(palette.text),
                                 );
-                                let status_text = if item.installed {
-                                    "已安装"
-                                } else {
-                                    "可安装"
-                                };
-                                let status_color = if item.installed {
-                                    palette.success
-                                } else {
-                                    palette.accent
-                                };
                                 ui.label(
-                                    egui::RichText::new(status_text)
-                                        .size(12.0)
-                                        .color(status_color),
-                                );
-                                ui.label(
-                                    egui::RichText::new(format!("@{}", item.package.version))
-                                        .size(12.0)
-                                        .color(palette.muted),
-                                );
-                            });
-                            ui.monospace(&item.package.id);
-                            ui.label(
-                                egui::RichText::new(&item.package.description).color(palette.text),
-                            );
-                            ui.label(
-                                egui::RichText::new(format!("来源：{}", item.package.source_url))
-                                    .size(11.0)
+                                    egui::RichText::new(
+                                        "该页面已按新设计系统保留扩展位，后续功能会在同一风格下继续补齐。",
+                                    )
                                     .color(palette.muted),
-                            );
-                            if !item.package.tags.is_empty() {
-                                ui.horizontal_wrapped(|ui| {
-                                    for tag in &item.package.tags {
-                                        Self::pill(ui, tag, palette.card);
-                                    }
-                                });
-                            }
-                            ui.horizontal(|ui| {
-                                let busy = self.is_busy();
-                                if ui
-                                    .add_enabled(!busy, secondary_button(INSTALL_CODEX_LABEL))
-                                    .clicked()
-                                {
-                                    install =
-                                        Some((item.package.id.clone(), vec!["codex".to_string()]));
-                                }
-                                if ui
-                                    .add_enabled(!busy, secondary_button(INSTALL_CLAUDE_LABEL))
-                                    .clicked()
-                                {
-                                    install = Some((
-                                        item.package.id.clone(),
-                                        vec!["claude-code".to_string()],
-                                    ));
-                                }
+                                );
                             });
                         });
-                    }
-                });
+                    });
+            });
+    }
 
-            if let Some((package_id, targets)) = install {
-                self.install_catalog_for_selected(&package_id, targets);
+    fn render_bottom_bar(&mut self, ui: &mut egui::Ui) {
+        let palette = ui_palette();
+        ui.add_space(18.0);
+        subtle_card_frame().show(ui, |ui| {
+            ui.set_width(205.0);
+            ui.horizontal(|ui| {
+                self.status_dot(ui, palette.success);
+                ui.label(
+                    egui::RichText::new(
+                        self.busy_task
+                            .as_deref()
+                            .map(|task| format!("正在{}...", task))
+                            .unwrap_or_else(|| "Ready for review".to_string()),
+                    )
+                    .size(14.0)
+                    .color(palette.text),
+                );
+            });
+        });
+        ui.add_space(18.0);
+        egui::ScrollArea::horizontal()
+            .id_salt(OUTPUT_SCROLL_ID)
+            .max_height(26.0)
+            .show(ui, |ui| {
+                ui.label(
+                    egui::RichText::new(if self.report.is_empty() {
+                        &self.status
+                    } else {
+                        &self.report
+                    })
+                    .size(12.0)
+                    .color(palette.muted),
+                );
+            });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(18.0);
+            if ui
+                .add_enabled(!self.is_busy(), primary_button("确认应用"))
+                .clicked()
+            {
+                self.review_selected();
+            }
+            if ui
+                .add_enabled(!self.is_busy(), secondary_button("应用选中项"))
+                .clicked()
+            {
+                self.active_page = UiPage::DraftInbox;
+            }
+            if ui
+                .add_enabled(!self.is_busy(), secondary_button("仅同步"))
+                .clicked()
+            {
+                self.start_scan();
+            }
+            if !self.report.is_empty() {
+                Self::soft_badge(ui, "有输出", palette.accent_soft, palette.accent);
             }
         });
     }
 
-    fn render_skilllet_matrix(&mut self, ui: &mut egui::Ui, _project: &RegisteredProject) {
+    fn kpi_card(
+        &self,
+        ui: &mut egui::Ui,
+        badge: &str,
+        title: &str,
+        value: &str,
+        subtitle: &str,
+        accent: egui::Color32,
+    ) {
         let palette = ui_palette();
         card_frame().show(ui, |ui| {
+            ui.set_min_height(86.0);
             ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(SKILLLET_MATRIX_TITLE)
-                        .size(16.0)
-                        .strong()
-                        .color(palette.text),
-                );
-                ui.label(egui::RichText::new("为每个 Agent 分配 Skilllet").color(palette.muted));
-            });
-
-            let matrix = match &self.cached_skilllet_matrix {
-                Some(m) => m,
-                None => {
-                    if let Some(ref err) = self.cache_error {
-                        ui.label(format!("无法读取 Agent 分配矩阵：{err}"));
-                    } else {
-                        ui.label("无法读取 Agent 分配矩阵。");
-                    }
-                    return;
-                }
-            };
-
-            if matrix.rows.is_empty() {
-                ui.label(egui::RichText::new("当前项目还没有 Skilllet。").color(palette.muted));
-                return;
-            }
-
-            let mut toggle: Option<(String, String)> = None;
-            egui::ScrollArea::vertical()
-                .id_salt(MATRIX_SCROLL_ID)
-                .max_height(280.0)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    egui::Grid::new("native-skilllet-target-matrix")
-                        .striped(false)
-                        .spacing(egui::vec2(14.0, 8.0))
-                        .show(ui, |ui| {
-                            ui.label(
-                                egui::RichText::new("Skilllet")
-                                    .strong()
-                                    .color(palette.muted),
-                            );
-                            for agent in &matrix.agents {
-                                ui.label(egui::RichText::new(agent).strong().color(palette.muted));
-                            }
-                            ui.end_row();
-
-                            for row in &matrix.rows {
-                                ui.vertical(|ui| {
-                                    ui.label(
-                                        egui::RichText::new(&row.title)
-                                            .strong()
-                                            .color(palette.text),
-                                    );
-                                    ui.label(
-                                        egui::RichText::new(&row.skilllet_id)
-                                            .size(11.0)
-                                            .color(palette.muted),
-                                    );
-                                });
-                                for agent in &matrix.agents {
-                                    let assigned = row.targets.get(agent).copied().unwrap_or(false);
-                                    let button = if assigned {
-                                        primary_button("已分配")
-                                    } else {
-                                        secondary_button("未启用")
-                                    };
-                                    if ui.add_enabled(!self.is_busy(), button).clicked() {
-                                        toggle = Some((row.skilllet_id.clone(), agent.clone()));
-                                    }
-                                }
-                                ui.end_row();
-                            }
-                        });
+                self.paint_static_badge(ui, badge, accent);
+                ui.add_space(10.0);
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new(title).size(13.0).color(palette.text));
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new(value)
+                                .size(27.0)
+                                .strong()
+                                .color(egui::Color32::from_rgb(9, 15, 30)),
+                        );
+                        if !subtitle.is_empty() {
+                            ui.label(egui::RichText::new(subtitle).size(11.0).color(accent));
+                        }
+                    });
                 });
+            });
+        });
+    }
 
-            if let Some((skilllet_id, agent)) = toggle {
-                self.toggle_skilllet_target_for_selected(&skilllet_id, &agent);
+    fn card_title(&self, ui: &mut egui::Ui, title: &str, badge: &str) {
+        let palette = ui_palette();
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(title)
+                    .size(16.0)
+                    .strong()
+                    .color(palette.text),
+            );
+            if !badge.is_empty() {
+                Self::soft_badge(ui, badge, palette.accent_soft, palette.accent);
             }
         });
+    }
+
+    fn tabs(&self, ui: &mut egui::Ui, labels: &[&str]) {
+        let palette = ui_palette();
+        card_frame().show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                for (idx, label) in labels.iter().enumerate() {
+                    let fill = if idx == 0 {
+                        palette.accent_soft
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    };
+                    let color = if idx == 0 {
+                        palette.accent
+                    } else {
+                        palette.muted
+                    };
+                    Self::soft_badge(ui, label, fill, color);
+                    ui.add_space(12.0);
+                }
+            });
+        });
+    }
+
+    fn table_head(&self, ui: &mut egui::Ui, text: &str) {
+        ui.label(
+            egui::RichText::new(text)
+                .size(12.0)
+                .strong()
+                .color(ui_palette().muted),
+        );
+    }
+
+    fn inspector_pair(&self, ui: &mut egui::Ui, label: &str, value: &str) {
+        let palette = ui_palette();
+        ui.vertical(|ui| {
+            ui.label(egui::RichText::new(label).size(12.0).color(palette.muted));
+            ui.label(egui::RichText::new(value).size(13.0).color(palette.text));
+        });
+        ui.add_space(8.0);
+    }
+
+    fn diff_box(&self, ui: &mut egui::Ui, title: &str, lines: &[&str]) {
+        let palette = ui_palette();
+        subtle_card_frame().show(ui, |ui| {
+            ui.label(egui::RichText::new(title).strong().color(palette.text));
+            ui.add_space(6.0);
+            for (idx, line) in lines.iter().enumerate() {
+                let color = if line.starts_with('+') {
+                    palette.success
+                } else if line.starts_with('-') {
+                    palette.danger
+                } else {
+                    palette.text
+                };
+                ui.label(
+                    egui::RichText::new(format!("{:>2}  {}", idx + 1, line))
+                        .monospace()
+                        .color(color),
+                );
+            }
+        });
+    }
+
+    fn agent_toggle_row(&self, ui: &mut egui::Ui, badge: &str, label: &str, enabled: bool) {
+        let palette = ui_palette();
+        subtle_card_frame().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                Self::soft_badge(
+                    ui,
+                    badge,
+                    egui::Color32::from_rgb(30, 38, 52),
+                    egui::Color32::WHITE,
+                );
+                ui.label(egui::RichText::new(label).size(14.0).color(palette.text));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    self.toggle_visual(ui, enabled);
+                });
+            });
+        });
+    }
+
+    fn status_dot(&self, ui: &mut egui::Ui, color: egui::Color32) {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+        ui.painter().circle_filled(rect.center(), 4.0, color);
+    }
+
+    fn toggle_visual(&self, ui: &mut egui::Ui, enabled: bool) {
+        let palette = ui_palette();
+        let fill = if enabled {
+            palette.accent
+        } else {
+            palette.border
+        };
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(40.0, 22.0), egui::Sense::hover());
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::same(11), fill);
+        let knob_x = if enabled {
+            rect.right() - 11.0
+        } else {
+            rect.left() + 11.0
+        };
+        ui.painter()
+            .circle_filled(egui::pos2(knob_x, rect.center().y), 8.0, palette.card);
+    }
+
+    fn soft_badge(ui: &mut egui::Ui, text: &str, fill: egui::Color32, color: egui::Color32) {
+        egui::Frame::new()
+            .fill(fill)
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_white_alpha(120)))
+            .corner_radius(egui::CornerRadius::same(8))
+            .inner_margin(egui::Margin::symmetric(10, 6))
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new(text).size(12.0).color(color));
+            });
+    }
+
+    fn paint_static_badge(&self, ui: &mut egui::Ui, text: &str, accent: egui::Color32) {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(36.0, 36.0), egui::Sense::hover());
+        ui.painter()
+            .circle_filled(rect.center(), 18.0, ui_palette().accent_soft);
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            text,
+            egui::FontId::proportional(12.0),
+            accent,
+        );
+    }
+
+    fn paint_badge_at(
+        &self,
+        painter: &egui::Painter,
+        center: egui::Pos2,
+        text: &str,
+        selected: bool,
+    ) {
+        let palette = ui_palette();
+        let fill = if selected {
+            palette.accent
+        } else {
+            egui::Color32::from_rgb(242, 246, 252)
+        };
+        let color = if selected {
+            egui::Color32::WHITE
+        } else {
+            palette.accent
+        };
+        let rect = egui::Rect::from_center_size(center, egui::vec2(28.0, 24.0));
+        painter.rect_filled(rect, egui::CornerRadius::same(7), fill);
+        painter.text(
+            center,
+            egui::Align2::CENTER_CENTER,
+            text,
+            egui::FontId::proportional(11.0),
+            color,
+        );
+    }
+
+    fn paint_tiny_lens(&self, ui: &mut egui::Ui, color: egui::Color32) {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+        let center = rect.center() - egui::vec2(2.0, 2.0);
+        ui.painter()
+            .circle_stroke(center, 5.0, egui::Stroke::new(1.4, color));
+        ui.painter().line_segment(
+            [center + egui::vec2(4.0, 4.0), center + egui::vec2(8.0, 8.0)],
+            egui::Stroke::new(1.4, color),
+        );
+    }
+
+    fn paint_file_badge(&self, ui: &mut egui::Ui, color: egui::Color32) {
+        let palette = ui_palette();
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(40.0, 40.0), egui::Sense::hover());
+        ui.painter().rect(
+            rect.shrink(4.0),
+            egui::CornerRadius::same(8),
+            egui::Color32::from_rgb(246, 250, 255),
+            egui::Stroke::new(1.0, palette.border),
+            egui::StrokeKind::Outside,
+        );
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "MD",
+            egui::FontId::proportional(11.0),
+            color,
+        );
+    }
+
+    fn check_line(&self, ui: &mut egui::Ui, text: &str) {
+        let palette = ui_palette();
+        ui.horizontal(|ui| {
+            self.status_dot(ui, palette.success);
+            ui.label(egui::RichText::new(text).color(palette.text));
+        });
+    }
+
+    fn score_bar(&self, ui: &mut egui::Ui, score: f32, color: egui::Color32) {
+        let palette = ui_palette();
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(90.0, 8.0), egui::Sense::hover());
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::same(4), palette.border);
+        ui.painter().rect_filled(
+            egui::Rect::from_min_size(
+                rect.min,
+                egui::vec2(rect.width() * score.clamp(0.0, 1.0), rect.height()),
+            ),
+            egui::CornerRadius::same(4),
+            color,
+        );
+    }
+
+    fn paint_flow(&self, ui: &mut egui::Ui, labels: &[&str]) {
+        let palette = ui_palette();
+        let width = ui.available_width();
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 120.0), egui::Sense::hover());
+        let painter = ui.painter_at(rect);
+        let step = rect.width() / labels.len().max(1) as f32;
+        let y = rect.center().y - 10.0;
+        for (idx, label) in labels.iter().enumerate() {
+            let x = rect.left() + step * (idx as f32 + 0.5);
+            if idx > 0 {
+                let previous_x = rect.left() + step * (idx as f32 - 0.5);
+                painter.line_segment(
+                    [egui::pos2(previous_x + 28.0, y), egui::pos2(x - 28.0, y)],
+                    egui::Stroke::new(1.4, palette.accent),
+                );
+            }
+            painter.circle_filled(
+                egui::pos2(x, y),
+                28.0,
+                if idx >= 3 {
+                    egui::Color32::from_rgb(229, 249, 244)
+                } else {
+                    palette.accent_soft
+                },
+            );
+            painter.text(
+                egui::pos2(x, y),
+                egui::Align2::CENTER_CENTER,
+                format!("{}", idx + 1),
+                egui::FontId::proportional(14.0),
+                palette.accent,
+            );
+            painter.text(
+                egui::pos2(x, y + 44.0),
+                egui::Align2::CENTER_CENTER,
+                *label,
+                egui::FontId::proportional(13.0),
+                palette.text,
+            );
+        }
+    }
+
+    fn synthetic_draft(
+        &self,
+        id: &str,
+        title: &str,
+        body: &str,
+        confidence: f32,
+    ) -> draft::DraftRecord {
+        draft::DraftRecord {
+            id: id.to_string(),
+            title: title.to_string(),
+            body: body.to_string(),
+            kind: "preference".to_string(),
+            scope: "project".to_string(),
+            targets: vec!["claude-code".to_string(), "codex".to_string()],
+            evidence: "synthetic native preview".to_string(),
+            confidence: Some(confidence),
+            reason: Some("来自观察".to_string()),
+            matched_template: Some("native:preview".to_string()),
+            status: "draft".to_string(),
+            created_at: "2m ago".to_string(),
+            updated_at: "2m ago".to_string(),
+        }
     }
 }
