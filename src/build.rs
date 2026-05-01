@@ -215,6 +215,27 @@ pub fn build_project(project_root: &Path, preview: bool) -> Result<BuildReport> 
                 });
             }
         }
+
+        if let Some(rules_dir) = &agent.exports.rules_dir {
+            let path = root.join(rules_dir).join("agent-kernel.mdc");
+            let content = render_rules_artifact(agent_name, &config.skilllets.include, &skilllets);
+            actions.push(format!(
+                "{} {}",
+                if preview { "Would write" } else { "Wrote" },
+                fsutil::path_to_slash(&path)
+            ));
+            if !preview {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::write(&path, &content).with_context(|| format!("write {}", path.display()))?;
+                lock.artifacts.push(ArtifactState {
+                    path: fsutil::path_to_slash(&path),
+                    hash: fsutil::sha256_text(&content),
+                    kind: format!("{agent_name}:rules"),
+                });
+            }
+        }
     }
 
     if !preview {
@@ -226,6 +247,37 @@ pub fn build_project(project_root: &Path, preview: bool) -> Result<BuildReport> 
         actions,
         warnings,
     })
+}
+
+fn render_rules_artifact(
+    agent_name: &str,
+    skilllet_refs: &[config::SkillletRef],
+    skilllets: &BTreeMap<String, SkillletRecord>,
+) -> String {
+    let mut out = String::new();
+    out.push_str("---\n");
+    out.push_str("description: Generated Agent-Kernel project rules\n");
+    out.push_str("alwaysApply: true\n");
+    out.push_str("---\n\n");
+    out.push_str("# Agent Kernel Rules\n\n");
+    out.push_str("This file is a build artifact for the current project.\n\n");
+
+    let mut rendered = 0;
+    for item in skilllet_refs {
+        if !item.targets.is_empty() && !item.targets.iter().any(|target| target == agent_name) {
+            continue;
+        }
+        if let Some(record) = skilllets.get(&item.id) {
+            out.push_str(&format!("## {}\n\n{}\n\n", record.title, record.body));
+            rendered += 1;
+        }
+    }
+
+    if rendered == 0 {
+        out.push_str("- No skilllets are declared for this agent yet.\n");
+    }
+
+    out
 }
 
 fn render_instructions(
@@ -483,5 +535,31 @@ mod tests {
         let rendered = report.render();
 
         assert!(rendered.contains("exceeds 32768 byte budget"));
+    }
+
+    #[test]
+    fn build_writes_cursor_rules_artifact_from_targeted_skilllet() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        skilllet::add_skilllet(
+            temp.path(),
+            "project:cursor-rule",
+            "Cursor Rule",
+            "Use strict TypeScript in Cursor edits.",
+            "constraint",
+            "project",
+            vec!["cursor".to_string()],
+        )
+        .expect("add skilllet");
+
+        build_project(temp.path(), false).expect("build");
+
+        let rule_path = temp
+            .path()
+            .join(".cursor")
+            .join("rules")
+            .join("agent-kernel.mdc");
+        let text = fs::read_to_string(rule_path).expect("cursor rule");
+        assert!(text.contains("alwaysApply: true"));
+        assert!(text.contains("Use strict TypeScript in Cursor edits."));
     }
 }

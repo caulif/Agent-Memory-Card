@@ -136,6 +136,12 @@ v0.21 adds instruction budget warnings:
 1. Build preview warns when generated Agent instruction artifacts exceed 32 KiB.
 2. The budget follows Codex-style project document constraints and helps prevent prompt bloat early.
 
+v0.22 adds the Cursor rules exporter:
+
+1. Agents with `rules_dir` now receive `.mdc` rule artifacts.
+2. Cursor exports write `.cursor/rules/agent-kernel.mdc` with `alwaysApply: true`.
+3. Cursor-targeted Skilllets now compile into a native Cursor Rules surface.
+
 ## Commands
 
 ```bash
@@ -260,3 +266,4 @@ The Canvas UI exposes:
 - `.agent-kernel/skill-index.yml` is the imported Skill index.
 - `.agent-kernel/project.lock.yml` records generated mirror and artifact hashes.
 - `AGENTS.md`, `CLAUDE.md`, and mirrored skill folders are build artifacts.
+- `.cursor/rules/agent-kernel.mdc` is generated when Cursor rules export is enabled.
