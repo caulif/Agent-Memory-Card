@@ -9,9 +9,11 @@ use crate::draft;
 use crate::observation;
 use crate::project_registry::{self, ProjectRegistry, RegisteredProject};
 use crate::review;
+use crate::skilllet;
 
 const DRAFT_INBOX_TITLE: &str = "Draft Inbox";
 const CATALOG_TITLE: &str = "Skilllet Catalog";
+const SKILLLET_MATRIX_TITLE: &str = "Skilllet Target Matrix";
 const APPROVE_LABEL: &str = "Approve";
 const REJECT_LABEL: &str = "Reject";
 const INSTALL_CODEX_LABEL: &str = "Install to Codex";
@@ -74,6 +76,7 @@ mod tests {
     fn native_review_inbox_labels_are_stable() {
         assert_eq!(DRAFT_INBOX_TITLE, "Draft Inbox");
         assert_eq!(CATALOG_TITLE, "Skilllet Catalog");
+        assert_eq!(SKILLLET_MATRIX_TITLE, "Skilllet Target Matrix");
         assert_eq!(APPROVE_LABEL, "Approve");
         assert_eq!(REJECT_LABEL, "Reject");
         assert_eq!(INSTALL_CODEX_LABEL, "Install to Codex");
@@ -124,6 +127,62 @@ mod tests {
             .find(|item| item.id == "core:rust-quality-gate")
             .expect("catalog skilllet");
         assert_eq!(included.targets, vec!["claude-code", "codex"]);
+    }
+
+    #[test]
+    fn native_skilllet_target_toggle_updates_matrix() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        crate::skilllet::add_skilllet(
+            temp.path(),
+            "project:use-axios",
+            "Use Axios",
+            "Use Axios for frontend HTTP requests.",
+            "preference",
+            "project",
+            vec!["codex".to_string()],
+        )
+        .expect("add skilllet");
+
+        let after_add =
+            toggle_native_skilllet_target(temp.path(), "project:use-axios", "claude-code")
+                .expect("toggle on");
+        let row = after_add
+            .rows
+            .iter()
+            .find(|row| row.skilllet_id == "project:use-axios")
+            .expect("row");
+        assert_eq!(row.targets.get("codex"), Some(&true));
+        assert_eq!(row.targets.get("claude-code"), Some(&true));
+
+        let after_remove = toggle_native_skilllet_target(temp.path(), "project:use-axios", "codex")
+            .expect("toggle off");
+        let row = after_remove
+            .rows
+            .iter()
+            .find(|row| row.skilllet_id == "project:use-axios")
+            .expect("row");
+        assert_eq!(row.targets.get("codex"), Some(&false));
+        assert_eq!(row.targets.get("claude-code"), Some(&true));
+    }
+
+    #[test]
+    fn native_skilllet_target_toggle_rejects_empty_target_set() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        crate::skilllet::add_skilllet(
+            temp.path(),
+            "project:use-axios",
+            "Use Axios",
+            "Use Axios for frontend HTTP requests.",
+            "preference",
+            "project",
+            vec!["codex".to_string()],
+        )
+        .expect("add skilllet");
+
+        let err = toggle_native_skilllet_target(temp.path(), "project:use-axios", "codex")
+            .expect_err("empty target set should be rejected");
+
+        assert!(err.to_string().contains("at least one target"));
     }
 }
 
@@ -191,6 +250,49 @@ fn merge_existing_catalog_targets(
     merged.sort();
     merged.dedup();
     Ok(merged)
+}
+
+fn toggle_native_skilllet_target(
+    project_root: &Path,
+    skilllet_id: &str,
+    agent: &str,
+) -> Result<skilllet::SkillletTargetMatrix> {
+    let matrix = skilllet::skilllet_target_matrix(project_root)?;
+    let Some(row) = matrix
+        .rows
+        .iter()
+        .find(|row| row.skilllet_id == skilllet_id)
+    else {
+        return Err(anyhow!("skilllet `{skilllet_id}` does not exist"));
+    };
+
+    let mut targets = row
+        .targets
+        .iter()
+        .filter_map(|(candidate, assigned)| {
+            if *assigned {
+                Some(candidate.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if targets.iter().any(|target| target == agent) {
+        targets.retain(|target| target != agent);
+    } else {
+        targets.push(agent.to_string());
+    }
+    targets.sort();
+    targets.dedup();
+    if targets.is_empty() {
+        return Err(anyhow!(
+            "at least one target is required; disable the Agent or remove the Skilllet instead"
+        ));
+    }
+
+    skilllet::set_skilllet_targets(project_root, skilllet_id, targets)?;
+    skilllet::skilllet_target_matrix(project_root)
 }
 
 struct AgentKernelApp {
@@ -338,6 +440,25 @@ impl AgentKernelApp {
             }
         }
     }
+
+    fn toggle_skilllet_target_for_selected(&mut self, skilllet_id: &str, agent: &str) {
+        let Some(project) = self.selected_project() else {
+            self.report = "Select a project first.".to_string();
+            return;
+        };
+        match toggle_native_skilllet_target(&PathBuf::from(&project.path), skilllet_id, agent) {
+            Ok(matrix) => {
+                self.report = format!(
+                    "Updated `{skilllet_id}` target `{agent}` for {}\n\n{}",
+                    project.name,
+                    matrix.render()
+                );
+            }
+            Err(err) => {
+                self.report = format!("Skilllet target update failed for `{skilllet_id}`: {err}");
+            }
+        }
+    }
 }
 
 impl eframe::App for AgentKernelApp {
@@ -437,6 +558,8 @@ impl AgentKernelApp {
         self.render_draft_inbox(ui, &project);
         ui.add_space(12.0);
         self.render_catalog_store(ui, &project);
+        ui.add_space(12.0);
+        self.render_skilllet_matrix(ui, &project);
         ui.add_space(12.0);
         ui.separator();
         ui.heading("Output");
@@ -565,6 +688,59 @@ impl AgentKernelApp {
 
         if let Some((package_id, targets)) = install {
             self.install_catalog_for_selected(&package_id, targets);
+        }
+    }
+
+    fn render_skilllet_matrix(&mut self, ui: &mut egui::Ui, project: &RegisteredProject) {
+        ui.heading(SKILLLET_MATRIX_TITLE);
+        let matrix = match skilllet::skilllet_target_matrix(&PathBuf::from(&project.path)) {
+            Ok(matrix) => matrix,
+            Err(err) => {
+                ui.label(format!("Could not load skilllet matrix: {err}"));
+                return;
+            }
+        };
+
+        if matrix.rows.is_empty() {
+            ui.label("No skilllets found.");
+            return;
+        }
+
+        let mut toggle: Option<(String, String)> = None;
+        egui::ScrollArea::vertical()
+            .max_height(260.0)
+            .show(ui, |ui| {
+                egui::Grid::new("native-skilllet-target-matrix")
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.strong("Skilllet");
+                        for agent in &matrix.agents {
+                            ui.strong(agent);
+                        }
+                        ui.end_row();
+
+                        for row in &matrix.rows {
+                            ui.label(&row.title);
+                            for agent in &matrix.agents {
+                                let assigned = row.targets.get(agent).copied().unwrap_or(false);
+                                let label = if assigned { "assigned" } else { "off" };
+                                if ui.button(label).clicked() {
+                                    toggle = Some((row.skilllet_id.clone(), agent.clone()));
+                                }
+                            }
+                            ui.end_row();
+
+                            ui.small(&row.skilllet_id);
+                            for _ in &matrix.agents {
+                                ui.label("");
+                            }
+                            ui.end_row();
+                        }
+                    });
+            });
+
+        if let Some((skilllet_id, agent)) = toggle {
+            self.toggle_skilllet_target_for_selected(&skilllet_id, &agent);
         }
     }
 }

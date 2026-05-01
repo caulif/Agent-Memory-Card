@@ -305,6 +305,12 @@ v0.49 brings the local App Store into the native app:
 2. Catalog packages can be installed or assigned to Codex / Claude Code from the native UI.
 3. Re-assigning an installed catalog package merges Agent targets instead of overwriting previous assignments.
 
+v0.50 makes multi-agent assignment visual:
+
+1. The native app shows a Skilllet by Agent target matrix for the selected project.
+2. Matrix cells can be clicked to assign or unassign Skilllets for Codex / Claude Code.
+3. The native toggle protects against empty target sets, because empty targets mean "all enabled agents" in the declarative config.
+
 See [docs/quickstart.md](docs/quickstart.md) for a hands-on walkthrough.
 See [docs/platform-support.md](docs/platform-support.md) for Windows / macOS / Linux support details.
 
@@ -462,6 +468,7 @@ The native desktop app is the preferred visual entrypoint. It shows:
 - Review status for the selected project
 - Draft Inbox approve/reject controls
 - Skilllet Catalog / App Store install controls
+- Skilllet by Agent target matrix
 - conversation evolution preview and Draft Inbox generation
 
 The legacy Canvas Web UI is still available for development and exposes:

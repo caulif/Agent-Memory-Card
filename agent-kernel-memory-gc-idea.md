@@ -69,6 +69,7 @@
 - v0.47 范围：将 Windows / macOS / Linux 支持变成工程约束。CI 在三大系统上跑 Rust 与 Bun wrapper 测试，release 输出 `win32-x64`、`linux-x64`、`darwin-x64`、`darwin-arm64` 四类预编译包，其他架构走 Cargo fallback。
 - v0.48 范围：让原生 app 成为真正的 Review Inbox。选中项目后直接展示 Draft Inbox，支持 approve / reject，并复用 CLI review 协议刷新摘要，继续坚持“自动提炼只进 Draft，不静默启用”的信任边界。
 - v0.49 范围：把 Skilllet Catalog / App Store 接入原生 app。选中项目后展示 Catalog Health、package provenance、安装状态，并支持把 catalog package 安装或分配给 Codex / Claude Code；重复分配时合并 targets，不覆盖已有 Agent 分配。
+- v0.50 范围：把 Skilllet × Agent target matrix 接入原生 app。选中项目后可以直接点击矩阵单元格给 Codex / Claude Code 分配或取消分配 Skilllet；同时防止通过 UI 产生空 targets，因为当前声明式语义中空 targets 表示“所有启用 Agent”。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 JavaScript registry 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。
