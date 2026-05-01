@@ -59,6 +59,12 @@ mod tests {
         assert_eq!(value["ok"], true);
         assert_eq!(value["report"]["errors"], 0);
     }
+
+    #[test]
+    fn canvas_html_renders_target_matrix_as_table() {
+        assert!(INDEX_HTML.contains("target-matrix-table"));
+        assert!(INDEX_HTML.contains("matrix-cell assigned"));
+    }
 }
 
 #[derive(Clone)]
@@ -417,6 +423,12 @@ const INDEX_HTML: &str = r##"<!doctype html>
     .metric { border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fbfcfe; }
     .metric strong { display: block; font-size: 18px; }
     .metric span { color: var(--muted); font-size: 11px; }
+    .target-matrix-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .target-matrix-table th { color: var(--muted); font-weight: 700; text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); }
+    .target-matrix-table td { padding: 6px 4px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+    .target-matrix-table .skilllet-name { max-width: 128px; overflow-wrap: anywhere; color: var(--text); font-weight: 600; }
+    .matrix-cell { width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 6px; background: #f8fafc; color: var(--muted); cursor: pointer; font-weight: 700; }
+    .matrix-cell.assigned { border-color: #8bd3ca; background: #ecfdf9; color: var(--accent); }
     .ok { color: var(--good); }
     .bad { color: var(--danger); }
   </style>
@@ -655,10 +667,27 @@ const INDEX_HTML: &str = r##"<!doctype html>
       }
       const matrix = payload.matrix;
       document.getElementById("target-matrix").innerHTML = matrix.rows && matrix.rows.length ? `
-        <ul>${matrix.rows.map(row => {
-          const active = matrix.agents.filter(agent => row.targets[agent]).join(", ") || "none";
-          return `<li><strong>${escapeHtml(row.skilllet_id)}</strong><br>${escapeHtml(active)}</li>`;
-        }).join("")}</ul>
+        <table class="target-matrix-table">
+          <thead>
+            <tr>
+              <th>Skilllet</th>
+              ${matrix.agents.map(agent => `<th title="${escapeHtml(agent)}">${escapeHtml(shortAgentLabel(agent))}</th>`).join("")}
+            </tr>
+          </thead>
+          <tbody>
+            ${matrix.rows.map(row => `
+              <tr>
+                <td class="skilllet-name">${escapeHtml(row.skilllet_id)}</td>
+                ${matrix.agents.map(agent => {
+                  const assigned = Boolean(row.targets[agent]);
+                  const label = assigned ? "✓" : "−";
+                  const className = assigned ? "matrix-cell assigned" : "matrix-cell";
+                  return `<td><button class="${className}" title="${escapeHtml(row.skilllet_id)} ${assigned ? "uses" : "does not use"} ${escapeHtml(agent)}" onclick="toggleSkillletTarget('${escapeAttr(row.skilllet_id)}','${escapeAttr(agent)}')">${label}</button></td>`;
+                }).join("")}
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
       ` : `<p>No skilllets found.</p>`;
     }
 
@@ -916,6 +945,16 @@ const INDEX_HTML: &str = r##"<!doctype html>
 
     function escapeAttr(value) {
       return String(value ?? "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    }
+
+    function shortAgentLabel(value) {
+      const labels = {
+        "claude-code": "Claude",
+        "codex": "Codex",
+        "cursor": "Cursor",
+        "cline": "Cline"
+      };
+      return labels[value] || value;
     }
 
     document.getElementById("search").addEventListener("input", renderSkills);

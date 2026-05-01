@@ -45,6 +45,7 @@
 - v0.24 范围：加入 Skilllet target assignment，CLI/UI 都能把同一 Skilllet 分配给不同 Agent，强化 Project 层 multi-agent 配置体验。
 - v0.25 范围：加入 Skilllet target matrix，CLI/UI 都能总览 Skilllet × Agent 分配关系，为后续拖拽连线和批量操作打底。
 - v0.26 范围：实现 Cline 原生规则目录 exporter，将 Cline 目标编译为 `.clinerules/agent-kernel.md`，并兼容早期 `.clinerules` 单文件配置迁移。
+- v0.27 范围：将 Canvas Inspector 中的 Skilllet target matrix 从文字摘要升级为可点击矩阵表，让用户能直接按 Skilllet × Agent 维度分配能力。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 npm 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。

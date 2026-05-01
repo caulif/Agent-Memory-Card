@@ -166,6 +166,12 @@ v0.26 adds the Cline rules exporter:
 2. Legacy project configs that used `instructions: .clinerules` are migrated in memory to `rules_dir: .clinerules`.
 3. Cursor keeps `.mdc` frontmatter, while Cline receives plain Markdown rules.
 
+v0.27 improves the Canvas target matrix:
+
+1. The inspector now renders a real Skilllet by Agent table instead of a compact text list.
+2. Matrix cells show assigned or unassigned state at a glance.
+3. Clicking a cell updates that Skilllet's Agent targets through the existing assignment API.
+
 ## Commands
 
 ```bash
