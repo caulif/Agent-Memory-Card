@@ -3,14 +3,19 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
 use eframe::egui;
 
+use crate::catalog;
+use crate::config;
 use crate::draft;
 use crate::observation;
 use crate::project_registry::{self, ProjectRegistry, RegisteredProject};
 use crate::review;
 
 const DRAFT_INBOX_TITLE: &str = "Draft Inbox";
+const CATALOG_TITLE: &str = "Skilllet Catalog";
 const APPROVE_LABEL: &str = "Approve";
 const REJECT_LABEL: &str = "Reject";
+const INSTALL_CODEX_LABEL: &str = "Install to Codex";
+const INSTALL_CLAUDE_LABEL: &str = "Install to Claude Code";
 
 #[cfg(test)]
 mod tests {
@@ -68,8 +73,57 @@ mod tests {
     #[test]
     fn native_review_inbox_labels_are_stable() {
         assert_eq!(DRAFT_INBOX_TITLE, "Draft Inbox");
+        assert_eq!(CATALOG_TITLE, "Skilllet Catalog");
         assert_eq!(APPROVE_LABEL, "Approve");
         assert_eq!(REJECT_LABEL, "Reject");
+        assert_eq!(INSTALL_CODEX_LABEL, "Install to Codex");
+        assert_eq!(INSTALL_CLAUDE_LABEL, "Install to Claude Code");
+    }
+
+    #[test]
+    fn native_catalog_install_refreshes_status() {
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        let status = install_native_catalog_package(
+            temp.path(),
+            "core:rust-quality-gate",
+            vec!["codex".to_string()],
+        )
+        .expect("install catalog package");
+
+        let item = status
+            .items
+            .iter()
+            .find(|item| item.package.id == "core:rust-quality-gate")
+            .expect("installed package");
+        assert!(item.installed);
+    }
+
+    #[test]
+    fn native_catalog_install_merges_agent_targets() {
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        install_native_catalog_package(
+            temp.path(),
+            "core:rust-quality-gate",
+            vec!["codex".to_string()],
+        )
+        .expect("install codex");
+        install_native_catalog_package(
+            temp.path(),
+            "core:rust-quality-gate",
+            vec!["claude-code".to_string()],
+        )
+        .expect("install claude");
+
+        let config = crate::config::load_or_default_project_config(temp.path()).expect("config");
+        let included = config
+            .skilllets
+            .include
+            .iter()
+            .find(|item| item.id == "core:rust-quality-gate")
+            .expect("catalog skilllet");
+        assert_eq!(included.targets, vec!["claude-code", "codex"]);
     }
 }
 
@@ -108,6 +162,35 @@ fn apply_native_draft_decision(
     };
     review::apply_review_decisions(project_root, &[decision])?;
     review::review_project(project_root)
+}
+
+fn install_native_catalog_package(
+    project_root: &Path,
+    package_id: &str,
+    targets: Vec<String>,
+) -> Result<catalog::CatalogStatus> {
+    let targets = merge_existing_catalog_targets(project_root, package_id, targets)?;
+    catalog::install_catalog_package(project_root, package_id, targets)?;
+    catalog::catalog_status(project_root)
+}
+
+fn merge_existing_catalog_targets(
+    project_root: &Path,
+    package_id: &str,
+    targets: Vec<String>,
+) -> Result<Vec<String>> {
+    let config = config::load_or_default_project_config(project_root)?;
+    let mut merged = config
+        .skilllets
+        .include
+        .iter()
+        .find(|item| item.id == package_id)
+        .map(|item| item.targets.clone())
+        .unwrap_or_default();
+    merged.extend(targets);
+    merged.sort();
+    merged.dedup();
+    Ok(merged)
 }
 
 struct AgentKernelApp {
@@ -230,6 +313,31 @@ impl AgentKernelApp {
             }
         }
     }
+
+    fn install_catalog_for_selected(&mut self, package_id: &str, targets: Vec<String>) {
+        let Some(project) = self.selected_project() else {
+            self.report = "Select a project first.".to_string();
+            return;
+        };
+        let target_summary = if targets.is_empty() {
+            "all enabled agents".to_string()
+        } else {
+            targets.join(", ")
+        };
+        match install_native_catalog_package(&PathBuf::from(&project.path), package_id, targets) {
+            Ok(status) => {
+                let installed = status.items.iter().filter(|item| item.installed).count();
+                self.report = format!(
+                    "Installed `{package_id}` for {target_summary} in {}\n\nInstalled catalog packages: {installed}/{}",
+                    project.name,
+                    status.items.len()
+                );
+            }
+            Err(err) => {
+                self.report = format!("Catalog install failed for `{package_id}`: {err}");
+            }
+        }
+    }
 }
 
 impl eframe::App for AgentKernelApp {
@@ -328,6 +436,8 @@ impl AgentKernelApp {
         ui.add_space(12.0);
         self.render_draft_inbox(ui, &project);
         ui.add_space(12.0);
+        self.render_catalog_store(ui, &project);
+        ui.add_space(12.0);
         ui.separator();
         ui.heading("Output");
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -384,6 +494,77 @@ impl AgentKernelApp {
 
         if let Some((draft_id, approve)) = decision {
             self.decide_draft_for_selected(&draft_id, approve);
+        }
+    }
+
+    fn render_catalog_store(&mut self, ui: &mut egui::Ui, project: &RegisteredProject) {
+        ui.heading(CATALOG_TITLE);
+        let root = PathBuf::from(&project.path);
+        let validation = match catalog::load_or_default_catalog(&root) {
+            Ok(catalog) => catalog::validate_catalog(&catalog),
+            Err(err) => {
+                ui.label(format!("Could not load catalog: {err}"));
+                return;
+            }
+        };
+        ui.label(format!(
+            "Catalog Health: {} errors, {} warnings",
+            validation.errors, validation.warnings
+        ));
+
+        let status = match catalog::catalog_status(&root) {
+            Ok(status) => status,
+            Err(err) => {
+                ui.label(format!("Could not load catalog status: {err}"));
+                return;
+            }
+        };
+
+        if status.items.is_empty() {
+            ui.label("No catalog packages found.");
+            return;
+        }
+
+        let mut install: Option<(String, Vec<String>)> = None;
+        egui::ScrollArea::vertical()
+            .max_height(280.0)
+            .show(ui, |ui| {
+                for item in &status.items {
+                    ui.group(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.strong(&item.package.title);
+                            ui.label(if item.installed {
+                                "[installed]"
+                            } else {
+                                "[available]"
+                            });
+                            ui.small(format!("@{}", item.package.version));
+                        });
+                        ui.monospace(&item.package.id);
+                        ui.label(&item.package.description);
+                        ui.small(format!("Source: {}", item.package.source_url));
+                        if !item.package.tags.is_empty() {
+                            ui.small(format!("Tags: {}", item.package.tags.join(", ")));
+                        }
+                        ui.horizontal(|ui| {
+                            if ui.button(INSTALL_CODEX_LABEL).clicked() {
+                                install =
+                                    Some((item.package.id.clone(), vec!["codex".to_string()]));
+                            }
+                            if ui.button(INSTALL_CLAUDE_LABEL).clicked() {
+                                install = Some((
+                                    item.package.id.clone(),
+                                    vec!["claude-code".to_string()],
+                                ));
+                            }
+                        });
+                    });
+                    ui.add_space(6.0);
+                }
+            });
+
+        if let Some((package_id, targets)) = install {
+            self.install_catalog_for_selected(&package_id, targets);
         }
     }
 }

@@ -299,6 +299,12 @@ v0.48 makes the native app a real review surface:
 2. Drafts can be approved or rejected from the native UI.
 3. Draft decisions reuse the same review protocol as CLI, then refresh Review summary counts.
 
+v0.49 brings the local App Store into the native app:
+
+1. The selected project view shows the Skilllet Catalog and Catalog Health.
+2. Catalog packages can be installed or assigned to Codex / Claude Code from the native UI.
+3. Re-assigning an installed catalog package merges Agent targets instead of overwriting previous assignments.
+
 See [docs/quickstart.md](docs/quickstart.md) for a hands-on walkthrough.
 See [docs/platform-support.md](docs/platform-support.md) for Windows / macOS / Linux support details.
 
@@ -455,6 +461,7 @@ The native desktop app is the preferred visual entrypoint. It shows:
 - per-project Claude Code / Codex markers
 - Review status for the selected project
 - Draft Inbox approve/reject controls
+- Skilllet Catalog / App Store install controls
 - conversation evolution preview and Draft Inbox generation
 
 The legacy Canvas Web UI is still available for development and exposes:
