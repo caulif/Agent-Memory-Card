@@ -18,8 +18,8 @@ const CATALOG_TITLE: &str = "Skilllet Catalog";
 const SKILLLET_MATRIX_TITLE: &str = "Skilllet Target Matrix";
 const APPROVE_LABEL: &str = "Approve";
 const REJECT_LABEL: &str = "Reject";
-const INSTALL_CODEX_LABEL: &str = "Install to Codex";
-const INSTALL_CLAUDE_LABEL: &str = "Install to Claude Code";
+const INSTALL_CODEX_LABEL: &str = "Install Codex";
+const INSTALL_CLAUDE_LABEL: &str = "Install Claude";
 const CONFIDENCE_LABEL: &str = "Confidence";
 const MATCHED_TEMPLATE_LABEL: &str = "Matched Template";
 const REASON_LABEL: &str = "Reason";
@@ -111,8 +111,8 @@ fn card_frame() -> egui::Frame {
         .fill(palette.card)
         .stroke(egui::Stroke::new(1.0, palette.border))
         .corner_radius(egui::CornerRadius::same(18))
-        .inner_margin(egui::Margin::same(16))
-        .outer_margin(egui::Margin::symmetric(0, 7))
+        .inner_margin(egui::Margin::same(12))
+        .outer_margin(egui::Margin::symmetric(0, 4))
 }
 
 fn subtle_card_frame() -> egui::Frame {
@@ -121,8 +121,8 @@ fn subtle_card_frame() -> egui::Frame {
         .fill(palette.card_alt)
         .stroke(egui::Stroke::new(1.0, palette.border))
         .corner_radius(egui::CornerRadius::same(14))
-        .inner_margin(egui::Margin::same(12))
-        .outer_margin(egui::Margin::symmetric(0, 5))
+        .inner_margin(egui::Margin::same(10))
+        .outer_margin(egui::Margin::symmetric(0, 3))
 }
 
 fn primary_button(label: &'static str) -> egui::Button<'static> {
@@ -256,8 +256,8 @@ mod tests {
         assert_eq!(SKILLLET_MATRIX_TITLE, "Skilllet Target Matrix");
         assert_eq!(APPROVE_LABEL, "Approve");
         assert_eq!(REJECT_LABEL, "Reject");
-        assert_eq!(INSTALL_CODEX_LABEL, "Install to Codex");
-        assert_eq!(INSTALL_CLAUDE_LABEL, "Install to Claude Code");
+        assert_eq!(INSTALL_CODEX_LABEL, "Install Codex");
+        assert_eq!(INSTALL_CLAUDE_LABEL, "Install Claude");
         assert_eq!(CONFIDENCE_LABEL, "Confidence");
         assert_eq!(MATCHED_TEMPLATE_LABEL, "Matched Template");
         assert_eq!(REASON_LABEL, "Reason");
@@ -411,6 +411,47 @@ mod tests {
             .expect_err("empty target set should be rejected");
 
         assert!(err.to_string().contains("at least one target"));
+    }
+
+    #[test]
+    fn native_scroll_area_ids_are_unique() {
+        let ids = &[
+            SIDEBAR_SCROLL_ID,
+            DRAFT_SCROLL_ID,
+            CATALOG_SCROLL_ID,
+            MATRIX_SCROLL_ID,
+            OUTPUT_SCROLL_ID,
+            WORKSPACE_SCROLL_ID,
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for id in ids {
+            assert!(seen.insert(id), "duplicate ScrollArea id: {id}");
+        }
+    }
+
+    #[test]
+    fn native_action_labels_are_compact() {
+        let labels = &[
+            APPROVE_LABEL,
+            REJECT_LABEL,
+            INSTALL_CODEX_LABEL,
+            INSTALL_CLAUDE_LABEL,
+        ];
+        for label in labels {
+            assert!(
+                label.len() <= 22,
+                "label `{label}` is too long ({len} chars); keep it short to avoid wrapping",
+                len = label.len()
+            );
+        }
+    }
+
+    #[test]
+    fn native_page_frame_uses_background_fill() {
+        let palette = ui_palette();
+        // Verify palette tokens are coherent: card is lighter than background
+        assert!(palette.card.r() > palette.background.r());
+        assert!(palette.sidebar.r() < palette.card.r());
     }
 }
 
@@ -863,33 +904,35 @@ impl AgentKernelApp {
                 ui.set_min_width(ui.available_width());
                 card_frame().show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.label(
-                                egui::RichText::new(&project.name)
-                                    .size(26.0)
-                                    .strong()
-                                    .color(palette.text),
-                            );
-                            ui.label(egui::RichText::new(&project.path).color(palette.muted));
-                        });
+                        ui.label(
+                            egui::RichText::new(&project.name)
+                                .size(20.0)
+                                .strong()
+                                .color(palette.text),
+                        );
+                        ui.label(
+                            egui::RichText::new(&project.path)
+                                .size(12.0)
+                                .color(palette.muted),
+                        );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(
                                 egui::RichText::new(&self.status)
-                                    .size(12.0)
+                                    .size(11.0)
                                     .color(palette.muted),
                             );
                         });
                     });
-                    ui.add_space(12.0);
+                    ui.add_space(6.0);
                     ui.horizontal_wrapped(|ui| {
                         for agent in &project.agents {
-                            Self::pill(ui, &format!("Agent: {agent}"), palette.accent_soft);
+                            Self::pill(ui, agent, palette.accent_soft);
                         }
                         for marker in visible_header_markers(&project.markers) {
                             Self::pill(ui, &marker, palette.card_alt);
                         }
                     });
-                    ui.add_space(14.0);
+                    ui.add_space(8.0);
                     ui.horizontal_wrapped(|ui| {
                         if ui.add(secondary_button("Open Folder")).clicked() {
                             let _ = open::that(&project.path);
@@ -897,16 +940,10 @@ impl AgentKernelApp {
                         if ui.add(secondary_button("Review")).clicked() {
                             self.review_selected();
                         }
-                        if ui
-                            .add(secondary_button("Preview Conversation Evolution"))
-                            .clicked()
-                        {
+                        if ui.add(secondary_button("Preview Evolution")).clicked() {
                             self.evolve_selected(true);
                         }
-                        if ui
-                            .add(primary_button("Evolve Conversations to Drafts"))
-                            .clicked()
-                        {
+                        if ui.add(primary_button("Evolve to Drafts")).clicked() {
                             self.evolve_selected(false);
                         }
                     });
@@ -939,7 +976,7 @@ impl AgentKernelApp {
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("Output")
-                        .size(18.0)
+                        .size(16.0)
                         .strong()
                         .color(palette.text),
                 );
@@ -976,7 +1013,7 @@ impl AgentKernelApp {
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new(DRAFT_INBOX_TITLE)
-                        .size(18.0)
+                        .size(16.0)
                         .strong()
                         .color(palette.text),
                 );
@@ -1079,7 +1116,7 @@ impl AgentKernelApp {
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new(CATALOG_TITLE)
-                        .size(18.0)
+                        .size(16.0)
                         .strong()
                         .color(palette.text),
                 );
@@ -1195,7 +1232,7 @@ impl AgentKernelApp {
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new(SKILLLET_MATRIX_TITLE)
-                        .size(18.0)
+                        .size(16.0)
                         .strong()
                         .color(palette.text),
                 );

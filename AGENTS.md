@@ -18,3 +18,7 @@ Use Axios for frontend HTTP requests.
 
 Use Bun for JavaScript package management and scripts.
 
+### Delegate UI Polish To Claude Code
+
+For UI and visual polish work, invoke Claude Code first as the UI optimization agent. Let Claude Code propose or edit the UI implementation, then Codex reviews, integrates, tests, and handles non-UI engineering work.
+

@@ -10,4 +10,7 @@ This file is a build artifact for the current project.
 
 ## Enabled Skilllets
 
-- No skilllets are declared for this agent yet.
+### Delegate UI Polish To Claude Code
+
+For UI and visual polish work, invoke Claude Code first as the UI optimization agent. Let Claude Code propose or edit the UI implementation, then Codex reviews, integrates, tests, and handles non-UI engineering work.
+
