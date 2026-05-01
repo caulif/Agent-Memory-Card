@@ -63,6 +63,13 @@ pub struct ExtractCandidatePreview {
     pub evidence: String,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PreferenceTemplatePreview {
+    pub title: String,
+    pub body: String,
+    pub source: String,
+}
+
 #[derive(Debug, Clone)]
 struct Candidate {
     title: String,
@@ -70,6 +77,17 @@ struct Candidate {
     kind: String,
     scope: String,
     evidence: String,
+}
+
+pub fn preference_templates(project_root: &Path) -> Result<Vec<PreferenceTemplatePreview>> {
+    Ok(load_known_preferences(project_root)?
+        .into_iter()
+        .map(|preference| PreferenceTemplatePreview {
+            title: preference.title,
+            body: preference.body,
+            source: preference.source,
+        })
+        .collect())
 }
 
 pub fn extract_to_drafts(
@@ -245,6 +263,7 @@ fn normalize_known_preference(
 struct KnownPreference {
     title: String,
     body: String,
+    source: String,
     required: Vec<String>,
     context: Vec<String>,
 }
@@ -295,6 +314,7 @@ fn load_project_preferences(project_root: &Path) -> Result<Vec<KnownPreference>>
         .map(|preference| KnownPreference {
             title: preference.title,
             body: preference.body,
+            source: "project".to_string(),
             required: preference
                 .required
                 .into_iter()
@@ -314,6 +334,7 @@ fn built_in_preferences() -> Vec<KnownPreference> {
         KnownPreference {
             title: "Prefer Bun".to_string(),
             body: "Use Bun for JavaScript package management and scripts.".to_string(),
+            source: "built-in".to_string(),
             required: strings(&["bun"]),
             context: strings(&[
                 "npm",
@@ -331,6 +352,7 @@ fn built_in_preferences() -> Vec<KnownPreference> {
         KnownPreference {
             title: "Use Axios".to_string(),
             body: "Use Axios for frontend HTTP requests.".to_string(),
+            source: "built-in".to_string(),
             required: strings(&["axios"]),
             context: strings(&[
                 "fetch",
@@ -346,6 +368,7 @@ fn built_in_preferences() -> Vec<KnownPreference> {
         KnownPreference {
             title: "Use Vitest".to_string(),
             body: "Use Vitest for frontend unit tests.".to_string(),
+            source: "built-in".to_string(),
             required: strings(&["vitest"]),
             context: strings(&[
                 "jest",
@@ -639,6 +662,35 @@ mod tests {
         assert_eq!(
             report.candidates[0].body,
             "Use Bun for package management, scripts, and JavaScript runtime tasks."
+        );
+    }
+
+    #[test]
+    fn preference_templates_list_project_before_built_ins() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let registry_dir = temp.path().join(".agent-kernel");
+        fs::create_dir_all(&registry_dir).expect("registry dir");
+        fs::write(
+            registry_dir.join("preference-registry.yml"),
+            r#"preferences:
+  - title: Use Playwright
+    body: Use Playwright for browser automation tests.
+    required:
+      - playwright
+    context:
+      - cypress
+"#,
+        )
+        .expect("write registry");
+
+        let templates = preference_templates(temp.path()).expect("templates");
+
+        assert_eq!(templates[0].source, "project");
+        assert_eq!(templates[0].title, "Use Playwright");
+        assert!(
+            templates
+                .iter()
+                .any(|template| template.source == "built-in")
         );
     }
 

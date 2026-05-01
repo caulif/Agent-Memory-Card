@@ -109,6 +109,18 @@ mod tests {
             _ => panic!("expected observe evolve command"),
         }
     }
+
+    #[test]
+    fn cli_accepts_preference_list_command() {
+        let cli = Cli::parse_from(["agent-kernel", "preference", "list", "--project", "."]);
+
+        match cli.command {
+            Commands::Preference {
+                command: PreferenceCommands::List { project },
+            } => assert_eq!(project, PathBuf::from(".")),
+            _ => panic!("expected preference list command"),
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -222,6 +234,12 @@ enum Commands {
         /// Project root.
         #[arg(long, default_value = ".")]
         project: PathBuf,
+    },
+
+    /// Inspect high-confidence preference extraction templates.
+    Preference {
+        #[command(subcommand)]
+        command: PreferenceCommands,
     },
 
     /// Import and inspect raw observations before Skilllet synthesis.
@@ -511,6 +529,15 @@ enum ObserveCommands {
 }
 
 #[derive(Subcommand)]
+enum PreferenceCommands {
+    /// List built-in and project preference templates.
+    List {
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
 enum ProviderCommands {
     /// Write default local-first provider config.
     Init {
@@ -735,6 +762,22 @@ async fn main() -> Result<()> {
                 extract::extract_to_drafts(&project, text, file, targets, provider, dry_run)?;
             println!("{}", report.render());
         }
+        Commands::Preference { command } => match command {
+            PreferenceCommands::List { project } => {
+                let templates = extract::preference_templates(&project)?;
+                if templates.is_empty() {
+                    println!("No preference templates found.");
+                } else {
+                    println!("Agent-Kernel preference templates\n");
+                    for template in templates {
+                        println!(
+                            "- [{}] {}: {}",
+                            template.source, template.title, template.body
+                        );
+                    }
+                }
+            }
+        },
         Commands::Observe { command } => match command {
             ObserveCommands::Import {
                 file,

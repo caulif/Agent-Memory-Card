@@ -263,6 +263,12 @@ v0.42 makes Known Preference Registry project-configurable:
 2. Project templates use `title`, `body`, `required`, and `context` fields.
 3. Project templates are matched before built-ins, so advanced users can override default Bun/Axios/Vitest wording.
 
+v0.43 makes preference templates discoverable:
+
+1. `preference list` shows built-in and project-defined extraction templates.
+2. Each row includes the template source, title, and canonical body.
+3. This gives advanced users a quick way to audit the local evolution vocabulary.
+
 ## Commands
 
 ```bash
@@ -288,6 +294,7 @@ cargo run -- extract --text "以后把 npm 改为 Bun，所有 JS 脚本都用 b
 cargo run -- extract --text "以后前端请求统一使用 Axios，不要再用 Fetch。" --target codex --dry-run --project .
 cargo run -- extract --text "以后前端单元测试默认使用 Vitest，不要再写 Jest 配置。" --target codex --dry-run --project .
 cargo run -- extract --file chat.md --target codex --project .
+cargo run -- preference list --project .
 cargo run -- extract --text "Always run cargo test before pushing." --target codex --provider local --dry-run --project .
 cargo run -- observe import --file chat.jsonl --agent claude-code --source-kind claude-code-session --project .
 cargo run -- observe local --project .
