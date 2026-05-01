@@ -242,6 +242,21 @@ enum SkillletCommands {
         #[arg(long, default_value = ".")]
         project: PathBuf,
     },
+
+    /// Assign an owned Skilllet to one or more Agent targets.
+    Targets {
+        /// Skilllet id, such as project:use-axios.
+        #[arg(long)]
+        id: String,
+
+        /// Agent target. Repeat for multiple agents. Empty means all enabled instruction agents.
+        #[arg(long = "target")]
+        targets: Vec<String>,
+
+        /// Project root.
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -420,6 +435,14 @@ async fn main() -> Result<()> {
                         println!("- {}: {}", record.id, record.title);
                     }
                 }
+            }
+            SkillletCommands::Targets {
+                id,
+                targets,
+                project,
+            } => {
+                skilllet::set_skilllet_targets(&project, &id, targets)?;
+                println!("Updated targets for skilllet `{id}`");
             }
         },
         Commands::Agent { command } => match command {

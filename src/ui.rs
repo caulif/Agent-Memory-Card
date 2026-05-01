@@ -95,6 +95,12 @@ struct AgentEnabledRequest {
     enabled: bool,
 }
 
+#[derive(Debug, Deserialize)]
+struct SkillletTargetsRequest {
+    id: String,
+    targets: Vec<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct ApiState {
     project_root: String,
@@ -117,6 +123,7 @@ pub async fn serve(project: PathBuf, port: u16, open_browser: bool) -> Result<()
         .route("/api/state", get(api_state))
         .route("/api/mirror", post(api_mirror))
         .route("/api/agent/enabled", post(api_agent_enabled))
+        .route("/api/skilllet/targets", post(api_skilllet_targets))
         .route("/api/draft/approve", post(api_draft_approve))
         .route("/api/draft/reject", post(api_draft_reject))
         .route("/api/extract", post(api_extract))
@@ -189,6 +196,16 @@ async fn api_agent_enabled(
     Json(req): Json<AgentEnabledRequest>,
 ) -> Json<serde_json::Value> {
     match config::set_agent_enabled(state.project_root.as_ref(), &req.agent, req.enabled) {
+        Ok(_) => Json(serde_json::json!({ "ok": true })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+async fn api_skilllet_targets(
+    State(state): State<AppState>,
+    Json(req): Json<SkillletTargetsRequest>,
+) -> Json<serde_json::Value> {
+    match skilllet::set_skilllet_targets(state.project_root.as_ref(), &req.id, req.targets) {
         Ok(_) => Json(serde_json::json!({ "ok": true })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
@@ -531,14 +548,24 @@ const INDEX_HTML: &str = r##"<!doctype html>
 
     function renderSkilllets() {
       const skilllets = state.skilllets || [];
+      const agents = Object.entries(state.project.agents || {});
       document.getElementById("skilllet-count").textContent = skilllets.length;
-      document.getElementById("skilllets").innerHTML = skilllets.map(item => `
-        <div class="skill">
-          <strong>${escapeHtml(item.id)}</strong>
-          <p>${escapeHtml(item.body)}</p>
-          <span class="tag">${escapeHtml(item.kind)}</span>
-        </div>
-      `).join("") || `<div class="empty">No owned skilllets yet.</div>`;
+      document.getElementById("skilllets").innerHTML = skilllets.map(item => {
+        const ref = (state.project.skilllets?.include || []).find(entry => entry.id === item.id);
+        const targets = ref ? ref.targets || [] : [];
+        const buttons = agents.map(([name, agent]) => {
+          const active = targets.length === 0 ? agent.enabled : targets.includes(name);
+          return `<button class="btn" style="margin-top:6px;margin-right:4px;border-color:${active ? "var(--accent)" : "var(--line)"}" onclick="toggleSkillletTarget('${escapeAttr(item.id)}','${escapeAttr(name)}')">${active ? "✓ " : ""}${escapeHtml(name)}</button>`;
+        }).join("");
+        return `
+          <div class="skill">
+            <strong>${escapeHtml(item.id)}</strong>
+            <p>${escapeHtml(item.body)}</p>
+            <span class="tag">${escapeHtml(item.kind)}</span>
+            <div>${buttons}</div>
+          </div>
+        `;
+      }).join("") || `<div class="empty">No owned skilllets yet.</div>`;
     }
 
     function renderDrafts() {
@@ -769,6 +796,23 @@ const INDEX_HTML: &str = r##"<!doctype html>
       });
       const result = await res.json();
       document.getElementById("build-output").textContent = result.ok ? `${enabled ? "Enabled" : "Disabled"} agent: ${agent}` : result.error;
+      await loadState();
+    }
+
+    async function toggleSkillletTarget(id, agent) {
+      const ref = (state.project.skilllets?.include || []).find(entry => entry.id === id);
+      const enabledAgents = Object.entries(state.project.agents || {}).filter(([, cfg]) => cfg.enabled).map(([name]) => name);
+      const current = ref && ref.targets && ref.targets.length ? [...ref.targets] : enabledAgents;
+      const next = current.includes(agent)
+        ? current.filter(name => name !== agent)
+        : [...current, agent].sort();
+      const res = await fetch("/api/skilllet/targets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, targets: next })
+      });
+      const result = await res.json();
+      document.getElementById("build-output").textContent = result.ok ? `Updated targets: ${id} -> ${next.join(", ") || "none"}` : result.error;
       await loadState();
     }
 

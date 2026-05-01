@@ -148,6 +148,12 @@ v0.23 adds Agent target controls:
 2. `agent enable --agent <name>` and `agent disable --agent <name>` update `project.yml`.
 3. The Canvas Agent nodes expose Enable/Disable controls.
 
+v0.24 adds Skilllet target assignment:
+
+1. `skilllet targets --id <skilllet> --target <agent>` updates a Skilllet's Agent targets.
+2. `/api/skilllet/targets` exposes the same assignment operation to the Canvas.
+3. Skilllet cards show Agent target buttons for quick multi-agent assignment.
+
 ## Commands
 
 ```bash
@@ -160,6 +166,7 @@ cargo run -- status --project .
 cargo run -- sync --project .
 cargo run -- skilllet add --id project:use-axios --title "Use Axios" --body "Use Axios for frontend HTTP requests." --target codex --project .
 cargo run -- skilllet list --project .
+cargo run -- skilllet targets --id project:use-axios --target codex --target cursor --project .
 cargo run -- draft add --id project:prefer-pnpm --title "Prefer pnpm" --body "Use pnpm for package management." --target codex --project .
 cargo run -- draft approve --id project:prefer-pnpm --project .
 cargo run -- draft reject --id project:prefer-pnpm --project .
@@ -256,6 +263,7 @@ The Canvas UI exposes:
 - `/api/state` for project config, imported rules, and skill index
 - `/api/mirror` for declaring a Skill mirror
 - `/api/agent/enabled` for enabling or disabling Agent targets
+- `/api/skilllet/targets` for assigning Skilllets to Agent targets
 - `/api/extract` creates Draft Inbox items from pasted text
 - `/api/build/preview` for build previews
 - `/api/sync` for syncing declared mirrors and generated artifacts

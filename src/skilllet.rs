@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
@@ -103,6 +103,31 @@ pub fn load_skilllets(project_root: &Path) -> Result<Vec<SkillletRecord>> {
     Ok(records)
 }
 
+pub fn set_skilllet_targets(project_root: &Path, id: &str, targets: Vec<String>) -> Result<()> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    let skilllets = load_skilllets(&root)?;
+    let Some(record) = skilllets.iter().find(|record| record.id == id) else {
+        return Err(anyhow!("skilllet `{id}` does not exist"));
+    };
+    let mut project = config::load_or_default_project_config(&root)?;
+    if let Some(existing) = project
+        .skilllets
+        .include
+        .iter_mut()
+        .find(|item| item.id == id)
+    {
+        existing.targets = targets;
+        existing.scope = Some(record.scope.clone());
+    } else {
+        project.skilllets.include.push(SkillletRef {
+            id: id.to_string(),
+            targets,
+            scope: Some(record.scope.clone()),
+        });
+    }
+    config::save_project_config(&root, &project)
+}
+
 pub fn skilllet_map(
     project_root: &Path,
 ) -> Result<std::collections::BTreeMap<String, SkillletRecord>> {
@@ -145,5 +170,33 @@ mod tests {
         let project = config::load_or_default_project_config(temp.path()).expect("load project");
         assert_eq!(project.skilllets.include[0].id, "project:use-axios");
         assert_eq!(project.skilllets.include[0].targets, vec!["codex"]);
+    }
+
+    #[test]
+    fn set_skilllet_targets_updates_project_include() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        add_skilllet(
+            temp.path(),
+            "project:use-axios",
+            "Use Axios",
+            "Use Axios for frontend HTTP requests.",
+            "preference",
+            "project",
+            vec!["codex".to_string()],
+        )
+        .expect("add skilllet");
+
+        set_skilllet_targets(
+            temp.path(),
+            "project:use-axios",
+            vec!["claude-code".to_string(), "cursor".to_string()],
+        )
+        .expect("set targets");
+
+        let project = config::load_or_default_project_config(temp.path()).expect("project");
+        assert_eq!(
+            project.skilllets.include[0].targets,
+            vec!["claude-code", "cursor"]
+        );
     }
 }

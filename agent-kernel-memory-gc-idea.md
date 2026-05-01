@@ -42,6 +42,7 @@
 - v0.21 范围：加入 instruction artifact 预算警告，默认 32 KiB，借鉴 Codex `project_doc_max_bytes` 约束，提前发现 prompt bloat。
 - v0.22 范围：实现 Cursor Rules exporter，根据 `rules_dir` 生成 `.cursor/rules/agent-kernel.mdc`，让 multi-agent 分发从 Codex/Claude 扩展到 Cursor 原生规则面。
 - v0.23 范围：加入 Agent target 启停控制，CLI 与 Canvas 都能切换 Agent enabled 状态，降低手改声明式 YAML 的门槛。
+- v0.24 范围：加入 Skilllet target assignment，CLI/UI 都能把同一 Skilllet 分配给不同 Agent，强化 Project 层 multi-agent 配置体验。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 npm 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。
