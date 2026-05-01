@@ -109,6 +109,37 @@ impl UiPage {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UiActionKind {
+    Navigate,
+    ScanProjects,
+    RefreshProjectCache,
+    ReviewProject,
+    EvolveConversations,
+}
+
+impl UiActionKind {
+    fn from_label(label: &str, page: UiPage) -> Self {
+        if label.contains("同步") {
+            return UiActionKind::ScanProjects;
+        }
+        if label.contains("刷新") || label.contains("目录") {
+            return UiActionKind::RefreshProjectCache;
+        }
+        if label.contains("审查") || label.contains("构建") || label.contains("Rule CI") {
+            return UiActionKind::ReviewProject;
+        }
+        if page == UiPage::Observations
+            || label.contains("合成")
+            || label.contains("扫描")
+            || label.contains("导入")
+        {
+            return UiActionKind::EvolveConversations;
+        }
+        UiActionKind::Navigate
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct UiPalette {
     background: egui::Color32,
@@ -1346,6 +1377,72 @@ mod tests {
         assert!(labels.contains(&"观察"));
         assert!(UiPage::ALL.iter().all(|page| page.badge().is_ascii()));
     }
+
+    #[test]
+    fn native_header_actions_map_to_real_commands() {
+        assert_eq!(
+            UiActionKind::from_label("同步", UiPage::Overview),
+            UiActionKind::ScanProjects
+        );
+        assert_eq!(
+            UiActionKind::from_label("刷新目录", UiPage::Catalog),
+            UiActionKind::RefreshProjectCache
+        );
+        assert_eq!(
+            UiActionKind::from_label("构建预览", UiPage::RuleCi),
+            UiActionKind::ReviewProject
+        );
+        assert_eq!(
+            UiActionKind::from_label("批量合成", UiPage::Observations),
+            UiActionKind::EvolveConversations
+        );
+    }
+
+    #[test]
+    fn native_project_selection_loads_cache_in_background() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let project_root = temp.path().join("project");
+        std::fs::create_dir_all(&project_root).expect("project root");
+        let project = project_registry::RegisteredProject {
+            name: "project".to_string(),
+            path: project_root.to_string_lossy().to_string(),
+            agents: vec!["codex".to_string()],
+            markers: vec!["AGENTS.md".to_string()],
+            last_seen: String::new(),
+        };
+        let mut app = AgentKernelApp {
+            home: temp.path().to_path_buf(),
+            scan_roots: Vec::new(),
+            max_depth: 2,
+            registry: ProjectRegistry {
+                version: 1,
+                projects: vec![project.clone()],
+            },
+            selected_path: None,
+            active_page: UiPage::Overview,
+            status: String::new(),
+            report: String::new(),
+            draft_edit: None,
+            draft_selection: Vec::new(),
+            merge_edit: None,
+            cached_project_path: None,
+            cached_drafts: Vec::new(),
+            cached_catalog_validation: None,
+            cached_catalog_status: None,
+            cached_skilllet_matrix: None,
+            cache_error: None,
+            task_rx: None,
+            busy_task: None,
+        };
+
+        app.select_project_path(project.path.clone());
+
+        assert_eq!(app.selected_path, Some(project.path));
+        assert!(
+            app.is_busy(),
+            "project cache load should not block the UI thread"
+        );
+    }
 }
 
 pub fn run(home: PathBuf, scan_roots: Vec<PathBuf>, max_depth: usize) -> Result<()> {
@@ -1546,6 +1643,36 @@ impl AgentKernelApp {
     fn refresh_project_cache_for_selected(&mut self) {
         let project = self.selected_project();
         self.apply_project_cache(load_project_cache(project.as_ref()));
+    }
+
+    fn refresh_project_cache_for_selected_async(&mut self) {
+        let Some(project) = self.selected_project() else {
+            self.report = "请先选择一个项目。".to_string();
+            return;
+        };
+        let task_project = project.clone();
+        self.start_task("加载项目", move || UiTaskResult::Report {
+            report: format!("已加载项目缓存：{}", task_project.name),
+            cache: Some(load_project_cache(Some(&task_project))),
+        });
+    }
+
+    fn select_project_path(&mut self, path: String) {
+        self.selected_path = Some(path);
+        self.draft_edit = None;
+        self.draft_selection.clear();
+        self.merge_edit = None;
+        self.refresh_project_cache_for_selected_async();
+    }
+
+    fn run_ui_action(&mut self, label: &str, page: UiPage) {
+        match UiActionKind::from_label(label, page) {
+            UiActionKind::Navigate => {}
+            UiActionKind::ScanProjects => self.start_scan(),
+            UiActionKind::RefreshProjectCache => self.refresh_project_cache_for_selected_async(),
+            UiActionKind::ReviewProject => self.review_selected(),
+            UiActionKind::EvolveConversations => self.evolve_selected(false),
+        }
     }
 
     fn apply_project_cache(&mut self, cache: ProjectCache) {
@@ -2016,29 +2143,30 @@ impl AgentKernelApp {
         ui.add_space(18.0);
 
         let mut selected_path: Option<String> = None;
-        egui::ComboBox::from_id_salt("native-project-switcher")
-            .width(if shell_width > 1320.0 { 210.0 } else { 170.0 })
-            .selected_text(
-                self.selected_project()
-                    .map(|project| project.name)
-                    .unwrap_or_else(|| "选择项目".to_string()),
-            )
-            .show_ui(ui, |ui| {
-                for project in &self.registry.projects {
-                    if ui
-                        .selectable_label(
-                            self.selected_path.as_deref() == Some(project.path.as_str()),
-                            &project.name,
-                        )
-                        .clicked()
-                    {
-                        selected_path = Some(project.path.clone());
+        ui.add_enabled_ui(!self.is_busy(), |ui| {
+            egui::ComboBox::from_id_salt("native-project-switcher")
+                .width(if shell_width > 1320.0 { 210.0 } else { 170.0 })
+                .selected_text(
+                    self.selected_project()
+                        .map(|project| project.name)
+                        .unwrap_or_else(|| "选择项目".to_string()),
+                )
+                .show_ui(ui, |ui| {
+                    for project in &self.registry.projects {
+                        if ui
+                            .selectable_label(
+                                self.selected_path.as_deref() == Some(project.path.as_str()),
+                                &project.name,
+                            )
+                            .clicked()
+                        {
+                            selected_path = Some(project.path.clone());
+                        }
                     }
-                }
-            });
+                });
+        });
         if let Some(path) = selected_path {
-            self.selected_path = Some(path);
-            self.refresh_project_cache_for_selected();
+            self.select_project_path(path);
         }
 
         ui.add_space(16.0);
@@ -2266,11 +2394,7 @@ impl AgentKernelApp {
                     };
                     if ui.add_enabled(!self.is_busy(), button).clicked() {
                         self.active_page = *page;
-                        match *page {
-                            UiPage::RuleCi => self.review_selected(),
-                            UiPage::Observations => self.evolve_selected(false),
-                            _ => {}
-                        }
+                        self.run_ui_action(label, *page);
                     }
                     ui.add_space(8.0);
                 }
@@ -3131,7 +3255,10 @@ impl AgentKernelApp {
                     self.table_head(ui, "目标");
                     self.table_head(ui, "状态");
                     ui.end_row();
-                    let mut rows = matrix.as_ref().map(|m| m.rows.clone()).unwrap_or_default();
+                    let mut rows = matrix
+                        .as_ref()
+                        .map(|m| m.rows.iter().take(80).cloned().collect::<Vec<_>>())
+                        .unwrap_or_default();
                     if rows.is_empty() {
                         for (id, title) in [
                             ("project:prefer-bun", "Prefer Bun"),
@@ -3279,7 +3406,12 @@ impl AgentKernelApp {
             .fill(palette.background)
             .inner_margin(egui::Margin::symmetric(30, 24))
             .show(ui, |ui| {
-                let drafts = self.cached_drafts.clone();
+                let drafts = self
+                    .cached_drafts
+                    .iter()
+                    .take(80)
+                    .cloned()
+                    .collect::<Vec<_>>();
                 let selected = drafts
                     .iter()
                     .find(|draft| self.draft_selection.contains(&draft.id))
@@ -3367,7 +3499,8 @@ impl AgentKernelApp {
                 .id_salt(DRAFT_SCROLL_ID)
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    let display_drafts = if drafts.is_empty() {
+                    let using_synthetic = drafts.is_empty();
+                    let display_drafts = if using_synthetic {
                         vec![
                             self.synthetic_draft(
                                 "project:prefer-bun",
@@ -3528,7 +3661,7 @@ impl AgentKernelApp {
                                             |ui| {
                                                 if ui
                                                     .add_enabled(
-                                                        !self.is_busy(),
+                                                        !self.is_busy() && !using_synthetic,
                                                         danger_button(REJECT_LABEL),
                                                     )
                                                     .clicked()
@@ -3537,7 +3670,7 @@ impl AgentKernelApp {
                                                 }
                                                 if ui
                                                     .add_enabled(
-                                                        !self.is_busy(),
+                                                        !self.is_busy() && !using_synthetic,
                                                         secondary_button(APPROVE_LABEL),
                                                     )
                                                     .clicked()
@@ -3546,7 +3679,7 @@ impl AgentKernelApp {
                                                 }
                                                 if ui
                                                     .add_enabled(
-                                                        !self.is_busy(),
+                                                        !self.is_busy() && !using_synthetic,
                                                         secondary_button(EDIT_LABEL),
                                                     )
                                                     .clicked()
