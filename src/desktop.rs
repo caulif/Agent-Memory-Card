@@ -18,6 +18,9 @@ const APPROVE_LABEL: &str = "Approve";
 const REJECT_LABEL: &str = "Reject";
 const INSTALL_CODEX_LABEL: &str = "Install to Codex";
 const INSTALL_CLAUDE_LABEL: &str = "Install to Claude Code";
+const CONFIDENCE_LABEL: &str = "Confidence";
+const MATCHED_TEMPLATE_LABEL: &str = "Matched Template";
+const REASON_LABEL: &str = "Reason";
 
 #[cfg(test)]
 mod tests {
@@ -37,6 +40,9 @@ mod tests {
                 scope: "project".to_string(),
                 targets: vec!["codex".to_string()],
                 evidence: "native app test".to_string(),
+                confidence: None,
+                reason: None,
+                matched_template: None,
             },
         )
         .expect("add draft");
@@ -61,6 +67,9 @@ mod tests {
                 scope: "project".to_string(),
                 targets: vec!["codex".to_string()],
                 evidence: "native app test".to_string(),
+                confidence: None,
+                reason: None,
+                matched_template: None,
             },
         )
         .expect("add draft");
@@ -81,6 +90,9 @@ mod tests {
         assert_eq!(REJECT_LABEL, "Reject");
         assert_eq!(INSTALL_CODEX_LABEL, "Install to Codex");
         assert_eq!(INSTALL_CLAUDE_LABEL, "Install to Claude Code");
+        assert_eq!(CONFIDENCE_LABEL, "Confidence");
+        assert_eq!(MATCHED_TEMPLATE_LABEL, "Matched Template");
+        assert_eq!(REASON_LABEL, "Reason");
     }
 
     #[test]
@@ -601,6 +613,15 @@ impl AgentKernelApp {
                         ui.label(&draft.body);
                         if !draft.targets.is_empty() {
                             ui.small(format!("Targets: {}", draft.targets.join(", ")));
+                        }
+                        if let Some(confidence) = draft.confidence {
+                            ui.small(format!("{CONFIDENCE_LABEL}: {:.0}%", confidence * 100.0));
+                        }
+                        if let Some(template) = draft.matched_template.as_deref() {
+                            ui.small(format!("{MATCHED_TEMPLATE_LABEL}: {template}"));
+                        }
+                        if let Some(reason) = draft.reason.as_deref() {
+                            ui.small(format!("{REASON_LABEL}: {reason}"));
                         }
                         ui.horizontal(|ui| {
                             if ui.button(APPROVE_LABEL).clicked() {

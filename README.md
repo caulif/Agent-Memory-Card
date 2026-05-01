@@ -311,6 +311,12 @@ v0.50 makes multi-agent assignment visual:
 2. Matrix cells can be clicked to assign or unassign Skilllets for Codex / Claude Code.
 3. The native toggle protects against empty target sets, because empty targets mean "all enabled agents" in the declarative config.
 
+v0.51 makes Draft Inbox candidates explainable:
+
+1. Extracted Drafts now store `confidence`, `reason`, and `matched_template`.
+2. Dry-run extraction reports show why a candidate matched before writing Draft files.
+3. The native Draft Inbox shows compact confidence, template, and reason details so approval feels auditable instead of magical.
+
 See [docs/quickstart.md](docs/quickstart.md) for a hands-on walkthrough.
 See [docs/platform-support.md](docs/platform-support.md) for Windows / macOS / Linux support details.
 
@@ -467,6 +473,7 @@ The native desktop app is the preferred visual entrypoint. It shows:
 - per-project Claude Code / Codex markers
 - Review status for the selected project
 - Draft Inbox approve/reject controls
+- Draft explainability with confidence, matched template, and reason
 - Skilllet Catalog / App Store install controls
 - Skilllet by Agent target matrix
 - conversation evolution preview and Draft Inbox generation

@@ -25,6 +25,9 @@ mod tests {
                 scope: "project".to_string(),
                 targets: vec!["codex".to_string()],
                 evidence: "manual test".to_string(),
+                confidence: None,
+                reason: None,
+                matched_template: None,
             },
         )
         .expect("add draft");
@@ -49,6 +52,9 @@ mod tests {
                 scope: "project".to_string(),
                 targets: vec!["codex".to_string()],
                 evidence: "manual test".to_string(),
+                confidence: None,
+                reason: None,
+                matched_template: None,
             },
         )
         .expect("add draft");

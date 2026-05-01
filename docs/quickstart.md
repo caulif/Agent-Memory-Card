@@ -24,7 +24,7 @@ cargo run -- project scan --root . --max-depth 4
 cargo run -- app --scan-root .
 ```
 
-`app` 是 Rust/egui 编译出来的本地桌面程序，不是 Web UI。它会读取 `~/.agent-kernel/projects.yml`，在第一屏展示本地项目列表；选择项目后可以查看 Review 摘要、处理 Draft Inbox、安装 Catalog Skilllets、调整 Skilllet × Agent 分配矩阵，并一键把 Claude Code / Codex 本地历史对话整理进 Draft Inbox。
+`app` 是 Rust/egui 编译出来的本地桌面程序，不是 Web UI。它会读取 `~/.agent-kernel/projects.yml`，在第一屏展示本地项目列表；选择项目后可以查看 Review 摘要、处理带置信度和原因解释的 Draft Inbox、安装 Catalog Skilllets、调整 Skilllet × Agent 分配矩阵，并一键把 Claude Code / Codex 本地历史对话整理进 Draft Inbox。
 
 ## 1. 初始化项目状态
 
@@ -133,6 +133,12 @@ cargo run -- draft list --project .
 ```
 
 也可以打开原生 app，在选中的项目页直接查看 `Draft Inbox`，点击 `Approve` 或 `Reject`。
+
+高置信模板生成的 Draft 会带上可解释信息：
+
+- `confidence`：当前本地规则对这个候选的信心，例如 `92%`
+- `matched_template`：命中的模板来源，例如 `built-in:Use Axios`
+- `reason`：具体命中了哪些 required/context marker
 
 ## 5. 批准 Draft 为 Skilllet
 
@@ -259,6 +265,6 @@ cargo run -- test-rules --project .
 - LLM provider 仍是配置地基，本地提取器是主路径
 - Cursor / Cline 不在当前 MVP 主线
 - 原生 app 已经能浏览项目、Review、触发对话进化，并处理 Draft Inbox；更细的 Canvas 拖拽、App Store、Preference Registry 编辑体验仍会继续补强
-- 原生 app 已经接入 Skilllet Catalog 和 Skilllet target matrix；后续还需要把包详情编辑、Skilllet remove/disable、Draft explainability 做得更顺手
+- 原生 app 已经接入 Skilllet Catalog、Skilllet target matrix 和 Draft explainability；后续还需要把包详情编辑、Skilllet remove/disable、Draft 编辑/合并做得更顺手
 
-下一步最值得补的是给 Draft 增加 `matched_template` / `confidence` / `reason` 字段，让审查体验更像一个可解释的进化系统。
+下一步最值得补的是 Draft 编辑/合并能力和更完整的 Skilllet lineage，让审查体验继续靠近一个可解释的进化系统。

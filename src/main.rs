@@ -941,6 +941,9 @@ async fn main() -> Result<()> {
                         scope,
                         targets,
                         evidence,
+                        confidence: None,
+                        reason: None,
+                        matched_template: None,
                     },
                 )?;
                 println!("Added draft `{id}`");

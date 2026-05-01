@@ -70,6 +70,7 @@
 - v0.48 范围：让原生 app 成为真正的 Review Inbox。选中项目后直接展示 Draft Inbox，支持 approve / reject，并复用 CLI review 协议刷新摘要，继续坚持“自动提炼只进 Draft，不静默启用”的信任边界。
 - v0.49 范围：把 Skilllet Catalog / App Store 接入原生 app。选中项目后展示 Catalog Health、package provenance、安装状态，并支持把 catalog package 安装或分配给 Codex / Claude Code；重复分配时合并 targets，不覆盖已有 Agent 分配。
 - v0.50 范围：把 Skilllet × Agent target matrix 接入原生 app。选中项目后可以直接点击矩阵单元格给 Codex / Claude Code 分配或取消分配 Skilllet；同时防止通过 UI 产生空 targets，因为当前声明式语义中空 targets 表示“所有启用 Agent”。
+- v0.51 范围：让 Draft Inbox 具备可解释性。自动提炼出来的 Draft 需要保存并展示 `confidence`、`matched_template`、`reason`，dry-run 与原生 app 都能说明“为什么建议固化这条 Skilllet”，把进化系统的信任边界从“可审批”推进到“可审计”。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 JavaScript registry 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。
@@ -283,6 +284,20 @@ Aider 的 RepoMap 很值得借鉴：
 关键启发：
 
 - Agent-Kernel 可以做 “MemoryMap”：不是把整份规则文件丢给 LLM，而是先构建 Markdown AST 和语义索引，让模型只处理冲突候选、冗余候选和需要合并的节点。
+
+### 3.7 2026-05-01 生态补充：Skills 正在变成基础设施
+
+最新一轮生态观察显示，Agent Skills 已经从“单个 Agent 的小插件”变成更通用的能力封装格式：
+
+- Codex / Claude Code 都把 Skills 作为按需加载能力包，配合 `AGENTS.md` / `CLAUDE.md` 形成“常驻规则 + 按需 Skill”的双层上下文。
+- Memento-Skills 这类研究方向开始强调把成功经验自动压缩成可复用 skills，说明“从历史任务中进化 Skilllet”不是孤立想法，而是 Agent 生态的共同趋势。
+- 社区 Skill 生态会带来供应链风险。Skilllet Catalog / App Store 不能只做安装按钮，还需要 provenance、版本、校验、信任提示、Rule CI 和 review 默认门槛。
+
+对 Agent-Kernel 的启发：
+
+- Draft explainability 是必要地基：每条自动候选都必须说明 `matched_template`、`confidence`、`reason` 和 evidence。
+- App Store 后续要从“本地内置包”升级为“带信任元数据的 registry client”，但 MVP 仍保持本地 catalog 优先。
+- Skilllet lineage 应成为下一阶段核心：用户需要看到一个 Skilllet 来自哪些 observations、何时被批准、编译给了哪些 Agent、是否通过 Rule CI。
 
 ## 4. 产品边界
 
@@ -1572,6 +1587,9 @@ Patch:
 - OpenAI Codex AGENTS.md: https://developers.openai.com/codex/guides/agents-md
 - OpenAI Codex Skills: https://developers.openai.com/codex/skills
 - Agent Skills standard: https://agentskills.io/
+- OpenAI Skills catalog: https://github.com/openai/skills
+- Memento-Skills: https://arxiv.org/abs/2603.18743
+- Dive into Claude Code: https://arxiv.org/abs/2604.14228
 - Model Context Protocol: https://modelcontextprotocol.io/docs/getting-started/intro
 - Cursor Rules: https://docs.cursor.com/context/rules
 - Cline Memory Bank: https://docs.cline.bot/customization/memory-bank

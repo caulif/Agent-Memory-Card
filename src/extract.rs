@@ -34,6 +34,15 @@ impl ExtractReport {
                 out.push_str("Draft candidates:\n");
                 for candidate in &self.candidates {
                     out.push_str(&format!("- {}: {}\n", candidate.id, candidate.body));
+                    if let Some(confidence) = candidate.confidence {
+                        out.push_str(&format!("  confidence: {:.0}%\n", confidence * 100.0));
+                    }
+                    if let Some(template) = candidate.matched_template.as_deref() {
+                        out.push_str(&format!("  matched_template: {template}\n"));
+                    }
+                    if let Some(reason) = candidate.reason.as_deref() {
+                        out.push_str(&format!("  reason: {reason}\n"));
+                    }
                 }
             } else {
                 out.push_str("No drafts created.\n");
@@ -62,6 +71,9 @@ pub struct ExtractCandidatePreview {
     pub kind: String,
     pub scope: String,
     pub evidence: String,
+    pub confidence: Option<f32>,
+    pub reason: Option<String>,
+    pub matched_template: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -140,6 +152,9 @@ struct Candidate {
     kind: String,
     scope: String,
     evidence: String,
+    confidence: Option<f32>,
+    reason: Option<String>,
+    matched_template: Option<String>,
 }
 
 pub fn preference_templates(project_root: &Path) -> Result<Vec<PreferenceTemplatePreview>> {
@@ -239,6 +254,9 @@ pub fn test_preference_text(project_root: &Path, text: &str) -> Result<Preferenc
                     kind: "preference".to_string(),
                     scope: "project".to_string(),
                     evidence: sentence.to_string(),
+                    confidence: Some(0.92),
+                    reason: Some(format_match_reason(&reason)),
+                    matched_template: Some(format!("{}:{}", preference.source, preference.title)),
                 };
                 matches.push(PreferenceTestMatch {
                     draft_id: draft_id(&candidate),
@@ -329,6 +347,9 @@ pub fn extract_text_to_drafts(
             kind: candidate.kind.clone(),
             scope: candidate.scope.clone(),
             evidence: format!("{source}: {}", candidate.evidence),
+            confidence: candidate.confidence,
+            reason: candidate.reason.clone(),
+            matched_template: candidate.matched_template.clone(),
         })
         .collect::<Vec<_>>();
     if dry_run {
@@ -356,6 +377,9 @@ pub fn extract_text_to_drafts(
                 body: candidate.body,
                 targets: targets.clone(),
                 evidence: format!("{source}: {}", candidate.evidence),
+                confidence: candidate.confidence,
+                reason: candidate.reason,
+                matched_template: candidate.matched_template,
             },
         );
         match result {
@@ -403,6 +427,9 @@ fn extract_candidates_with_preferences(
             kind: classify_kind(sentence).to_string(),
             scope: "project".to_string(),
             evidence: sentence.to_string(),
+            confidence: Some(0.62),
+            reason: Some("Matched local rule-like sentence heuristic.".to_string()),
+            matched_template: None,
         });
     }
     dedupe_candidates(candidates)
@@ -413,16 +440,18 @@ fn normalize_known_preference(
     preferences: &[KnownPreference],
 ) -> Option<Candidate> {
     let lower = sentence.to_lowercase();
-    preferences
-        .iter()
-        .find(|preference| preference.matches(&lower))
-        .map(|preference| Candidate {
+    preferences.iter().find_map(|preference| {
+        preference.match_reason(&lower).map(|reason| Candidate {
             title: preference.title.clone(),
             body: preference.body.clone(),
             kind: "preference".to_string(),
             scope: "project".to_string(),
             evidence: sentence.to_string(),
+            confidence: Some(0.92),
+            reason: Some(format_match_reason(&reason)),
+            matched_template: Some(format!("{}:{}", preference.source, preference.title)),
         })
+    })
 }
 
 struct KnownPreference {
@@ -434,10 +463,6 @@ struct KnownPreference {
 }
 
 impl KnownPreference {
-    fn matches(&self, lower: &str) -> bool {
-        self.match_reason(lower).is_some()
-    }
-
     fn match_reason(&self, lower: &str) -> Option<KnownPreferenceMatchReason> {
         let required = self
             .required
@@ -464,6 +489,20 @@ impl KnownPreference {
 struct KnownPreferenceMatchReason {
     required: Vec<String>,
     context: Vec<String>,
+}
+
+fn format_match_reason(reason: &KnownPreferenceMatchReason) -> String {
+    let required = if reason.required.is_empty() {
+        "none".to_string()
+    } else {
+        reason.required.join(", ")
+    };
+    let context = if reason.context.is_empty() {
+        "none".to_string()
+    } else {
+        reason.context.join(", ")
+    };
+    format!("Matched preference template; required: {required}; context: {context}")
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -730,6 +769,62 @@ mod tests {
         assert_eq!(report.created.len(), 1);
         let drafts = draft::load_drafts(temp.path()).expect("drafts");
         assert_eq!(drafts[0].targets, vec!["codex"]);
+    }
+
+    #[test]
+    fn extracted_preference_draft_includes_explainability() {
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        extract_to_drafts(
+            temp.path(),
+            Some("以后前端请求统一使用 Axios，不要再用 Fetch。".to_string()),
+            None,
+            vec!["codex".to_string()],
+            Some("local".to_string()),
+            false,
+        )
+        .expect("extract");
+
+        let drafts = draft::load_drafts(temp.path()).expect("drafts");
+
+        assert_eq!(
+            drafts[0].matched_template.as_deref(),
+            Some("built-in:Use Axios")
+        );
+        assert_eq!(drafts[0].confidence, Some(0.92));
+        assert!(
+            drafts[0]
+                .reason
+                .as_deref()
+                .unwrap_or_default()
+                .contains("required: axios")
+        );
+    }
+
+    #[test]
+    fn dry_run_previews_preference_explainability() {
+        let temp = tempfile::tempdir().expect("tempdir");
+
+        let report = extract_to_drafts(
+            temp.path(),
+            Some("以后前端请求统一使用 Axios，不要再用 Fetch。".to_string()),
+            None,
+            vec!["codex".to_string()],
+            Some("local".to_string()),
+            true,
+        )
+        .expect("extract");
+
+        assert_eq!(
+            report.candidates[0].matched_template.as_deref(),
+            Some("built-in:Use Axios")
+        );
+        assert_eq!(report.candidates[0].confidence, Some(0.92));
+        assert!(
+            report
+                .render()
+                .contains("Matched preference template; required: axios")
+        );
     }
 
     #[test]

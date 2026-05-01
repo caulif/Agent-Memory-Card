@@ -18,6 +18,12 @@ pub struct DraftRecord {
     pub body: String,
     pub targets: Vec<String>,
     pub evidence: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matched_template: Option<String>,
     pub status: String,
     pub created_at: String,
     pub updated_at: String,
@@ -32,6 +38,9 @@ pub struct NewDraft {
     pub body: String,
     pub targets: Vec<String>,
     pub evidence: String,
+    pub confidence: Option<f32>,
+    pub reason: Option<String>,
+    pub matched_template: Option<String>,
 }
 
 pub fn add_draft(project_root: &Path, draft: NewDraft) -> Result<()> {
@@ -46,6 +55,9 @@ pub fn add_draft(project_root: &Path, draft: NewDraft) -> Result<()> {
         body: draft.body,
         targets: draft.targets,
         evidence: draft.evidence,
+        confidence: draft.confidence,
+        reason: draft.reason,
+        matched_template: draft.matched_template,
         status: "draft".to_string(),
         created_at: now.clone(),
         updated_at: now,
@@ -133,6 +145,9 @@ mod tests {
                 scope: "project".to_string(),
                 targets: vec!["codex".to_string()],
                 evidence: "manual test".to_string(),
+                confidence: None,
+                reason: None,
+                matched_template: None,
             },
         )
         .expect("add draft");
@@ -142,5 +157,38 @@ mod tests {
         assert!(load_drafts(temp.path()).expect("drafts").is_empty());
         let skilllets = skilllet::load_skilllets(temp.path()).expect("skilllets");
         assert_eq!(skilllets[0].id, "project:prefer-bun");
+    }
+
+    #[test]
+    fn draft_explainability_fields_roundtrip() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        add_draft(
+            temp.path(),
+            NewDraft {
+                id: "project:prefer-bun".to_string(),
+                title: "Prefer Bun".to_string(),
+                body: "Use Bun for JavaScript package management and scripts.".to_string(),
+                kind: "preference".to_string(),
+                scope: "project".to_string(),
+                targets: vec!["codex".to_string()],
+                evidence: "manual test".to_string(),
+                confidence: Some(0.92),
+                reason: Some("Matched project preference template".to_string()),
+                matched_template: Some("project:prefer-bun".to_string()),
+            },
+        )
+        .expect("add draft");
+
+        let drafts = load_drafts(temp.path()).expect("drafts");
+
+        assert_eq!(drafts[0].confidence, Some(0.92));
+        assert_eq!(
+            drafts[0].reason.as_deref(),
+            Some("Matched project preference template")
+        );
+        assert_eq!(
+            drafts[0].matched_template.as_deref(),
+            Some("project:prefer-bun")
+        );
     }
 }

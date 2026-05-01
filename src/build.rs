@@ -469,6 +469,9 @@ pub fn import_artifact_drifts(project_root: &Path) -> Result<ArtifactImportRepor
                 body,
                 targets: vec![artifact.agent.clone()],
                 evidence: format!("Imported from {}", fsutil::path_to_slash(&artifact.path)),
+                confidence: None,
+                reason: None,
+                matched_template: None,
             },
         )?;
         drafts.push(id);
