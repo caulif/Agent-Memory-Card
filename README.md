@@ -37,6 +37,13 @@ v0.5 makes Draft Inbox actionable in the UI:
 3. `/api/draft/reject` removes unwanted drafts.
 4. Build preview returns structured actions and warnings for richer UI rendering.
 
+v0.6 adds local heuristic extraction:
+
+1. `extract --text` creates Draft Inbox items from high-signal instruction text.
+2. `extract --file` does the same for chat logs or session notes.
+3. The extractor is local-only and does not call an LLM.
+4. Extracted candidates remain drafts until approved.
+
 ## Commands
 
 ```bash
@@ -52,6 +59,8 @@ cargo run -- skilllet list --project .
 cargo run -- draft add --id project:prefer-pnpm --title "Prefer pnpm" --body "Use pnpm for package management." --target codex --project .
 cargo run -- draft approve --id project:prefer-pnpm --project .
 cargo run -- draft reject --id project:prefer-pnpm --project .
+cargo run -- extract --text "Always use pnpm for package management." --target codex --project .
+cargo run -- extract --file chat.md --target codex --project .
 ```
 
 The npm wrapper works locally after the Rust binary has been built:
@@ -90,6 +99,10 @@ cargo run -- skilllet add --id project:use-axios --title "Use Axios" --body "Use
 # 9. Add and approve a Draft Inbox item.
 cargo run -- draft add --id project:prefer-pnpm --title "Prefer pnpm" --body "Use pnpm for package management." --target codex --project .
 cargo run -- draft approve --id project:prefer-pnpm --project .
+
+# 10. Extract local heuristic drafts from text or files.
+cargo run -- extract --text "Always use pnpm for package management." --target codex --project .
+cargo run -- extract --file chat.md --target codex --project .
 ```
 
 The Canvas UI exposes:

@@ -1,6 +1,7 @@
 mod build;
 mod config;
 mod draft;
+mod extract;
 mod fsutil;
 mod scanner;
 mod skilllet;
@@ -93,6 +94,25 @@ enum Commands {
     Draft {
         #[command(subcommand)]
         command: DraftCommands,
+    },
+
+    /// Extract local heuristic Draft Inbox candidates from text or a file.
+    Extract {
+        /// Inline text to extract from.
+        #[arg(long, conflicts_with = "file")]
+        text: Option<String>,
+
+        /// File to extract from.
+        #[arg(long, conflicts_with = "text")]
+        file: Option<PathBuf>,
+
+        /// Agent target. Repeat for multiple agents. Empty means project-level candidate.
+        #[arg(long = "target")]
+        targets: Vec<String>,
+
+        /// Project root.
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
     },
 
     /// Launch the local Canvas workspace UI.
@@ -300,6 +320,15 @@ async fn main() -> Result<()> {
                 println!("Rejected draft `{id}`");
             }
         },
+        Commands::Extract {
+            text,
+            file,
+            targets,
+            project,
+        } => {
+            let report = extract::extract_to_drafts(&project, text, file, targets)?;
+            println!("{}", report.render());
+        }
         Commands::Ui {
             project,
             port,
