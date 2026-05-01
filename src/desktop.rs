@@ -35,11 +35,12 @@ const DRAFT_SCROLL_ID: &str = "native-draft-inbox-scroll";
 const CATALOG_SCROLL_ID: &str = "native-catalog-scroll";
 const MATRIX_SCROLL_ID: &str = "native-skilllet-matrix-scroll";
 const OUTPUT_SCROLL_ID: &str = "native-output-scroll";
-const WORKSPACE_SCROLL_ID: &str = "native-project-workspace-scroll";
 const REVIEW_SCROLL_ID: &str = "native-review-center-scroll";
 const OBSERVATION_SCROLL_ID: &str = "native-observations-scroll";
 const INSPECTOR_SCROLL_ID: &str = "native-inspector-scroll";
 const AGENTS_SCROLL_ID: &str = "native-agents-scroll";
+const MIRRORS_SCROLL_ID: &str = "native-mirrors-scroll";
+const SETTINGS_SCROLL_ID: &str = "native-settings-scroll";
 const MAX_HEADER_MARKERS: usize = 3;
 const MERGE_SELECTED_LABEL: &str = "合并所选";
 const MERGE_CONFIRM_LABEL: &str = "创建合并候选";
@@ -181,6 +182,7 @@ struct ProjectCache {
     catalog_validation: Option<catalog::CatalogValidationReport>,
     catalog_status: Option<catalog::CatalogStatus>,
     skilllet_matrix: Option<skilllet::SkillletTargetMatrix>,
+    cached_lock: Option<config::ProjectLock>,
     error: Option<String>,
 }
 
@@ -404,6 +406,14 @@ fn busy_indicator_frame(seconds: f64) -> &'static str {
     }
 }
 
+fn compact_hash(value: &str) -> String {
+    if value.chars().count() <= 12 {
+        value.to_string()
+    } else {
+        value.chars().take(12).collect()
+    }
+}
+
 fn primary_button(label: &'static str) -> egui::Button<'static> {
     let palette = ui_palette();
     egui::Button::new(
@@ -492,6 +502,7 @@ fn empty_project_cache() -> ProjectCache {
         catalog_validation: None,
         catalog_status: None,
         skilllet_matrix: None,
+        cached_lock: None,
         error: None,
     }
 }
@@ -507,6 +518,7 @@ fn load_project_cache(project: Option<&RegisteredProject>) -> ProjectCache {
         catalog_validation: None,
         catalog_status: None,
         skilllet_matrix: None,
+        cached_lock: None,
         error: None,
     };
 
@@ -538,6 +550,15 @@ fn load_project_cache(project: Option<&RegisteredProject>) -> ProjectCache {
         Err(err) => {
             if cache.error.is_none() {
                 cache.error = Some(format!("Agent 分配矩阵读取失败：{err}"));
+            }
+        }
+    }
+
+    match config::load_lock(&root) {
+        Ok(lock) => cache.cached_lock = Some(lock),
+        Err(err) => {
+            if cache.error.is_none() {
+                cache.error = Some(format!("项目锁读取失败：{err}"));
             }
         }
     }
@@ -666,8 +687,9 @@ mod tests {
         assert_eq!(CATALOG_SCROLL_ID, "native-catalog-scroll");
         assert_eq!(MATRIX_SCROLL_ID, "native-skilllet-matrix-scroll");
         assert_eq!(OUTPUT_SCROLL_ID, "native-output-scroll");
-        assert_eq!(WORKSPACE_SCROLL_ID, "native-project-workspace-scroll");
         assert_eq!(AGENTS_SCROLL_ID, "native-agents-scroll");
+        assert_eq!(MIRRORS_SCROLL_ID, "native-mirrors-scroll");
+        assert_eq!(SETTINGS_SCROLL_ID, "native-settings-scroll");
 
         let palette = ui_palette();
         assert!(palette.background.r() > 235);
@@ -813,11 +835,12 @@ mod tests {
             CATALOG_SCROLL_ID,
             MATRIX_SCROLL_ID,
             OUTPUT_SCROLL_ID,
-            WORKSPACE_SCROLL_ID,
             REVIEW_SCROLL_ID,
             OBSERVATION_SCROLL_ID,
             INSPECTOR_SCROLL_ID,
             AGENTS_SCROLL_ID,
+            MIRRORS_SCROLL_ID,
+            SETTINGS_SCROLL_ID,
         ];
         let mut seen = std::collections::HashSet::new();
         for id in ids {
@@ -1296,6 +1319,7 @@ mod tests {
             cached_catalog_validation: None,
             cached_catalog_status: None,
             cached_skilllet_matrix: None,
+            cached_lock: None,
             cache_error: None,
             task_rx: None,
             busy_task: None,
@@ -1361,6 +1385,7 @@ mod tests {
             cached_catalog_validation: None,
             cached_catalog_status: None,
             cached_skilllet_matrix: None,
+            cached_lock: None,
             cache_error: None,
             task_rx: None,
             busy_task: None,
@@ -1402,6 +1427,7 @@ mod tests {
             cached_catalog_validation: None,
             cached_catalog_status: None,
             cached_skilllet_matrix: None,
+            cached_lock: None,
             cache_error: None,
             task_rx: None,
             busy_task: None,
@@ -1561,6 +1587,91 @@ mod tests {
     }
 
     #[test]
+    fn native_settings_summary_describes_runtime_context() {
+        let home = PathBuf::from("C:/Users/dev/.agent-kernel");
+        let scan_roots = vec![
+            PathBuf::from("C:/Users/dev/projects"),
+            PathBuf::from("D:/work"),
+        ];
+        let selected = project_registry::RegisteredProject {
+            name: "Skill-Memory".to_string(),
+            path: "C:/Users/dev/projects/Skill-Memory".to_string(),
+            agents: vec!["codex".to_string(), "claude-code".to_string()],
+            markers: vec!["AGENTS.md".to_string(), "CLAUDE.md".to_string()],
+            last_seen: "2026-05-02T00:00:00Z".to_string(),
+        };
+
+        let summary = settings_summary(&home, &scan_roots, 5, 12, Some(&selected));
+
+        assert!(summary.home.contains(".agent-kernel"));
+        assert_eq!(summary.scan_roots.len(), 2);
+        assert_eq!(summary.max_depth, 5);
+        assert_eq!(summary.project_count, 12);
+        assert_eq!(
+            summary.selected_project_name.as_deref(),
+            Some("Skill-Memory")
+        );
+        assert!(
+            summary
+                .selected_project_path
+                .as_deref()
+                .unwrap()
+                .contains("Skill-Memory")
+        );
+        assert_eq!(summary.privacy_mode, "本地优先");
+    }
+
+    #[test]
+    fn native_mirror_summary_counts_lock_states() {
+        let lock = config::ProjectLock {
+            generated_at: "2026-05-02T00:00:00Z".to_string(),
+            mirrors: vec![
+                config::MirrorState {
+                    source: "C:/skills/a".to_string(),
+                    target: ".claude/skills/a".to_string(),
+                    agent: "claude-code".to_string(),
+                    source_hash: "a".to_string(),
+                    target_hash: "a".to_string(),
+                    status: "synced".to_string(),
+                },
+                config::MirrorState {
+                    source: "C:/skills/b".to_string(),
+                    target: ".agents/skills/b".to_string(),
+                    agent: "codex".to_string(),
+                    source_hash: "b".to_string(),
+                    target_hash: "old".to_string(),
+                    status: "target drifted".to_string(),
+                },
+            ],
+            artifacts: vec![
+                config::ArtifactState {
+                    path: "AGENTS.md".to_string(),
+                    hash: "1".to_string(),
+                    kind: "codex:instructions".to_string(),
+                },
+                config::ArtifactState {
+                    path: "CLAUDE.md".to_string(),
+                    hash: "2".to_string(),
+                    kind: "claude-code:instructions".to_string(),
+                },
+            ],
+        };
+
+        let summary = mirror_summary(Some(&lock));
+
+        assert_eq!(summary.mirrors, 2);
+        assert_eq!(summary.artifacts, 2);
+        assert_eq!(summary.synced_mirrors, 1);
+        assert_eq!(summary.drifted_mirrors, 1);
+        assert_eq!(
+            summary.generated_at.as_deref(),
+            Some("2026-05-02T00:00:00Z")
+        );
+        assert_eq!(summary.mirror_rows[1].agent, "codex");
+        assert_eq!(summary.artifact_rows[0].path, "AGENTS.md");
+    }
+
+    #[test]
     fn native_project_selection_loads_cache_in_background() {
         let temp = tempfile::tempdir().expect("tempdir");
         let project_root = temp.path().join("project");
@@ -1593,6 +1704,7 @@ mod tests {
             cached_catalog_validation: None,
             cached_catalog_status: None,
             cached_skilllet_matrix: None,
+            cached_lock: None,
             cache_error: None,
             task_rx: None,
             busy_task: None,
@@ -1745,6 +1857,112 @@ struct AgentAssignmentSummary {
     skilllet_ids: Vec<String>,
 }
 
+struct SettingsSummary {
+    home: String,
+    scan_roots: Vec<String>,
+    max_depth: usize,
+    project_count: usize,
+    selected_project_name: Option<String>,
+    selected_project_path: Option<String>,
+    privacy_mode: String,
+}
+
+struct MirrorRow {
+    source: String,
+    target: String,
+    agent: String,
+    source_hash: String,
+    target_hash: String,
+    status: String,
+}
+
+struct ArtifactRow {
+    path: String,
+    hash: String,
+    kind: String,
+}
+
+struct MirrorSummary {
+    mirrors: usize,
+    artifacts: usize,
+    synced_mirrors: usize,
+    drifted_mirrors: usize,
+    generated_at: Option<String>,
+    mirror_rows: Vec<MirrorRow>,
+    artifact_rows: Vec<ArtifactRow>,
+}
+
+/// 构建运行时上下文摘要，供设置页面展示。
+fn settings_summary(
+    home: &Path,
+    scan_roots: &[PathBuf],
+    max_depth: usize,
+    project_count: usize,
+    selected: Option<&RegisteredProject>,
+) -> SettingsSummary {
+    SettingsSummary {
+        home: home.display().to_string(),
+        scan_roots: scan_roots.iter().map(|r| r.display().to_string()).collect(),
+        max_depth,
+        project_count,
+        selected_project_name: selected.map(|p| p.name.clone()),
+        selected_project_path: selected.map(|p| p.path.clone()),
+        privacy_mode: "本地优先".to_string(),
+    }
+}
+
+/// 从 project.lock.yml 构建镜像摘要，供镜像页面展示。
+fn mirror_summary(lock: Option<&config::ProjectLock>) -> MirrorSummary {
+    let lock = match lock {
+        Some(l) => l,
+        None => {
+            return MirrorSummary {
+                mirrors: 0,
+                artifacts: 0,
+                synced_mirrors: 0,
+                drifted_mirrors: 0,
+                generated_at: None,
+                mirror_rows: Vec::new(),
+                artifact_rows: Vec::new(),
+            };
+        }
+    };
+    let synced = lock.mirrors.iter().filter(|m| m.status == "synced").count();
+    let drifted = lock.mirrors.len() - synced;
+    MirrorSummary {
+        mirrors: lock.mirrors.len(),
+        artifacts: lock.artifacts.len(),
+        synced_mirrors: synced,
+        drifted_mirrors: drifted,
+        generated_at: if lock.generated_at.is_empty() {
+            None
+        } else {
+            Some(lock.generated_at.clone())
+        },
+        mirror_rows: lock
+            .mirrors
+            .iter()
+            .map(|m| MirrorRow {
+                source: m.source.clone(),
+                target: m.target.clone(),
+                agent: m.agent.clone(),
+                source_hash: m.source_hash.clone(),
+                target_hash: m.target_hash.clone(),
+                status: m.status.clone(),
+            })
+            .collect(),
+        artifact_rows: lock
+            .artifacts
+            .iter()
+            .map(|a| ArtifactRow {
+                path: a.path.clone(),
+                hash: a.hash.clone(),
+                kind: a.kind.clone(),
+            })
+            .collect(),
+    }
+}
+
 /// 从 SkillletTargetMatrix 计算每个 Agent 的分配摘要。
 /// 返回按 agents 顺序排列的摘要列表。
 fn agent_assignment_summaries(
@@ -1801,6 +2019,7 @@ struct AgentKernelApp {
     cached_catalog_validation: Option<catalog::CatalogValidationReport>,
     cached_catalog_status: Option<catalog::CatalogStatus>,
     cached_skilllet_matrix: Option<skilllet::SkillletTargetMatrix>,
+    cached_lock: Option<config::ProjectLock>,
     cache_error: Option<String>,
     task_rx: Option<Receiver<UiTaskResult>>,
     busy_task: Option<String>,
@@ -1839,6 +2058,7 @@ impl AgentKernelApp {
             cached_catalog_validation: None,
             cached_catalog_status: None,
             cached_skilllet_matrix: None,
+            cached_lock: None,
             cache_error: None,
             task_rx: None,
             busy_task: None,
@@ -1899,6 +2119,7 @@ impl AgentKernelApp {
         self.cached_catalog_validation = cache.catalog_validation;
         self.cached_catalog_status = cache.catalog_status;
         self.cached_skilllet_matrix = cache.skilllet_matrix;
+        self.cached_lock = cache.cached_lock;
         self.cache_error = cache.error;
     }
 
@@ -2561,17 +2782,9 @@ impl AgentKernelApp {
             UiPage::RuleCi => self.render_review_center_page(ui),
             UiPage::Observations => self.render_observations_page(ui),
             UiPage::Catalog => self.render_catalog_page(ui),
-            UiPage::Mirrors => self.render_placeholder_page(
-                ui,
-                "镜像状态",
-                "查看 Claude Code / Codex 编译产物和 Mirror drift。",
-            ),
+            UiPage::Mirrors => self.render_mirrors_page(ui),
             UiPage::Agents => self.render_agents_page(ui),
-            UiPage::Settings => self.render_placeholder_page(
-                ui,
-                "设置",
-                "配置扫描路径、隐私脱敏、本地模型和构建策略。",
-            ),
+            UiPage::Settings => self.render_settings_page(ui),
         }
     }
 
@@ -4505,80 +4718,347 @@ impl AgentKernelApp {
             });
     }
 
-    fn render_placeholder_page(&mut self, ui: &mut egui::Ui, title: &str, subtitle: &str) {
+    fn render_mirrors_page(&mut self, ui: &mut egui::Ui) {
         let palette = ui_palette();
+        let summary = mirror_summary(self.cached_lock.as_ref());
+
         egui::Frame::new()
             .fill(palette.background)
             .inner_margin(egui::Margin::symmetric(30, 24))
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
-                    .id_salt(WORKSPACE_SCROLL_ID)
+                    .id_salt(MIRRORS_SCROLL_ID)
                     .show(ui, |ui| {
                         self.render_page_header(
                             ui,
-                            title,
-                            subtitle,
+                            "镜像状态 / Mirrors",
+                            "查看 mirrored skills、生成产物和 project.lock.yml 记录，判断是否需要同步或反向导入。",
                             &[
                                 HeaderAction::new(
-                                    "同步",
-                                    UiPage::Overview,
-                                    UiActionKind::ScanProjects,
+                                    "刷新状态",
+                                    UiPage::Mirrors,
+                                    UiActionKind::RefreshProjectCache,
                                 ),
                                 HeaderAction::new(
-                                    "构建预览",
-                                    UiPage::RuleCi,
-                                    UiActionKind::ReviewProject,
+                                    "导入漂移",
+                                    UiPage::Observations,
+                                    UiActionKind::EvolveConversations,
                                 ),
                             ],
                         );
                         ui.add_space(24.0);
-                        ui.columns(3, |cols| {
+
+                        ui.columns(4, |cols| {
                             self.kpi_card(
                                 &mut cols[0],
-                                "LC",
-                                "Local-first",
-                                "ON",
-                                "隐私本地",
-                                palette.success,
-                            );
-                            self.kpi_card(
-                                &mut cols[1],
-                                "CC",
-                                "Claude Code",
-                                "Ready",
-                                "已支持",
+                                "MR",
+                                "Mirrored Skills",
+                                &summary.mirrors.to_string(),
+                                "引用镜像",
                                 palette.accent,
                             );
                             self.kpi_card(
+                                &mut cols[1],
+                                "OK",
+                                "Synced",
+                                &summary.synced_mirrors.to_string(),
+                                "已同步",
+                                palette.success,
+                            );
+                            self.kpi_card(
                                 &mut cols[2],
-                                "CX",
-                                "Codex",
-                                "Ready",
-                                "已支持",
+                                "DF",
+                                "Drift",
+                                &summary.drifted_mirrors.to_string(),
+                                "需处理",
+                                if summary.drifted_mirrors > 0 {
+                                    palette.warning
+                                } else {
+                                    palette.muted
+                                },
+                            );
+                            self.kpi_card(
+                                &mut cols[3],
+                                "AR",
+                                "Artifacts",
+                                &summary.artifacts.to_string(),
+                                "编译产物",
                                 palette.purple,
                             );
                         });
+
                         ui.add_space(18.0);
-                        card_frame().show(ui, |ui| {
-                            ui.set_min_height(360.0);
-                            ui.vertical_centered(|ui| {
-                                ui.add_space(90.0);
-                                ui.label(
-                                    egui::RichText::new(title)
-                                        .size(26.0)
-                                        .strong()
-                                        .color(palette.text),
+                        ui.columns(2, |cols| {
+                            card_frame().show(&mut cols[0], |ui| {
+                                self.card_title(
+                                    ui,
+                                    "Skill Mirrors",
+                                    summary.generated_at.as_deref().unwrap_or("尚未生成 lock"),
                                 );
-                                ui.label(
-                                    egui::RichText::new(
-                                        "该页面已按新设计系统保留扩展位，后续功能会在同一风格下继续补齐。",
-                                    )
-                                    .color(palette.muted),
-                                );
+                                ui.add_space(10.0);
+                                if summary.mirror_rows.is_empty() {
+                                    ui.label(
+                                        egui::RichText::new(
+                                            "当前项目还没有 mirrored skill。可以先在技能商店安装，或在 project.yml 中声明 mirrors。",
+                                        )
+                                        .size(13.0)
+                                        .color(palette.muted),
+                                    );
+                                } else {
+                                    egui::Grid::new("native-mirror-skill-grid")
+                                        .striped(true)
+                                        .spacing(egui::vec2(14.0, 9.0))
+                                        .show(ui, |ui| {
+                                            self.table_head(ui, "Agent");
+                                            self.table_head(ui, "来源");
+                                            self.table_head(ui, "目标");
+                                            self.table_head(ui, "状态");
+                                            self.table_head(ui, "Hash");
+                                            ui.end_row();
+                                            for row in summary.mirror_rows.iter().take(12) {
+                                                ui.label(
+                                                    egui::RichText::new(&row.agent)
+                                                        .size(12.0)
+                                                        .color(palette.text),
+                                                );
+                                                ui.label(
+                                                    egui::RichText::new(compact_middle_path(
+                                                        &row.source,
+                                                    ))
+                                                    .size(12.0)
+                                                    .color(palette.muted),
+                                                );
+                                                ui.label(
+                                                    egui::RichText::new(compact_middle_path(
+                                                        &row.target,
+                                                    ))
+                                                    .size(12.0)
+                                                    .color(palette.text),
+                                                );
+                                                Self::soft_badge(
+                                                    ui,
+                                                    &row.status,
+                                                    if row.status == "synced" {
+                                                        egui::Color32::from_rgb(231, 248, 238)
+                                                    } else {
+                                                        egui::Color32::from_rgb(255, 247, 226)
+                                                    },
+                                                    if row.status == "synced" {
+                                                        palette.success
+                                                    } else {
+                                                        palette.warning
+                                                    },
+                                                );
+                                                ui.label(
+                                                    egui::RichText::new(format!(
+                                                        "{} -> {}",
+                                                        compact_hash(&row.source_hash),
+                                                        compact_hash(&row.target_hash)
+                                                    ))
+                                                    .size(11.0)
+                                                    .color(palette.muted),
+                                                );
+                                                ui.end_row();
+                                            }
+                                        });
+                                }
+                            });
+
+                            card_frame().show(&mut cols[1], |ui| {
+                                self.card_title(ui, "Generated Artifacts", "CLAUDE.md / AGENTS.md");
+                                ui.add_space(10.0);
+                                if summary.artifact_rows.is_empty() {
+                                    ui.label(
+                                        egui::RichText::new(
+                                            "还没有生成产物记录。运行构建预览确认后，再同步生成 CLAUDE.md / AGENTS.md。",
+                                        )
+                                        .size(13.0)
+                                        .color(palette.muted),
+                                    );
+                                } else {
+                                    egui::Grid::new("native-mirror-artifact-grid")
+                                        .striped(true)
+                                        .spacing(egui::vec2(14.0, 9.0))
+                                        .show(ui, |ui| {
+                                            self.table_head(ui, "文件");
+                                            self.table_head(ui, "类型");
+                                            self.table_head(ui, "Hash");
+                                            ui.end_row();
+                                            for row in summary.artifact_rows.iter().take(12) {
+                                                ui.label(
+                                                    egui::RichText::new(&row.path)
+                                                        .size(12.0)
+                                                        .color(palette.text),
+                                                );
+                                                ui.label(
+                                                    egui::RichText::new(&row.kind)
+                                                        .size(12.0)
+                                                        .color(palette.text),
+                                                );
+                                                ui.label(
+                                                    egui::RichText::new(compact_hash(&row.hash))
+                                                        .size(11.0)
+                                                        .color(palette.muted),
+                                                );
+                                                ui.end_row();
+                                            }
+                                        });
+                                }
                             });
                         });
                     });
             });
+    }
+
+    fn render_settings_page(&mut self, ui: &mut egui::Ui) {
+        let palette = ui_palette();
+        let selected = self.selected_project();
+        let summary = settings_summary(
+            &self.home,
+            &self.scan_roots,
+            self.max_depth,
+            self.registry.projects.len(),
+            selected.as_ref(),
+        );
+
+        egui::Frame::new()
+            .fill(palette.background)
+            .inner_margin(egui::Margin::symmetric(30, 24))
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt(SETTINGS_SCROLL_ID)
+                    .show(ui, |ui| {
+                        self.render_page_header(
+                            ui,
+                            "设置 / Settings",
+                            "查看本地运行环境、扫描范围、隐私策略和当前支持的 Agent 目标。",
+                            &[
+                                HeaderAction::new(
+                                    "重新扫描",
+                                    UiPage::Settings,
+                                    UiActionKind::ScanProjects,
+                                ),
+                                HeaderAction::new(
+                                    "刷新项目",
+                                    UiPage::Settings,
+                                    UiActionKind::RefreshProjectCache,
+                                ),
+                            ],
+                        );
+                        ui.add_space(24.0);
+
+                        ui.columns(4, |cols| {
+                            self.kpi_card(
+                                &mut cols[0],
+                                "PJ",
+                                "项目数",
+                                &summary.project_count.to_string(),
+                                "已发现",
+                                palette.accent,
+                            );
+                            self.kpi_card(
+                                &mut cols[1],
+                                "DP",
+                                "扫描深度",
+                                &summary.max_depth.to_string(),
+                                "max-depth",
+                                palette.teal,
+                            );
+                            self.kpi_card(
+                                &mut cols[2],
+                                "PV",
+                                "隐私模式",
+                                &summary.privacy_mode,
+                                "Hybrid ready",
+                                palette.success,
+                            );
+                            self.kpi_card(
+                                &mut cols[3],
+                                "AG",
+                                "目标 Agent",
+                                "2",
+                                "Claude / Codex",
+                                palette.purple,
+                            );
+                        });
+
+                        ui.add_space(18.0);
+                        ui.columns(2, |cols| {
+                            card_frame().show(&mut cols[0], |ui| {
+                                self.card_title(ui, "本地环境", "");
+                                self.setting_row(ui, "Agent-Kernel Home", &summary.home);
+                                self.setting_row(
+                                    ui,
+                                    "当前项目",
+                                    summary
+                                        .selected_project_name
+                                        .as_deref()
+                                        .unwrap_or("未选择项目"),
+                                );
+                                self.setting_row(
+                                    ui,
+                                    "项目路径",
+                                    summary
+                                        .selected_project_path
+                                        .as_deref()
+                                        .unwrap_or("选择项目后显示"),
+                                );
+                            });
+
+                            card_frame().show(&mut cols[1], |ui| {
+                                self.card_title(ui, "扫描范围", "");
+                                if summary.scan_roots.is_empty() {
+                                    ui.label(
+                                        egui::RichText::new("未配置扫描根，将使用启动时的默认根。")
+                                            .size(13.0)
+                                            .color(palette.muted),
+                                    );
+                                } else {
+                                    for root in &summary.scan_roots {
+                                        self.setting_row(ui, "Scan Root", root);
+                                    }
+                                }
+                                ui.add_space(10.0);
+                                ui.horizontal_wrapped(|ui| {
+                                    Self::soft_badge(
+                                        ui,
+                                        "Claude Code",
+                                        palette.accent_soft,
+                                        palette.accent,
+                                    );
+                                    Self::soft_badge(
+                                        ui,
+                                        "Codex",
+                                        palette.accent_soft,
+                                        palette.accent,
+                                    );
+                                    Self::soft_badge(
+                                        ui,
+                                        "Local-first",
+                                        egui::Color32::from_rgb(231, 248, 238),
+                                        palette.success,
+                                    );
+                                });
+                            });
+                        });
+                    });
+            });
+    }
+
+    fn setting_row(&self, ui: &mut egui::Ui, label: &str, value: &str) {
+        let palette = ui_palette();
+        ui.add_space(6.0);
+        ui.label(
+            egui::RichText::new(label)
+                .size(12.0)
+                .strong()
+                .color(palette.muted),
+        );
+        ui.label(
+            egui::RichText::new(compact_middle_path(value))
+                .size(13.0)
+                .color(palette.text),
+        );
     }
 
     fn render_bottom_bar(&mut self, ui: &mut egui::Ui) {
