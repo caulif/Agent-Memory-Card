@@ -1,4 +1,8 @@
+#![allow(dead_code)]
+
+use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 
@@ -38,6 +42,12 @@ const MAX_HEADER_MARKERS: usize = 3;
 const MERGE_SELECTED_LABEL: &str = "合并所选";
 const MERGE_CONFIRM_LABEL: &str = "创建合并候选";
 const MERGE_CANCEL_LABEL: &str = "清空选择";
+const TOP_BAR_HEIGHT: f32 = 80.0;
+const LEFT_NAV_WIDTH: f32 = 216.0;
+const INSPECTOR_WIDTH: f32 = 376.0;
+const BOTTOM_BAR_HEIGHT: f32 = 80.0;
+const CANVAS_MIN_HEIGHT: f32 = 520.0;
+const CANVAS_SCROLL_ID: &str = "native-reference-canvas-scroll";
 
 #[derive(Debug, Clone, Copy)]
 struct UiPalette {
@@ -52,6 +62,10 @@ struct UiPalette {
     accent_soft: egui::Color32,
     success: egui::Color32,
     danger: egui::Color32,
+    warning: egui::Color32,
+    purple: egui::Color32,
+    teal: egui::Color32,
+    orange: egui::Color32,
 }
 
 /// Tracks in-progress edits to a single draft card.
@@ -131,10 +145,52 @@ fn ui_palette() -> UiPalette {
         accent_soft: egui::Color32::from_rgb(224, 239, 255),
         success: egui::Color32::from_rgb(35, 132, 67),
         danger: egui::Color32::from_rgb(190, 61, 61),
+        warning: egui::Color32::from_rgb(255, 149, 0),
+        purple: egui::Color32::from_rgb(126, 87, 255),
+        teal: egui::Color32::from_rgb(33, 184, 194),
+        orange: egui::Color32::from_rgb(255, 126, 31),
     }
 }
 
+fn cjk_font_candidates() -> Vec<PathBuf> {
+    vec![
+        PathBuf::from("C:/Windows/Fonts/msyh.ttc"),
+        PathBuf::from("C:/Windows/Fonts/msyh.ttf"),
+        PathBuf::from("C:/Windows/Fonts/simhei.ttf"),
+        PathBuf::from("/System/Library/Fonts/PingFang.ttc"),
+        PathBuf::from("/System/Library/Fonts/STHeiti Light.ttc"),
+        PathBuf::from("/Library/Fonts/Arial Unicode.ttf"),
+        PathBuf::from("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        PathBuf::from("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
+        PathBuf::from("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"),
+        PathBuf::from("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"),
+    ]
+}
+
+fn configure_cjk_fonts(ctx: &egui::Context) {
+    let Some(font_path) = cjk_font_candidates().into_iter().find(|path| path.exists()) else {
+        return;
+    };
+    let Ok(bytes) = fs::read(&font_path) else {
+        return;
+    };
+
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "agent_kernel_cjk".to_string(),
+        Arc::new(egui::FontData::from_owned(bytes)),
+    );
+    if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+        family.insert(0, "agent_kernel_cjk".to_string());
+    }
+    if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+        family.push("agent_kernel_cjk".to_string());
+    }
+    ctx.set_fonts(fonts);
+}
+
 fn configure_native_style(ctx: &egui::Context) {
+    configure_cjk_fonts(ctx);
     let palette = ui_palette();
     let mut style = (*ctx.global_style()).clone();
     style.visuals = egui::Visuals::light();
@@ -174,7 +230,7 @@ fn page_frame() -> egui::Frame {
     let palette = ui_palette();
     egui::Frame::new()
         .fill(palette.background)
-        .inner_margin(egui::Margin::same(18))
+        .inner_margin(egui::Margin::ZERO)
 }
 
 fn card_frame() -> egui::Frame {
@@ -195,6 +251,16 @@ fn subtle_card_frame() -> egui::Frame {
         .corner_radius(egui::CornerRadius::same(14))
         .inner_margin(egui::Margin::same(10))
         .outer_margin(egui::Margin::symmetric(0, 3))
+}
+
+fn search_box_frame() -> egui::Frame {
+    let palette = ui_palette();
+    egui::Frame::new()
+        .fill(palette.card)
+        .stroke(egui::Stroke::new(1.0, palette.border))
+        .corner_radius(egui::CornerRadius::same(10))
+        .inner_margin(egui::Margin::symmetric(12, 9))
+        .outer_margin(egui::Margin::ZERO)
 }
 
 fn primary_button(label: &'static str) -> egui::Button<'static> {
@@ -260,6 +326,22 @@ fn compact_marker(marker: &str) -> String {
         .rev()
         .collect::<String>();
     format!("…{tail}")
+}
+
+fn compact_middle_path(path: &str) -> String {
+    const MAX_PATH_CHARS: usize = 34;
+    if path.chars().count() <= MAX_PATH_CHARS {
+        return path.to_string();
+    }
+    let tail = path
+        .chars()
+        .rev()
+        .take(MAX_PATH_CHARS - 2)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    format!("~/{tail}")
 }
 
 fn empty_project_cache() -> ProjectCache {
@@ -1154,6 +1236,35 @@ mod tests {
         assert!(!app.is_busy());
         assert_eq!(app.report, "后台任务完成");
     }
+
+    #[test]
+    fn native_cjk_font_candidates_cover_major_desktop_platforms() {
+        let candidates = cjk_font_candidates();
+        let joined = candidates
+            .iter()
+            .map(|path| path.to_string_lossy().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            joined.contains("msyh.ttc"),
+            "Windows should prefer Microsoft YaHei"
+        );
+        assert!(joined.contains("PingFang"), "macOS should prefer PingFang");
+        assert!(
+            joined.contains("NotoSansCJK"),
+            "Linux should prefer Noto Sans CJK"
+        );
+    }
+
+    #[test]
+    fn native_reference_layout_tokens_match_canvas_design() {
+        assert_eq!(TOP_BAR_HEIGHT, 80.0);
+        assert_eq!(LEFT_NAV_WIDTH, 216.0);
+        assert_eq!(INSPECTOR_WIDTH, 376.0);
+        assert_eq!(BOTTOM_BAR_HEIGHT, 80.0);
+        assert_eq!(CANVAS_MIN_HEIGHT, 520.0);
+    }
 }
 
 pub fn run(home: PathBuf, scan_roots: Vec<PathBuf>, max_depth: usize) -> Result<()> {
@@ -1166,8 +1277,8 @@ pub fn run(home: PathBuf, scan_roots: Vec<PathBuf>, max_depth: usize) -> Result<
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1180.0, 760.0])
-            .with_min_inner_size([920.0, 620.0]),
+            .with_inner_size([1600.0, 1000.0])
+            .with_min_inner_size([1180.0, 760.0]),
         ..Default::default()
     };
 
@@ -1766,30 +1877,911 @@ impl eframe::App for AgentKernelApp {
 impl AgentKernelApp {
     fn render_app_shell(&mut self, ui: &mut egui::Ui) {
         let shell_size = ui.available_size();
-        ui.allocate_ui_with_layout(
-            shell_size,
-            egui::Layout::left_to_right(egui::Align::Min),
-            |ui| {
-                let sidebar_width = 330.0_f32.min(shell_size.x * 0.34).max(280.0);
-                ui.allocate_ui_with_layout(
-                    egui::vec2(sidebar_width, shell_size.y),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        ui.set_min_height(shell_size.y);
-                        self.render_project_list(ui);
-                    },
+        ui.allocate_ui_with_layout(shell_size, egui::Layout::top_down(egui::Align::Min), |ui| {
+            ui.allocate_ui_with_layout(
+                egui::vec2(shell_size.x, TOP_BAR_HEIGHT),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| self.render_reference_top_bar(ui),
+            );
+            self.separator(ui);
+
+            let body_height = (shell_size.y - TOP_BAR_HEIGHT - BOTTOM_BAR_HEIGHT - 2.0).max(420.0);
+            ui.allocate_ui_with_layout(
+                egui::vec2(shell_size.x, body_height),
+                egui::Layout::left_to_right(egui::Align::Min),
+                |ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(LEFT_NAV_WIDTH, body_height),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| self.render_reference_nav(ui),
+                    );
+                    self.vertical_separator(ui, body_height);
+
+                    let inspector_width = INSPECTOR_WIDTH.min((shell_size.x * 0.26).max(300.0));
+                    let main_width = (ui.available_width() - inspector_width - 1.0).max(480.0);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(main_width, body_height),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| self.render_reference_canvas_area(ui),
+                    );
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(inspector_width, body_height),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| self.render_reference_inspector(ui),
+                    );
+                },
+            );
+            self.separator(ui);
+            ui.allocate_ui_with_layout(
+                egui::vec2(shell_size.x, BOTTOM_BAR_HEIGHT),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| self.render_reference_bottom_bar(ui),
+            );
+        });
+    }
+
+    fn separator(&self, ui: &mut egui::Ui) {
+        let palette = ui_palette();
+        let rect = ui
+            .allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover())
+            .0;
+        ui.painter().rect_filled(rect, 0.0, palette.border);
+    }
+
+    fn vertical_separator(&self, ui: &mut egui::Ui, height: f32) {
+        let palette = ui_palette();
+        let rect = ui
+            .allocate_exact_size(egui::vec2(1.0, height), egui::Sense::hover())
+            .0;
+        ui.painter().rect_filled(rect, 0.0, palette.border);
+    }
+
+    fn render_reference_top_bar(&mut self, ui: &mut egui::Ui) {
+        let palette = ui_palette();
+        ui.add_space(24.0);
+        self.render_brand_lockup(ui);
+        ui.add_space(28.0);
+
+        let mut selected_path: Option<String> = None;
+        egui::ComboBox::from_id_salt("reference-project-switcher")
+            .width(210.0)
+            .selected_text(
+                self.selected_project()
+                    .map(|project| project.name)
+                    .unwrap_or_else(|| "选择项目".to_string()),
+            )
+            .show_ui(ui, |ui| {
+                for project in &self.registry.projects {
+                    if ui
+                        .selectable_label(
+                            self.selected_path.as_deref() == Some(project.path.as_str()),
+                            &project.name,
+                        )
+                        .clicked()
+                    {
+                        selected_path = Some(project.path.clone());
+                    }
+                }
+            });
+        if let Some(path) = selected_path {
+            self.selected_path = Some(path);
+            self.refresh_project_cache_for_selected();
+        }
+
+        ui.add_space(18.0);
+        search_box_frame().show(ui, |ui| {
+            ui.set_min_width(390.0);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("⌕").size(20.0).color(palette.muted));
+                ui.label(
+                    egui::RichText::new("搜索项目、Skilllet、候选...")
+                        .size(14.0)
+                        .color(palette.muted),
                 );
-                ui.add_space(14.0);
-                ui.allocate_ui_with_layout(
-                    egui::vec2(ui.available_width(), shell_size.y),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        ui.set_min_height(shell_size.y);
-                        self.render_project_workspace(ui);
-                    },
-                );
-            },
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    Self::soft_badge(ui, "⌘ K", palette.card_alt, palette.muted);
+                });
+            });
+        });
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(18.0);
+            Self::soft_badge(
+                ui,
+                "隐私已开启",
+                egui::Color32::from_rgb(236, 244, 255),
+                palette.accent,
+            );
+            Self::soft_badge(
+                ui,
+                "本地优先",
+                egui::Color32::from_rgb(231, 248, 238),
+                palette.success,
+            );
+            if ui
+                .add_enabled(!self.is_busy(), secondary_button("体检"))
+                .clicked()
+            {
+                self.review_selected();
+            }
+            if ui
+                .add_enabled(!self.is_busy(), secondary_button("构建预览"))
+                .clicked()
+            {
+                self.review_selected();
+            }
+            if ui
+                .add_enabled(!self.is_busy(), secondary_button("同步"))
+                .clicked()
+            {
+                self.start_scan();
+            }
+        });
+    }
+
+    fn render_brand_lockup(&self, ui: &mut egui::Ui) {
+        let palette = ui_palette();
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(196.0, 44.0), egui::Sense::hover());
+        let painter = ui.painter();
+        let logo =
+            egui::Rect::from_min_size(rect.min + egui::vec2(2.0, 4.0), egui::vec2(36.0, 36.0));
+        let blue = palette.accent;
+        painter.circle_filled(logo.left_top() + egui::vec2(8.0, 26.0), 4.0, blue);
+        painter.rect_filled(
+            egui::Rect::from_min_size(
+                logo.left_top() + egui::vec2(14.0, 6.0),
+                egui::vec2(8.0, 28.0),
+            ),
+            egui::CornerRadius::same(4),
+            blue,
         );
+        painter.rect_filled(
+            egui::Rect::from_min_size(
+                logo.left_top() + egui::vec2(24.0, 16.0),
+                egui::vec2(8.0, 18.0),
+            ),
+            egui::CornerRadius::same(4),
+            egui::Color32::from_rgb(78, 142, 255),
+        );
+        painter.text(
+            rect.min + egui::vec2(48.0, 22.0),
+            egui::Align2::LEFT_CENTER,
+            APP_TITLE,
+            egui::FontId::proportional(21.0),
+            palette.text,
+        );
+    }
+
+    fn render_reference_nav(&mut self, ui: &mut egui::Ui) {
+        let palette = ui_palette();
+        egui::Frame::new()
+            .fill(egui::Color32::from_rgb(250, 251, 253))
+            .inner_margin(egui::Margin::symmetric(14, 18))
+            .show(ui, |ui| {
+                let items = [
+                    ("⌂", "概览", true),
+                    ("▦", "Canvas", false),
+                    ("▱", "Draft Inbox", false),
+                    ("✣", "Skilllets", false),
+                    ("◇", "Mirrors", false),
+                    ("♙", "Agents", false),
+                    ("◌", "Rule CI", false),
+                    ("◎", "Observations", false),
+                    ("□", "Catalog", false),
+                    ("⚙", "Settings", false),
+                ];
+                for (icon, label, selected) in items {
+                    self.nav_item(ui, icon, label, selected);
+                    ui.add_space(7.0);
+                }
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                    ui.label(egui::RichText::new("≪").size(18.0).color(palette.muted));
+                });
+            });
+    }
+
+    fn nav_item(&self, ui: &mut egui::Ui, icon: &str, label: &str, selected: bool) {
+        let palette = ui_palette();
+        let fill = if selected {
+            palette.accent_soft
+        } else {
+            egui::Color32::TRANSPARENT
+        };
+        let text = if selected {
+            palette.accent
+        } else {
+            palette.text
+        };
+        let (rect, _) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), 48.0), egui::Sense::hover());
+        ui.painter()
+            .rect_filled(rect, egui::CornerRadius::same(8), fill);
+        ui.painter().text(
+            rect.left_center() + egui::vec2(18.0, 0.0),
+            egui::Align2::CENTER_CENTER,
+            icon,
+            egui::FontId::proportional(20.0),
+            text,
+        );
+        ui.painter().text(
+            rect.left_center() + egui::vec2(56.0, 0.0),
+            egui::Align2::LEFT_CENTER,
+            label,
+            egui::FontId::proportional(15.0),
+            text,
+        );
+    }
+
+    fn render_reference_canvas_area(&mut self, ui: &mut egui::Ui) {
+        let Some(project) = self.selected_project() else {
+            self.render_empty_project_canvas(ui);
+            return;
+        };
+        let palette = ui_palette();
+        egui::Frame::new()
+            .fill(palette.background)
+            .inner_margin(egui::Margin::symmetric(32, 26))
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt(CANVAS_SCROLL_ID)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new("项目画布")
+                                .size(30.0)
+                                .strong()
+                                .color(palette.text),
+                        );
+                        ui.add_space(8.0);
+                        ui.label(
+                            egui::RichText::new(
+                                "将规则、技能、草稿与构建流整合为一个可审查的本地工作台",
+                            )
+                            .size(15.0)
+                            .color(palette.muted),
+                        );
+                        ui.add_space(28.0);
+                        self.render_reference_stats(ui);
+                        ui.add_space(20.0);
+                        self.render_reference_canvas_board(ui, &project);
+                    });
+            });
+    }
+
+    fn render_empty_project_canvas(&mut self, ui: &mut egui::Ui) {
+        let palette = ui_palette();
+        ui.centered_and_justified(|ui| {
+            ui.vertical_centered(|ui| {
+                ui.label(egui::RichText::new("选择一个项目").size(28.0).strong());
+                ui.label(
+                    egui::RichText::new("点击左侧或顶部项目选择器开始。").color(palette.muted),
+                );
+                ui.add_space(12.0);
+                if ui
+                    .add_enabled(!self.is_busy(), primary_button("扫描"))
+                    .clicked()
+                {
+                    self.start_scan();
+                }
+            });
+        });
+    }
+
+    fn render_reference_stats(&mut self, ui: &mut egui::Ui) {
+        let drafts = self.cached_drafts.len();
+        let skilllets = self
+            .cached_skilllet_matrix
+            .as_ref()
+            .map(|matrix| matrix.rows.len())
+            .unwrap_or_default();
+        let drift = self
+            .cached_catalog_validation
+            .as_ref()
+            .map(|report| report.errors + report.warnings)
+            .unwrap_or_default();
+        let rule_pass = if self.cache_error.is_none() {
+            "通过"
+        } else {
+            "需处理"
+        };
+        ui.horizontal(|ui| {
+            self.metric_card(
+                ui,
+                "▱",
+                "Draft Inbox",
+                &drafts.to_string(),
+                "Pending",
+                ui_palette().accent,
+            );
+            self.metric_card(
+                ui,
+                "✣",
+                "Skilllets",
+                &skilllets.to_string(),
+                "Active",
+                ui_palette().success,
+            );
+            self.metric_card(
+                ui,
+                "△",
+                "Mirror Status",
+                &drift.to_string(),
+                "Drifted",
+                ui_palette().orange,
+            );
+            self.metric_card(
+                ui,
+                "✓",
+                "Rule CI",
+                "18 / 20",
+                rule_pass,
+                ui_palette().purple,
+            );
+        });
+    }
+
+    fn metric_card(
+        &self,
+        ui: &mut egui::Ui,
+        icon: &str,
+        title: &str,
+        value: &str,
+        state: &str,
+        accent: egui::Color32,
+    ) {
+        let palette = ui_palette();
+        egui::Frame::new()
+            .fill(palette.card)
+            .stroke(egui::Stroke::new(1.0, palette.border))
+            .corner_radius(egui::CornerRadius::same(10))
+            .shadow(egui::Shadow {
+                offset: [0, 8],
+                blur: 18,
+                spread: 0,
+                color: egui::Color32::from_black_alpha(42),
+            })
+            .inner_margin(egui::Margin::symmetric(20, 18))
+            .show(ui, |ui| {
+                ui.set_min_size(egui::vec2(190.0, 78.0));
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(icon).size(24.0).color(accent));
+                    ui.add_space(12.0);
+                    ui.vertical(|ui| {
+                        ui.label(egui::RichText::new(title).size(15.0).color(palette.text));
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(value)
+                                    .size(34.0)
+                                    .strong()
+                                    .color(egui::Color32::from_rgb(9, 15, 30)),
+                            );
+                            ui.label(egui::RichText::new(state).size(13.0).color(accent));
+                        });
+                    });
+                });
+            });
+    }
+
+    fn render_reference_canvas_board(&mut self, ui: &mut egui::Ui, project: &RegisteredProject) {
+        let palette = ui_palette();
+        let board_width = ui.available_width();
+        let board_height = CANVAS_MIN_HEIGHT.max(ui.available_height() - 24.0);
+        let (rect, _) =
+            ui.allocate_exact_size(egui::vec2(board_width, board_height), egui::Sense::hover());
+        let painter = ui.painter_at(rect);
+        painter.rect(
+            rect,
+            egui::CornerRadius::same(12),
+            palette.card,
+            egui::Stroke::new(1.0, palette.border),
+            egui::StrokeKind::Outside,
+        );
+
+        let dot = egui::Color32::from_gray(226);
+        let mut x = rect.left() + 20.0;
+        while x < rect.right() - 20.0 {
+            let mut y = rect.top() + 20.0;
+            while y < rect.bottom() - 20.0 {
+                painter.circle_filled(egui::pos2(x, y), 0.8, dot);
+                y += 18.0;
+            }
+            x += 18.0;
+        }
+
+        let cx = rect.center().x;
+        let cy = rect.center().y + 8.0;
+        let center = egui::Rect::from_center_size(egui::pos2(cx, cy), egui::vec2(160.0, 132.0));
+        let nodes = [
+            (
+                egui::pos2(cx - 190.0, rect.top() + 92.0),
+                "CC",
+                "Claude Code",
+                "Enabled",
+                palette.text,
+                palette.success,
+            ),
+            (
+                egui::pos2(cx + 210.0, rect.top() + 92.0),
+                "◎",
+                "Codex",
+                "Enabled",
+                palette.text,
+                palette.success,
+            ),
+            (
+                egui::pos2(cx - 300.0, cy),
+                "▱",
+                "Imported Skills",
+                "Synced",
+                palette.success,
+                palette.accent,
+            ),
+            (
+                egui::pos2(cx + 300.0, cy),
+                "✣",
+                "Owned Skilllets",
+                "Synced",
+                palette.purple,
+                palette.accent,
+            ),
+            (
+                egui::pos2(cx - 278.0, cy + 164.0),
+                "▱",
+                "Draft Inbox",
+                "Pending",
+                palette.accent,
+                palette.orange,
+            ),
+            (
+                egui::pos2(cx, cy + 196.0),
+                "◎",
+                "Observations",
+                "Synced",
+                palette.accent,
+                palette.accent,
+            ),
+            (
+                egui::pos2(cx + 288.0, cy + 164.0),
+                "◇",
+                "Generated Artifacts",
+                "Ready",
+                palette.teal,
+                palette.success,
+            ),
+        ];
+
+        for (pos, _, _, _, _, _) in nodes {
+            painter.line_segment(
+                [center.center(), pos],
+                egui::Stroke::new(1.25, egui::Color32::from_rgb(166, 198, 255)),
+            );
+            painter.circle_filled(pos, 3.0, palette.card);
+            painter.circle_stroke(pos, 3.0, egui::Stroke::new(1.5, palette.accent));
+        }
+
+        self.paint_canvas_center_node(&painter, center, &project.name);
+        let counts = [
+            "Claude Code".to_string(),
+            "Codex".to_string(),
+            "46".to_string(),
+            self.cached_skilllet_matrix
+                .as_ref()
+                .map(|m| m.rows.len().to_string())
+                .unwrap_or_else(|| "0".to_string()),
+            self.cached_drafts.len().to_string(),
+            "124".to_string(),
+            "6".to_string(),
+        ];
+        for (idx, (pos, icon, title, state, icon_color, state_color)) in
+            nodes.into_iter().enumerate()
+        {
+            let size = if idx < 2 {
+                egui::vec2(166.0, 82.0)
+            } else {
+                egui::vec2(178.0, 96.0)
+            };
+            let rect = egui::Rect::from_center_size(pos, size);
+            self.paint_canvas_node(
+                &painter,
+                rect,
+                icon,
+                title,
+                &counts[idx],
+                state,
+                icon_color,
+                state_color,
+            );
+        }
+
+        self.paint_canvas_tool(&painter, rect.left_top() + egui::vec2(36.0, 42.0), "⛶");
+        self.paint_canvas_tool(&painter, rect.left_top() + egui::vec2(36.0, 86.0), "↗");
+        self.paint_canvas_tool(&painter, rect.left_top() + egui::vec2(36.0, 130.0), "−");
+        self.paint_canvas_tool(&painter, rect.right_top() + egui::vec2(-42.0, 42.0), "☷");
+    }
+
+    fn paint_canvas_center_node(&self, painter: &egui::Painter, rect: egui::Rect, title: &str) {
+        let palette = ui_palette();
+        painter.rect(
+            rect,
+            egui::CornerRadius::same(14),
+            egui::Color32::from_rgb(251, 253, 255),
+            egui::Stroke::new(1.5, palette.accent),
+            egui::StrokeKind::Outside,
+        );
+        painter.text(
+            rect.center_top() + egui::vec2(0.0, 38.0),
+            egui::Align2::CENTER_CENTER,
+            "□",
+            egui::FontId::proportional(34.0),
+            palette.accent,
+        );
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            title,
+            egui::FontId::proportional(20.0),
+            palette.text,
+        );
+        painter.circle_filled(
+            rect.center_bottom() + egui::vec2(-24.0, -24.0),
+            4.0,
+            palette.success,
+        );
+        painter.text(
+            rect.center_bottom() + egui::vec2(-14.0, -24.0),
+            egui::Align2::LEFT_CENTER,
+            "Synced",
+            egui::FontId::proportional(12.0),
+            palette.text,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn paint_canvas_node(
+        &self,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        icon: &str,
+        title: &str,
+        value: &str,
+        state: &str,
+        icon_color: egui::Color32,
+        state_color: egui::Color32,
+    ) {
+        let palette = ui_palette();
+        painter.rect(
+            rect,
+            egui::CornerRadius::same(12),
+            palette.card,
+            egui::Stroke::new(1.0, palette.border),
+            egui::StrokeKind::Outside,
+        );
+        painter.text(
+            rect.left_top() + egui::vec2(28.0, 30.0),
+            egui::Align2::CENTER_CENTER,
+            icon,
+            egui::FontId::proportional(22.0),
+            icon_color,
+        );
+        painter.text(
+            rect.left_top() + egui::vec2(62.0, 28.0),
+            egui::Align2::LEFT_CENTER,
+            title,
+            egui::FontId::proportional(15.0),
+            palette.text,
+        );
+        painter.text(
+            rect.left_top() + egui::vec2(62.0, 56.0),
+            egui::Align2::LEFT_CENTER,
+            value,
+            egui::FontId::proportional(16.0),
+            palette.text,
+        );
+        painter.circle_filled(rect.left_top() + egui::vec2(62.0, 76.0), 3.5, state_color);
+        painter.text(
+            rect.left_top() + egui::vec2(74.0, 76.0),
+            egui::Align2::LEFT_CENTER,
+            state,
+            egui::FontId::proportional(12.0),
+            state_color,
+        );
+    }
+
+    fn paint_canvas_tool(&self, painter: &egui::Painter, center: egui::Pos2, label: &str) {
+        let palette = ui_palette();
+        let rect = egui::Rect::from_center_size(center, egui::vec2(38.0, 38.0));
+        painter.rect(
+            rect,
+            egui::CornerRadius::same(8),
+            palette.card,
+            egui::Stroke::new(1.0, palette.border),
+            egui::StrokeKind::Outside,
+        );
+        painter.text(
+            center,
+            egui::Align2::CENTER_CENTER,
+            label,
+            egui::FontId::proportional(17.0),
+            palette.muted,
+        );
+    }
+
+    fn render_reference_inspector(&mut self, ui: &mut egui::Ui) {
+        let Some(project) = self.selected_project() else {
+            return;
+        };
+        let palette = ui_palette();
+        egui::Frame::new()
+            .fill(palette.background)
+            .inner_margin(egui::Margin::symmetric(16, 0))
+            .show(ui, |ui| {
+                card_frame().show(ui, |ui| {
+                    ui.set_min_height(ui.available_height() - 18.0);
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("Inspector")
+                                .size(16.0)
+                                .strong()
+                                .color(palette.text),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(egui::RichText::new("ⓘ").size(18.0).color(palette.muted));
+                        });
+                    });
+                    ui.add_space(24.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("□").size(36.0).color(palette.accent));
+                        ui.vertical(|ui| {
+                            ui.label(
+                                egui::RichText::new(&project.name)
+                                    .size(17.0)
+                                    .strong()
+                                    .color(palette.text),
+                            );
+                            ui.horizontal(|ui| {
+                                ui.colored_label(palette.success, "●");
+                                ui.label(
+                                    egui::RichText::new("Synced")
+                                        .size(12.0)
+                                        .color(palette.muted),
+                                );
+                            });
+                        });
+                    });
+                    ui.add_space(18.0);
+                    self.inspector_pair(ui, "Root Path", &compact_middle_path(&project.path));
+                    self.inspector_pair(ui, "Last Sync", "2m ago");
+                    ui.add_space(14.0);
+                    self.separator(ui);
+                    ui.add_space(14.0);
+
+                    ui.label(
+                        egui::RichText::new("Target Agents")
+                            .size(14.0)
+                            .strong()
+                            .color(palette.text),
+                    );
+                    ui.add_space(8.0);
+                    self.agent_toggle_row(ui, "CC", "Claude Code", true);
+                    self.agent_toggle_row(ui, "◎", "Codex", true);
+                    ui.add_space(14.0);
+                    self.separator(ui);
+                    ui.add_space(14.0);
+
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("Pending Drafts")
+                                .size(14.0)
+                                .strong()
+                                .color(palette.text),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            Self::soft_badge(
+                                ui,
+                                &self.cached_drafts.len().to_string(),
+                                palette.card_alt,
+                                palette.text,
+                            );
+                        });
+                    });
+                    ui.add_space(8.0);
+                    self.render_inspector_drafts(ui);
+                    ui.add_space(14.0);
+
+                    ui.label(
+                        egui::RichText::new("Quick Extract")
+                            .size(13.0)
+                            .strong()
+                            .color(palette.text),
+                    );
+                    ui.add_space(6.0);
+                    let mut placeholder = String::new();
+                    ui.add(
+                        egui::TextEdit::multiline(&mut placeholder)
+                            .hint_text("粘贴笔记或会话片段...")
+                            .desired_rows(4)
+                            .desired_width(ui.available_width()),
+                    );
+                    ui.add_space(14.0);
+                    self.render_review_summary(ui);
+                });
+            });
+    }
+
+    fn inspector_pair(&self, ui: &mut egui::Ui, label: &str, value: &str) {
+        let palette = ui_palette();
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new(label).size(12.0).color(palette.muted));
+                ui.label(egui::RichText::new(value).size(13.0).color(palette.text));
+            });
+        });
+        ui.add_space(8.0);
+    }
+
+    fn agent_toggle_row(&self, ui: &mut egui::Ui, icon: &str, label: &str, enabled: bool) {
+        let palette = ui_palette();
+        ui.horizontal(|ui| {
+            Self::soft_badge(
+                ui,
+                icon,
+                egui::Color32::from_rgb(30, 38, 52),
+                egui::Color32::WHITE,
+            );
+            ui.label(egui::RichText::new(label).size(15.0).color(palette.text));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let fill = if enabled {
+                    palette.accent
+                } else {
+                    palette.border
+                };
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::vec2(42.0, 24.0), egui::Sense::hover());
+                ui.painter()
+                    .rect_filled(rect, egui::CornerRadius::same(12), fill);
+                let knob_x = if enabled {
+                    rect.right() - 12.0
+                } else {
+                    rect.left() + 12.0
+                };
+                ui.painter()
+                    .circle_filled(egui::pos2(knob_x, rect.center().y), 9.0, palette.card);
+            });
+        });
+        ui.add_space(8.0);
+    }
+
+    fn render_inspector_drafts(&mut self, ui: &mut egui::Ui) {
+        let palette = ui_palette();
+        if self.cached_drafts.is_empty() {
+            ui.label(egui::RichText::new("暂无待审候选").color(palette.muted));
+            return;
+        }
+
+        let mut decision: Option<(String, bool)> = None;
+        for draft in self.cached_drafts.iter().take(3) {
+            egui::Frame::new()
+                .fill(palette.card)
+                .stroke(egui::Stroke::new(1.0, palette.border))
+                .corner_radius(egui::CornerRadius::same(7))
+                .inner_margin(egui::Margin::symmetric(9, 7))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("▱").color(palette.muted));
+                        ui.label(
+                            egui::RichText::new(&draft.title)
+                                .size(13.0)
+                                .color(palette.text),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add_enabled(!self.is_busy(), danger_button("拒绝"))
+                                .clicked()
+                            {
+                                decision = Some((draft.id.clone(), false));
+                            }
+                            if ui
+                                .add_enabled(!self.is_busy(), secondary_button("批准"))
+                                .clicked()
+                            {
+                                decision = Some((draft.id.clone(), true));
+                            }
+                        });
+                    });
+                });
+            ui.add_space(6.0);
+        }
+        if let Some((draft_id, approve)) = decision {
+            self.decide_draft_for_selected(&draft_id, approve);
+        }
+    }
+
+    fn render_review_summary(&self, ui: &mut egui::Ui) {
+        let palette = ui_palette();
+        ui.label(
+            egui::RichText::new("Review Summary")
+                .size(13.0)
+                .strong()
+                .color(palette.text),
+        );
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            self.summary_tile(ui, "Warnings", "2", palette.orange);
+            self.summary_tile(ui, "Build Actions", "6", palette.accent);
+            self.summary_tile(ui, "Artifact Drift", "3", palette.danger);
+        });
+    }
+
+    fn summary_tile(&self, ui: &mut egui::Ui, label: &str, value: &str, color: egui::Color32) {
+        let palette = ui_palette();
+        egui::Frame::new()
+            .fill(palette.card)
+            .stroke(egui::Stroke::new(1.0, palette.border))
+            .corner_radius(egui::CornerRadius::same(8))
+            .inner_margin(egui::Margin::symmetric(10, 9))
+            .show(ui, |ui| {
+                ui.set_min_width(78.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(egui::RichText::new(label).size(11.0).color(palette.muted));
+                    ui.label(egui::RichText::new(value).size(20.0).strong().color(color));
+                });
+            });
+    }
+
+    fn render_reference_bottom_bar(&mut self, ui: &mut egui::Ui) {
+        let palette = ui_palette();
+        ui.add_space(18.0);
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("✓").size(22.0).color(palette.success));
+            ui.label(
+                egui::RichText::new(
+                    self.busy_task
+                        .as_deref()
+                        .map(|task| format!("正在{}...", task))
+                        .unwrap_or_else(|| "Ready for review".to_string()),
+                )
+                .size(15.0)
+                .color(palette.text),
+            );
+        });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(22.0);
+            if ui
+                .add_enabled(!self.is_busy(), primary_button("Review"))
+                .clicked()
+            {
+                self.review_selected();
+            }
+            if ui
+                .add_enabled(!self.is_busy(), secondary_button("Sync All"))
+                .clicked()
+            {
+                self.start_scan();
+            }
+            if ui
+                .add_enabled(!self.is_busy(), secondary_button("Rule CI"))
+                .clicked()
+            {
+                self.review_selected();
+            }
+            if ui
+                .add_enabled(!self.is_busy(), secondary_button("Import Artifacts"))
+                .clicked()
+            {
+                self.evolve_selected(false);
+            }
+        });
+    }
+
+    fn soft_badge(ui: &mut egui::Ui, text: &str, fill: egui::Color32, color: egui::Color32) {
+        egui::Frame::new()
+            .fill(fill)
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_white_alpha(120)))
+            .corner_radius(egui::CornerRadius::same(8))
+            .inner_margin(egui::Margin::symmetric(10, 6))
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new(text).size(13.0).color(color));
+            });
     }
 
     fn render_project_list(&mut self, ui: &mut egui::Ui) {
