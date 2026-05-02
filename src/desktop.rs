@@ -32,6 +32,7 @@ const MATCHED_TEMPLATE_LABEL: &str = "匹配模板";
 const REASON_LABEL: &str = "生成原因";
 const SIDEBAR_SCROLL_ID: &str = "native-project-sidebar-scroll";
 const DRAFT_SCROLL_ID: &str = "native-draft-inbox-scroll";
+const DRAFT_PAGE_SCROLL_ID: &str = "native-draft-page-scroll";
 const CATALOG_SCROLL_ID: &str = "native-catalog-scroll";
 const MATRIX_SCROLL_ID: &str = "native-skilllet-matrix-scroll";
 const OUTPUT_SCROLL_ID: &str = "native-output-scroll";
@@ -406,6 +407,27 @@ fn busy_indicator_frame(seconds: f64) -> &'static str {
     }
 }
 
+fn shell_body_height(shell_height: f32) -> f32 {
+    (shell_height - TOP_BAR_HEIGHT - BOTTOM_BAR_HEIGHT - 2.0).max(0.0)
+}
+
+fn header_action_enabled(is_busy: bool, active_page: UiPage, action: &HeaderAction) -> bool {
+    !(is_busy || action.kind == UiActionKind::Navigate && action.target_page == active_page)
+}
+
+fn responsive_panel_height(available: f32, preferred: f32, min_comfortable: f32) -> f32 {
+    let available = available.max(0.0);
+    if available < min_comfortable {
+        available.max(120.0)
+    } else {
+        available.min(preferred)
+    }
+}
+
+fn page_header_is_compact(available_width: f32) -> bool {
+    available_width < 840.0
+}
+
 fn compact_hash(value: &str) -> String {
     if value.chars().count() <= 12 {
         value.to_string()
@@ -684,6 +706,7 @@ mod tests {
         assert_eq!(APP_SUBTITLE, "Claude Code / Codex 本地 Skilllet 进化引擎");
         assert_eq!(SIDEBAR_SCROLL_ID, "native-project-sidebar-scroll");
         assert_eq!(DRAFT_SCROLL_ID, "native-draft-inbox-scroll");
+        assert_eq!(DRAFT_PAGE_SCROLL_ID, "native-draft-page-scroll");
         assert_eq!(CATALOG_SCROLL_ID, "native-catalog-scroll");
         assert_eq!(MATRIX_SCROLL_ID, "native-skilllet-matrix-scroll");
         assert_eq!(OUTPUT_SCROLL_ID, "native-output-scroll");
@@ -832,6 +855,7 @@ mod tests {
         let ids = &[
             SIDEBAR_SCROLL_ID,
             DRAFT_SCROLL_ID,
+            DRAFT_PAGE_SCROLL_ID,
             CATALOG_SCROLL_ID,
             MATRIX_SCROLL_ID,
             OUTPUT_SCROLL_ID,
@@ -1492,6 +1516,46 @@ mod tests {
         assert_eq!(BOTTOM_BAR_HEIGHT, 80.0);
         assert_eq!(CANVAS_MIN_HEIGHT, 520.0);
         assert_eq!(BUSY_REPAINT_INTERVAL_MS, 50);
+    }
+
+    #[test]
+    fn native_shell_body_height_never_hides_bottom_bar() {
+        let compact = shell_body_height(520.0);
+        assert_eq!(compact, 358.0);
+        assert!(TOP_BAR_HEIGHT + compact + BOTTOM_BAR_HEIGHT + 2.0 <= 520.0);
+
+        let tiny = shell_body_height(120.0);
+        assert_eq!(tiny, 0.0);
+        assert!(TOP_BAR_HEIGHT + tiny + BOTTOM_BAR_HEIGHT + 2.0 > 120.0);
+    }
+
+    #[test]
+    fn native_header_navigation_to_current_page_is_disabled() {
+        let action = HeaderAction::new("打开草稿", UiPage::DraftInbox, UiActionKind::Navigate);
+
+        assert!(!header_action_enabled(false, UiPage::DraftInbox, &action));
+        assert!(header_action_enabled(false, UiPage::Canvas, &action));
+        assert!(!header_action_enabled(true, UiPage::Canvas, &action));
+    }
+
+    #[test]
+    fn native_panel_height_clamps_between_floor_and_preferred() {
+        // At or above preferred → clamped to preferred
+        assert_eq!(responsive_panel_height(620.0, 560.0, 320.0), 560.0);
+        // Between min_comfortable and preferred → returns available
+        assert_eq!(responsive_panel_height(420.0, 560.0, 320.0), 420.0);
+        // Below min_comfortable but above floor → returns available
+        assert_eq!(responsive_panel_height(180.0, 560.0, 320.0), 180.0);
+        // Below 120 floor → raised to floor
+        assert_eq!(responsive_panel_height(50.0, 560.0, 320.0), 120.0);
+        // Negative → clamped to floor
+        assert_eq!(responsive_panel_height(-10.0, 560.0, 320.0), 120.0);
+    }
+
+    #[test]
+    fn native_page_header_switches_to_compact_layout_on_narrow_widths() {
+        assert!(page_header_is_compact(720.0));
+        assert!(!page_header_is_compact(960.0));
     }
 
     #[test]
@@ -2539,7 +2603,7 @@ impl AgentKernelApp {
             );
             self.separator(ui);
 
-            let body_height = (shell_size.y - TOP_BAR_HEIGHT - BOTTOM_BAR_HEIGHT - 2.0).max(480.0);
+            let body_height = shell_body_height(shell_size.y);
             ui.allocate_ui_with_layout(
                 egui::vec2(shell_size.x, body_height),
                 egui::Layout::left_to_right(egui::Align::Min),
@@ -2551,10 +2615,7 @@ impl AgentKernelApp {
                     );
                     self.vertical_separator(ui, body_height);
                     ui.allocate_ui_with_layout(
-                        egui::vec2(
-                            (shell_size.x - LEFT_NAV_WIDTH - 1.0).max(760.0),
-                            body_height,
-                        ),
+                        egui::vec2((shell_size.x - LEFT_NAV_WIDTH - 1.0).max(0.0), body_height),
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| self.render_active_page(ui),
                     );
@@ -2796,36 +2857,76 @@ impl AgentKernelApp {
         actions: &[HeaderAction],
     ) {
         let palette = ui_palette();
-        ui.horizontal(|ui| {
+        let compact = page_header_is_compact(ui.available_width());
+        let render_title = |ui: &mut egui::Ui| {
+            ui.label(
+                egui::RichText::new(title)
+                    .size(if compact { 24.0 } else { 30.0 })
+                    .strong()
+                    .color(palette.text),
+            );
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(subtitle)
+                    .size(14.0)
+                    .color(palette.muted),
+            );
+        };
+        let mut clicked: Option<HeaderAction> = None;
+
+        if compact {
             ui.vertical(|ui| {
-                ui.label(
-                    egui::RichText::new(title)
-                        .size(30.0)
-                        .strong()
-                        .color(palette.text),
-                );
-                ui.add_space(4.0);
-                ui.label(
-                    egui::RichText::new(subtitle)
-                        .size(14.0)
-                        .color(palette.muted),
-                );
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                for (idx, action) in actions.iter().enumerate() {
-                    let button = if idx == 0 {
-                        primary_button(action.label)
-                    } else {
-                        secondary_button(action.label)
-                    };
-                    if ui.add_enabled(!self.is_busy(), button).clicked() {
-                        self.active_page = action.target_page;
-                        self.run_ui_action(action.kind);
+                render_title(ui);
+                ui.add_space(12.0);
+                ui.horizontal_wrapped(|ui| {
+                    for (idx, action) in actions.iter().enumerate() {
+                        let button = if idx == 0 {
+                            primary_button(action.label)
+                        } else {
+                            secondary_button(action.label)
+                        };
+                        if ui
+                            .add_enabled(
+                                header_action_enabled(self.is_busy(), self.active_page, action),
+                                button,
+                            )
+                            .clicked()
+                        {
+                            clicked = Some(*action);
+                        }
+                        ui.add_space(8.0);
                     }
-                    ui.add_space(8.0);
-                }
+                });
             });
-        });
+        } else {
+            ui.horizontal(|ui| {
+                ui.vertical(render_title);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    for (idx, action) in actions.iter().enumerate() {
+                        let button = if idx == 0 {
+                            primary_button(action.label)
+                        } else {
+                            secondary_button(action.label)
+                        };
+                        if ui
+                            .add_enabled(
+                                header_action_enabled(self.is_busy(), self.active_page, action),
+                                button,
+                            )
+                            .clicked()
+                        {
+                            clicked = Some(*action);
+                        }
+                        ui.add_space(8.0);
+                    }
+                });
+            });
+        }
+
+        if let Some(action) = clicked {
+            self.active_page = action.target_page;
+            self.run_ui_action(action.kind);
+        }
     }
 
     fn render_canvas_page(&mut self, ui: &mut egui::Ui) {
@@ -3193,15 +3294,20 @@ impl AgentKernelApp {
                             self.rule_ci_card(&mut cols[1]);
                         });
                         ui.add_space(14.0);
-                        let inspector_width = INSPECTOR_WIDTH.min((ui.available_width() * 0.32).max(320.0));
+                        let available_width = ui.available_width();
+                        let inspector_width =
+                            INSPECTOR_WIDTH.min((available_width * 0.32).clamp(280.0, 320.0));
+                        let panel_height =
+                            responsive_panel_height(ui.available_height(), 320.0, 240.0);
+                        let queue_width = (available_width - inspector_width - 14.0).max(0.0);
                         ui.horizontal(|ui| {
                             ui.allocate_ui_with_layout(
-                                egui::vec2((ui.available_width() - inspector_width - 14.0).max(480.0), 320.0),
+                                egui::vec2(queue_width, panel_height),
                                 egui::Layout::top_down(egui::Align::Min),
                                 |ui| self.review_queue_card(ui),
                             );
                             ui.allocate_ui_with_layout(
-                                egui::vec2(inspector_width, 320.0),
+                                egui::vec2(inspector_width, panel_height),
                                 egui::Layout::top_down(egui::Align::Min),
                                 |ui| self.review_inspector_card(ui),
                             );
@@ -3481,17 +3587,11 @@ impl AgentKernelApp {
     fn observation_table_card(&mut self, ui: &mut egui::Ui) {
         let palette = ui_palette();
         card_frame().show(ui, |ui| {
-            ui.set_min_height(470.0);
+            ui.set_min_height(responsive_panel_height(ui.available_height(), 420.0, 260.0));
             ui.horizontal(|ui| {
-                render_search_input(ui, &mut self.search_query, "搜索 observations...", 300.0);
+                render_search_input(ui, &mut self.search_query, "搜索观察记录...", 300.0);
                 if ui
-                    .add_enabled(!self.is_busy(), secondary_button("Filters"))
-                    .clicked()
-                {
-                    self.report = "已打开观察过滤器。".to_string();
-                }
-                if ui
-                    .add_enabled(!self.is_busy(), secondary_button("最新导入"))
+                    .add_enabled(!self.is_busy(), secondary_button("刷新项目"))
                     .clicked()
                 {
                     self.start_scan();
@@ -3582,7 +3682,7 @@ impl AgentKernelApp {
     fn synthesis_flow_card(&mut self, ui: &mut egui::Ui) {
         let palette = ui_palette();
         card_frame().show(ui, |ui| {
-            ui.set_min_height(470.0);
+            ui.set_min_height(responsive_panel_height(ui.available_height(), 420.0, 260.0));
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("合成流程")
@@ -3695,15 +3795,20 @@ impl AgentKernelApp {
                             self.kpi_card(&mut cols[5], "UN", "未分配", "4", "", palette.danger);
                         });
                         ui.add_space(18.0);
-                        let detail_width = INSPECTOR_WIDTH.min((ui.available_width() * 0.34).max(340.0));
+                        let available_width = ui.available_width();
+                        let detail_width =
+                            INSPECTOR_WIDTH.min((available_width * 0.34).clamp(280.0, 340.0));
+                        let panel_height =
+                            responsive_panel_height(ui.available_height(), 500.0, 300.0);
+                        let table_width = (available_width - detail_width - 14.0).max(0.0);
                         ui.horizontal(|ui| {
                             ui.allocate_ui_with_layout(
-                                egui::vec2((ui.available_width() - detail_width - 14.0).max(520.0), 500.0),
+                                egui::vec2(table_width, panel_height),
                                 egui::Layout::top_down(egui::Align::Min),
                                 |ui| self.skilllet_table_card(ui),
                             );
                             ui.allocate_ui_with_layout(
-                                egui::vec2(detail_width, 500.0),
+                                egui::vec2(detail_width, panel_height),
                                 egui::Layout::top_down(egui::Align::Min),
                                 |ui| self.skilllet_detail_card(ui),
                             );
@@ -3895,59 +4000,70 @@ impl AgentKernelApp {
             .fill(palette.background)
             .inner_margin(egui::Margin::symmetric(30, 24))
             .show(ui, |ui| {
-                let drafts = self
-                    .cached_drafts
-                    .iter()
-                    .take(80)
-                    .cloned()
-                    .collect::<Vec<_>>();
-                let selected = drafts
-                    .iter()
-                    .find(|draft| self.draft_selection.contains(&draft.id))
-                    .cloned()
-                    .or_else(|| drafts.first().cloned());
+                egui::ScrollArea::vertical()
+                    .id_salt(DRAFT_PAGE_SCROLL_ID)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        let drafts = self
+                            .cached_drafts
+                            .iter()
+                            .take(80)
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        let selected = drafts
+                            .iter()
+                            .find(|draft| self.draft_selection.contains(&draft.id))
+                            .cloned()
+                            .or_else(|| drafts.first().cloned());
 
-                self.render_page_header(
-                    ui,
-                    "草稿收件箱 / Draft Inbox",
-                    "审查并决定是否将草稿提升为规则或转为 Skilllet。",
-                    &[
-                        HeaderAction::new("批量草稿", UiPage::DraftInbox, UiActionKind::Navigate),
-                        HeaderAction::new(
-                            "转为 Skilllet",
-                            UiPage::Skilllets,
-                            UiActionKind::Navigate,
-                        ),
-                    ],
-                );
-                ui.add_space(12.0);
-                self.tabs(
-                    ui,
-                    &[
-                        "全部 28",
-                        "待审查 12",
-                        "高置信 10",
-                        "来自观察 8",
-                        "反向解析 6",
-                    ],
-                );
-                ui.add_space(18.0);
-                let detail_width = INSPECTOR_WIDTH.min((ui.available_width() * 0.33).max(340.0));
-                ui.horizontal(|ui| {
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(
-                            (ui.available_width() - detail_width - 14.0).max(520.0),
-                            ui.available_height().max(560.0),
-                        ),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| self.draft_list_card(ui, &drafts),
-                    );
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(detail_width, ui.available_height().max(560.0)),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| self.draft_detail_card(ui, selected.as_ref()),
-                    );
-                });
+                        self.render_page_header(
+                            ui,
+                            "草稿收件箱 / Draft Inbox",
+                            "审查并决定是否将草稿提升为规则或转为 Skilllet。",
+                            &[
+                                HeaderAction::new(
+                                    "批量草稿",
+                                    UiPage::DraftInbox,
+                                    UiActionKind::Navigate,
+                                ),
+                                HeaderAction::new(
+                                    "转为 Skilllet",
+                                    UiPage::Skilllets,
+                                    UiActionKind::Navigate,
+                                ),
+                            ],
+                        );
+                        ui.add_space(12.0);
+                        self.tabs(
+                            ui,
+                            &[
+                                "全部 28",
+                                "待审查 12",
+                                "高置信 10",
+                                "来自观察 8",
+                                "反向解析 6",
+                            ],
+                        );
+                        ui.add_space(18.0);
+                        let available_width = ui.available_width();
+                        let available_height = ui.available_height();
+                        let detail_width =
+                            INSPECTOR_WIDTH.min((available_width * 0.33).clamp(280.0, 340.0));
+                        let panel_height = responsive_panel_height(available_height, 560.0, 320.0);
+                        let list_width = (available_width - detail_width - 14.0).max(0.0);
+                        ui.horizontal(|ui| {
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(list_width, panel_height),
+                                egui::Layout::top_down(egui::Align::Min),
+                                |ui| self.draft_list_card(ui, &drafts),
+                            );
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(detail_width, panel_height),
+                                egui::Layout::top_down(egui::Align::Min),
+                                |ui| self.draft_detail_card(ui, selected.as_ref()),
+                            );
+                        });
+                    });
             });
     }
 
@@ -4297,7 +4413,7 @@ impl AgentKernelApp {
     fn draft_detail_card(&mut self, ui: &mut egui::Ui, selected: Option<&draft::DraftRecord>) {
         let palette = ui_palette();
         card_frame().show(ui, |ui| {
-            ui.set_min_height(560.0);
+            ui.set_min_height(responsive_panel_height(ui.available_height(), 520.0, 280.0));
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("草稿详情")
@@ -5106,19 +5222,22 @@ impl AgentKernelApp {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(18.0);
             if ui
-                .add_enabled(!self.is_busy(), primary_button("确认应用"))
+                .add_enabled(!self.is_busy(), primary_button("运行审查"))
                 .clicked()
             {
                 self.review_selected();
             }
             if ui
-                .add_enabled(!self.is_busy(), secondary_button("应用选中项"))
+                .add_enabled(
+                    !self.is_busy() && self.active_page != UiPage::DraftInbox,
+                    secondary_button("打开草稿"),
+                )
                 .clicked()
             {
                 self.active_page = UiPage::DraftInbox;
             }
             if ui
-                .add_enabled(!self.is_busy(), secondary_button("仅同步"))
+                .add_enabled(!self.is_busy(), secondary_button("扫描项目"))
                 .clicked()
             {
                 self.start_scan();
