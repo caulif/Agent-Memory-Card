@@ -9,7 +9,7 @@ use crate::textutil;
 /// 语义匹配器 trait：预留 Embedding 模型接入接口。
 /// 当前默认实现为 JaccardMatcher。
 #[allow(dead_code)]
-pub(super) trait SemanticMatcher: Send + Sync {
+pub(crate) trait SemanticMatcher: Send + Sync {
     /// 计算两个文本的语义相似度 (0.0 - 1.0)
     fn compute_similarity(&self, left: &str, right: &str) -> f32;
 
@@ -20,14 +20,14 @@ pub(super) trait SemanticMatcher: Send + Sync {
 }
 
 /// Jaccard 相似度匹配器（默认实现）
-pub(super) struct JaccardMatcher {
+pub(crate) struct JaccardMatcher {
     /// 相似度阈值 (0.0 - 1.0)，超过此值视为重复
     #[allow(dead_code)]
     similarity_threshold: f32,
 }
 
 impl JaccardMatcher {
-    pub(super) fn new(similarity_threshold: f32) -> Self {
+    pub(crate) fn new(similarity_threshold: f32) -> Self {
         Self {
             similarity_threshold,
         }
@@ -41,7 +41,7 @@ impl SemanticMatcher for JaccardMatcher {
 }
 
 /// 语义去重器：管理去重逻辑
-pub(super) struct SemanticDeduper<M: SemanticMatcher = JaccardMatcher> {
+pub(crate) struct SemanticDeduper<M: SemanticMatcher = JaccardMatcher> {
     matcher: M,
     /// 和已有 Skilllet 比较的相似度阈值 (默认 0.75)
     existing_threshold: f32,
@@ -50,7 +50,7 @@ pub(super) struct SemanticDeduper<M: SemanticMatcher = JaccardMatcher> {
 }
 
 impl SemanticDeduper<JaccardMatcher> {
-    pub(super) fn new(existing_threshold: f32, batch_threshold: f32) -> Self {
+    pub(crate) fn new(existing_threshold: f32, batch_threshold: f32) -> Self {
         SemanticDeduper {
             matcher: JaccardMatcher::new(batch_threshold),
             existing_threshold,
@@ -59,7 +59,7 @@ impl SemanticDeduper<JaccardMatcher> {
     }
 
     /// 和已有 Skilllet 做语义去重：如果 body 相似度 > existing_threshold，视为重复
-    pub(super) fn dedup_against_existing(
+    pub(crate) fn dedup_against_existing(
         &self,
         body: &str,
         existing_skilllets: &[SkillletRecord],
@@ -78,7 +78,7 @@ impl SemanticDeduper<JaccardMatcher> {
 
     /// 同批次内去重：按 confidence 降序排序后，移除低 confidence 的重复项。
     /// 返回去重后的保留项索引列表。
-    pub(super) fn dedup_within_batch(&self, items: &mut [LlmKnowledgeItem]) -> Vec<usize> {
+    pub(crate) fn dedup_within_batch(&self, items: &mut [LlmKnowledgeItem]) -> Vec<usize> {
         let mut retained = Vec::new();
         let mut kept_items: Vec<&LlmKnowledgeItem> = Vec::new();
 
@@ -108,7 +108,7 @@ impl SemanticDeduper<JaccardMatcher> {
 
 /// LLM 提取的知识项（用于去重层输入）
 #[derive(Debug, Clone)]
-pub(super) struct LlmKnowledgeItem {
+pub(crate) struct LlmKnowledgeItem {
     pub title: String,
     pub body: String,
     pub kind: String,
@@ -118,12 +118,13 @@ pub(super) struct LlmKnowledgeItem {
     pub reason: String,
     pub matched_signal: String,
     pub is_noise: bool,
+    pub suggested_action: crate::candidate::ExtractionAction,
 }
 
 /// 去重结果
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub(super) enum DedupResult {
+pub(crate) enum DedupResult {
     Unique,
     Duplicate { similar_id: String, similarity: f32 },
 }
@@ -171,6 +172,10 @@ mod tests {
             tags: Vec::new(),
             language: "en".to_string(),
             source_project: None,
+            extraction: None,
+            approved_from: None,
+            evidence: None,
+            merge_history: Vec::new(),
             created_at: String::new(),
             updated_at: String::new(),
         }];
@@ -200,6 +205,10 @@ mod tests {
             tags: Vec::new(),
             language: "en".to_string(),
             source_project: None,
+            extraction: None,
+            approved_from: None,
+            evidence: None,
+            merge_history: Vec::new(),
             created_at: String::new(),
             updated_at: String::new(),
         }];
@@ -227,6 +236,7 @@ mod tests {
                 reason: "test".into(),
                 matched_signal: "preference".into(),
                 is_noise: false,
+                suggested_action: crate::candidate::ExtractionAction::new_candidate(),
             },
             LlmKnowledgeItem {
                 title: "Prefer Bun".into(),
@@ -238,6 +248,7 @@ mod tests {
                 reason: "test".into(),
                 matched_signal: "preference".into(),
                 is_noise: false,
+                suggested_action: crate::candidate::ExtractionAction::new_candidate(),
             },
             LlmKnowledgeItem {
                 title: "Use Axios".into(),
@@ -249,6 +260,7 @@ mod tests {
                 reason: "test".into(),
                 matched_signal: "preference".into(),
                 is_noise: false,
+                suggested_action: crate::candidate::ExtractionAction::new_candidate(),
             },
         ];
 
@@ -273,6 +285,7 @@ mod tests {
             reason: "test".into(),
             matched_signal: String::new(),
             is_noise: true,
+            suggested_action: crate::candidate::ExtractionAction::new_candidate(),
         }];
 
         let retained = deduper.dedup_within_batch(&mut items);

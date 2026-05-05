@@ -16,7 +16,8 @@ use crate::textutil;
 pub mod chunk;
 pub mod classify;
 mod dedupe;
-mod embedding;
+pub(crate) mod embedding;
+pub mod gate;
 mod llm;
 pub mod quality;
 pub mod scoring;
@@ -104,6 +105,7 @@ pub struct ExtractCandidatePreview {
     pub matched_template: Option<String>,
     pub classification: Option<classify::KnowledgeClassification>,
     pub tags: Vec<String>,
+    pub suggested_action: Option<candidate::ExtractionAction>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -378,24 +380,31 @@ fn extract_local_text_to_drafts(
     let preferences = load_known_preferences(project_root)?;
     let candidates = extract_candidates_with_preferences(&redacted_input, &preferences);
 
-    // 对已有 skilllet 做语义去重，避免重复生成
+    // 对已有 skilllet 做语义比对。重复内容保留为合并建议，而不是静默丢弃。
     let existing_skilllets = skilllet::load_skilllets(project_root)?;
     let deduper = embedding::SemanticDeduper::new(0.75, 0.65);
-    let candidates: Vec<Candidate> = candidates
+    let candidates: Vec<(Candidate, candidate::ExtractionAction)> = candidates
         .into_iter()
-        .filter(|candidate| {
-            if let embedding::DedupResult::Duplicate { .. } =
-                deduper.dedup_against_existing(&candidate.body, &existing_skilllets)
+        .map(|candidate| {
+            let action = match deduper.dedup_against_existing(&candidate.body, &existing_skilllets)
             {
-                return false;
-            }
-            true
+                embedding::DedupResult::Duplicate {
+                    similar_id,
+                    similarity,
+                } => candidate::ExtractionAction::merge_into_existing(similar_id, similarity),
+                embedding::DedupResult::Unique => candidate::ExtractionAction::new_candidate(),
+            };
+            (candidate, action)
         })
         .collect();
 
     // 应用质量评分门控：将每个候选转为 EvidenceChunk（使用原始证据文本），评分，仅保留 Candidate 级别
-    let mut scored_candidates: Vec<(Candidate, scoring::ExtractionScore)> = Vec::new();
-    for candidate in candidates {
+    let mut scored_candidates: Vec<(
+        Candidate,
+        scoring::ExtractionScore,
+        candidate::ExtractionAction,
+    )> = Vec::new();
+    for (candidate, action) in candidates {
         let chunk = chunk::EvidenceChunk {
             id: candidate.title.clone(),
             text: candidate.evidence.clone(),
@@ -405,11 +414,11 @@ fn extract_local_text_to_drafts(
         };
         let score = scoring::score_chunk(&chunk);
         if score.disposition == scoring::ExtractionDisposition::Candidate {
-            scored_candidates.push((candidate, score));
+            scored_candidates.push((candidate, score, action));
         }
     }
     // 按 confidence 降序排序，截断到 10 条
-    scored_candidates.sort_by(|(a, _), (b, _)| {
+    scored_candidates.sort_by(|(a, _, _), (b, _, _)| {
         b.confidence
             .unwrap_or(0.0)
             .partial_cmp(&a.confidence.unwrap_or(0.0))
@@ -419,7 +428,7 @@ fn extract_local_text_to_drafts(
 
     let previews = scored_candidates
         .iter()
-        .map(|(candidate, _score)| {
+        .map(|(candidate, _score, action)| {
             let chunk = chunk::EvidenceChunk {
                 id: candidate.title.clone(),
                 text: candidate.evidence.clone(),
@@ -428,6 +437,7 @@ fn extract_local_text_to_drafts(
                 source_observations: Vec::new(),
             };
             let classification = classify::classify_chunk(&chunk);
+            let routed_action = action.clone().with_route(&classification.artifact_kind);
             ExtractCandidatePreview {
                 id: draft_id(candidate),
                 title: candidate.title.clone(),
@@ -440,6 +450,7 @@ fn extract_local_text_to_drafts(
                 matched_template: candidate.matched_template.clone(),
                 classification: Some(classification.clone()),
                 tags: classification.tags.clone(),
+                suggested_action: Some(routed_action),
             }
         })
         .collect::<Vec<_>>();
@@ -456,7 +467,7 @@ fn extract_local_text_to_drafts(
 
     let mut created = Vec::new();
     let mut skipped = Vec::new();
-    for (candidate, score) in scored_candidates {
+    for (candidate, score, action) in scored_candidates {
         let id = draft_id(&candidate);
         let chunk = chunk::EvidenceChunk {
             id: candidate.title.clone(),
@@ -465,7 +476,14 @@ fn extract_local_text_to_drafts(
             source_kind: source.to_string(),
             source_observations: Vec::new(),
         };
-        let extraction = extraction_metadata_for_chunk(&chunk, &score, None);
+        let mut extraction =
+            extraction_metadata_for_chunk(&chunk, &score, action.record_id.clone());
+        let route = extraction
+            .classification
+            .as_ref()
+            .map(|classification| classification.artifact_kind.as_str())
+            .unwrap_or("review_only");
+        extraction.suggested_action = Some(action.with_route(route));
         let result = draft::add_draft(
             project_root,
             NewDraft {
@@ -563,12 +581,13 @@ fn extract_llm_text_to_drafts(
         if item.is_noise {
             continue;
         }
-        // 和已有 Skilllet 去重
-        if let embedding::DedupResult::Duplicate { .. } =
-            deduper.dedup_against_existing(&item.body, &skilllets)
-        {
-            continue;
-        }
+        let suggested_action = match deduper.dedup_against_existing(&item.body, &skilllets) {
+            embedding::DedupResult::Duplicate {
+                similar_id,
+                similarity,
+            } => candidate::ExtractionAction::merge_into_existing(similar_id, similarity),
+            embedding::DedupResult::Unique => candidate::ExtractionAction::new_candidate(),
+        };
         deduped_items.push(embedding::LlmKnowledgeItem {
             title: item.title.clone(),
             body: item.body.clone(),
@@ -579,6 +598,7 @@ fn extract_llm_text_to_drafts(
             reason: item.rationale.clone(),
             matched_signal: format!("{:?}", item.kind),
             is_noise: item.is_noise,
+            suggested_action,
         });
     }
 
@@ -635,6 +655,10 @@ fn extract_llm_text_to_drafts(
                 source_observations: Vec::new(),
             };
             let classification = classify::classify_chunk(&chunk);
+            let routed_action = item
+                .suggested_action
+                .clone()
+                .with_route(&classification.artifact_kind);
             ExtractCandidatePreview {
                 id: format!("project:{}", textutil::slug(&item.title)),
                 title: item.title.clone(),
@@ -647,6 +671,7 @@ fn extract_llm_text_to_drafts(
                 matched_template: Some(item.matched_signal.clone()),
                 classification: Some(classification.clone()),
                 tags: classification.tags.clone(),
+                suggested_action: Some(routed_action),
             }
         })
         .collect::<Vec<_>>();
@@ -674,7 +699,14 @@ fn extract_llm_text_to_drafts(
             source_kind: source.to_string(),
             source_observations: Vec::new(),
         };
-        let extraction = extraction_metadata_for_chunk(&chunk, &score, None);
+        let mut extraction =
+            extraction_metadata_for_chunk(&chunk, &score, item.suggested_action.record_id.clone());
+        let route = extraction
+            .classification
+            .as_ref()
+            .map(|classification| classification.artifact_kind.as_str())
+            .unwrap_or("review_only");
+        extraction.suggested_action = Some(item.suggested_action.clone().with_route(route));
         let result = candidate::add_candidate(
             project_root,
             candidate::NewCandidate {
@@ -772,22 +804,27 @@ fn extract_local_high_value_text_to_drafts(
         max_candidates,
     );
 
-    // 对已有 skilllet 做语义去重
+    // 对已有 skilllet 做语义比对。重复内容保留为合并建议，而不是静默丢弃。
     let existing_skilllets = skilllet::load_skilllets(project_root)?;
     let deduper = embedding::SemanticDeduper::new(0.75, 0.65);
-    let candidates: Vec<Candidate> = candidates
+    let candidates: Vec<(Candidate, candidate::ExtractionAction)> = candidates
         .into_iter()
-        .filter(|candidate| {
-            !matches!(
-                deduper.dedup_against_existing(&candidate.body, &existing_skilllets),
-                embedding::DedupResult::Duplicate { .. }
-            )
+        .map(|candidate| {
+            let action = match deduper.dedup_against_existing(&candidate.body, &existing_skilllets)
+            {
+                embedding::DedupResult::Duplicate {
+                    similar_id,
+                    similarity,
+                } => candidate::ExtractionAction::merge_into_existing(similar_id, similarity),
+                embedding::DedupResult::Unique => candidate::ExtractionAction::new_candidate(),
+            };
+            (candidate, action)
         })
         .collect();
 
     let previews = candidates
         .iter()
-        .map(|candidate| {
+        .map(|(candidate, action)| {
             let chunk = chunk::EvidenceChunk {
                 id: candidate.title.clone(),
                 text: candidate.evidence.clone(),
@@ -796,6 +833,7 @@ fn extract_local_high_value_text_to_drafts(
                 source_observations: Vec::new(),
             };
             let classification = classify::classify_chunk(&chunk);
+            let routed_action = action.clone().with_route(&classification.artifact_kind);
             ExtractCandidatePreview {
                 id: draft_id(candidate),
                 title: candidate.title.clone(),
@@ -808,6 +846,7 @@ fn extract_local_high_value_text_to_drafts(
                 matched_template: candidate.matched_template.clone(),
                 classification: Some(classification.clone()),
                 tags: classification.tags.clone(),
+                suggested_action: Some(routed_action),
             }
         })
         .collect::<Vec<_>>();
@@ -824,8 +863,24 @@ fn extract_local_high_value_text_to_drafts(
 
     let mut created = Vec::new();
     let mut skipped = Vec::new();
-    for candidate in candidates {
+    for (candidate, action) in candidates {
         let id = draft_id(&candidate);
+        let chunk = chunk::EvidenceChunk {
+            id: candidate.title.clone(),
+            text: candidate.evidence.clone(),
+            origin: chunk::ChunkOrigin::User,
+            source_kind: source.to_string(),
+            source_observations: Vec::new(),
+        };
+        let score = scoring::score_chunk(&chunk);
+        let mut extraction =
+            extraction_metadata_for_chunk(&chunk, &score, action.record_id.clone());
+        let route = extraction
+            .classification
+            .as_ref()
+            .map(|classification| classification.artifact_kind.as_str())
+            .unwrap_or("review_only");
+        extraction.suggested_action = Some(action.with_route(route));
         let result = draft::add_draft(
             project_root,
             NewDraft {
@@ -839,7 +894,7 @@ fn extract_local_high_value_text_to_drafts(
                 confidence: candidate.confidence,
                 reason: candidate.reason,
                 matched_template: candidate.matched_template,
-                extraction: candidate::ExtractionMetadata::default(),
+                extraction,
             },
         );
         match result {
@@ -1299,6 +1354,7 @@ fn extraction_metadata_for_chunk(
     similar_record: Option<String>,
 ) -> candidate::ExtractionMetadata {
     let classification = classify::classify_chunk(chunk);
+    let route = classification.artifact_kind.clone();
     candidate::ExtractionMetadata {
         origin: chunk.origin.as_str().to_string(),
         matched_signal: score.matched_signal.clone(),
@@ -1308,6 +1364,7 @@ fn extraction_metadata_for_chunk(
         similar_record,
         tags: classification.tags.clone(),
         classification: Some(classification),
+        suggested_action: Some(candidate::ExtractionAction::new_candidate_for_route(&route)),
     }
 }
 

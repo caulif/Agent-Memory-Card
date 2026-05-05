@@ -72,6 +72,10 @@ export type SkillletRecord = {
   tags?: string[];
   language?: string;
   source_project?: string;
+  extraction?: ExtractionMetadata | null;
+  approved_from?: string | null;
+  evidence?: string | null;
+  merge_history?: Array<{ source_id: string; merged_at: string; action: string }>;
 };
 
 export type CatalogItem = {
@@ -229,6 +233,18 @@ export type ExtractionMetadata = {
   similar_record?: string | null;
   classification?: KnowledgeClassification | null;
   tags?: string[];
+  suggested_action?: ExtractionAction | null;
+};
+
+export type ExtractionAction = {
+  action: string;
+  route?: string;
+  target_record?: string | null;
+  compile_enabled?: boolean | null;
+  record_id?: string | null;
+  similarity?: number | null;
+  reason?: string | null;
+  rationale?: string | null;
 };
 
 // ===== 编辑表单 =====

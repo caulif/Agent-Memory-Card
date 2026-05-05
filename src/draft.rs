@@ -257,7 +257,7 @@ pub fn approve_draft(project_root: &Path, id: &str) -> Result<()> {
             draft.id
         ));
     }
-    skilllet::add_skilllet(
+    skilllet::add_skilllet_with_provenance(
         &root,
         &draft.id,
         &draft.title,
@@ -265,6 +265,9 @@ pub fn approve_draft(project_root: &Path, id: &str) -> Result<()> {
         &draft.kind,
         &draft.scope,
         draft.targets,
+        Some(draft.extraction.clone()),
+        Some(draft.id.clone()),
+        Some(draft.evidence.clone()),
     )?;
     fs::remove_file(path)?;
     Ok(())

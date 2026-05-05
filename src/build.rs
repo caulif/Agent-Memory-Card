@@ -328,6 +328,9 @@ fn render_rules_artifact(
             continue;
         }
         if let Some(record) = skilllets.get(&item.id) {
+            if !skilllet_compiles_to_always_on(record) {
+                continue;
+            }
             out.push_str(&format!("## {}\n\n{}\n\n", record.title, record.body));
             rendered += 1;
         }
@@ -372,6 +375,9 @@ fn render_instructions(
             continue;
         }
         if let Some(record) = skilllets.get(&item.id) {
+            if !skilllet_compiles_to_always_on(record) {
+                continue;
+            }
             out.push_str(&format!("### {}\n\n{}\n\n", record.title, record.body));
             rendered += 1;
         }
@@ -381,6 +387,27 @@ fn render_instructions(
     }
 
     out
+}
+
+fn skilllet_compiles_to_always_on(record: &SkillletRecord) -> bool {
+    let Some(extraction) = &record.extraction else {
+        return true;
+    };
+
+    if let Some(action) = &extraction.suggested_action {
+        if action.compile_enabled == Some(false) {
+            return false;
+        }
+        if action.route != "always_on_rule" {
+            return false;
+        }
+    }
+
+    if let Some(classification) = &extraction.classification {
+        return classification.artifact_kind == "always_on_rule";
+    }
+
+    true
 }
 
 fn write_skill_supplement(
@@ -777,6 +804,10 @@ mod tests {
                 tags: vec!["frontend".to_string()],
                 language: "en".to_string(),
                 source_project: None,
+                extraction: None,
+                approved_from: None,
+                evidence: None,
+                merge_history: Vec::new(),
                 created_at: "now".to_string(),
                 updated_at: "now".to_string(),
             },
@@ -792,6 +823,116 @@ mod tests {
 
         assert!(codex.contains("Use Axios for frontend requests."));
         assert!(!claude.contains("Use Axios for frontend requests."));
+    }
+
+    #[test]
+    fn render_instructions_only_includes_compile_enabled_always_on_skilllets() {
+        let mut skilllets = BTreeMap::new();
+        skilllets.insert(
+            "project:always-on".to_string(),
+            test_skilllet_with_artifact_kind(
+                "project:always-on",
+                "Always On",
+                "Use Axios for frontend HTTP requests.",
+                "always_on_rule",
+                true,
+            ),
+        );
+        skilllets.insert(
+            "project:workflow".to_string(),
+            test_skilllet_with_artifact_kind(
+                "project:workflow",
+                "Workflow",
+                "Create a SKILL.md draft for UI handoff prompts.",
+                "workflow_skill",
+                false,
+            ),
+        );
+        skilllets.insert(
+            "project:review-only".to_string(),
+            test_skilllet_with_artifact_kind(
+                "project:review-only",
+                "Review Only",
+                "Review AI project improvements before compiling them.",
+                "review_only",
+                false,
+            ),
+        );
+        let refs = vec![
+            config::SkillletRef {
+                id: "project:always-on".to_string(),
+                targets: vec!["codex".to_string()],
+                scope: Some("project".to_string()),
+            },
+            config::SkillletRef {
+                id: "project:workflow".to_string(),
+                targets: vec!["codex".to_string()],
+                scope: Some("project".to_string()),
+            },
+            config::SkillletRef {
+                id: "project:review-only".to_string(),
+                targets: vec!["codex".to_string()],
+                scope: Some("project".to_string()),
+            },
+        ];
+
+        let codex = render_instructions("codex", &[], &refs, &skilllets);
+
+        assert!(codex.contains("Use Axios for frontend HTTP requests."));
+        assert!(!codex.contains("Create a SKILL.md draft"));
+        assert!(!codex.contains("Review AI project improvements"));
+    }
+
+    fn test_skilllet_with_artifact_kind(
+        id: &str,
+        title: &str,
+        body: &str,
+        artifact_kind: &str,
+        compile_enabled: bool,
+    ) -> SkillletRecord {
+        SkillletRecord {
+            schema_version: 1,
+            id: id.to_string(),
+            title: title.to_string(),
+            kind: "preference".to_string(),
+            scope: "project".to_string(),
+            body: body.to_string(),
+            brief: String::new(),
+            tags: Vec::new(),
+            language: "en".to_string(),
+            source_project: None,
+            extraction: Some(ExtractionMetadata {
+                classification: Some(crate::extract::classify::KnowledgeClassification {
+                    signal: "preference".to_string(),
+                    artifact_kind: artifact_kind.to_string(),
+                    activation: if artifact_kind == "always_on_rule" {
+                        "always_on".to_string()
+                    } else {
+                        "manual".to_string()
+                    },
+                    hardness: "low".to_string(),
+                    control: "default".to_string(),
+                    rationale: "test".to_string(),
+                    tags: Vec::new(),
+                }),
+                suggested_action: Some(crate::candidate::ExtractionAction {
+                    action: "new_candidate".to_string(),
+                    route: artifact_kind.to_string(),
+                    target_record: None,
+                    compile_enabled: Some(compile_enabled),
+                    record_id: None,
+                    similarity: None,
+                    reason: None,
+                    rationale: Some("test route".to_string()),
+                }),
+                ..ExtractionMetadata::default()
+            }),
+            approved_from: None,
+            evidence: None,
+            merge_history: Vec::new(),
+            created_at: "now".to_string(),
+            updated_at: "now".to_string(),
+        }
     }
 
     #[test]

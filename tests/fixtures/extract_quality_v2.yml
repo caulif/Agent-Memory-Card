@@ -98,3 +98,75 @@ cases:
     expected_hardness: high
     expected_terms: ["Candidate/Draft", "Skilllet"]
     expected_tags: ["shape:constraint", "domain:governance", "evidence:accepted-ai", "hardness:high"]
+  - id: durable-constraint-no-hard-reset
+    origin: user
+    input: "不要使用 git reset --hard 清理工作区；如果有无关改动，先和我确认范围。"
+    expected: candidate
+    expected_signal: constraint
+    expected_artifact_kind: always_on_rule
+    expected_hardness: high
+    expected_terms: ["git reset --hard"]
+    expected_tags: ["shape:constraint", "hardness:high", "target:agents-md"]
+  - id: durable-procedure-review-first
+    origin: user
+    input: "以后涉及高质量提取改动时，先补 fixture，再改 scoring，最后跑 cargo test。"
+    expected: candidate
+    expected_signal: validation
+    expected_artifact_kind: always_on_rule
+    expected_hardness: high
+    expected_terms: ["fixture", "scoring", "cargo test"]
+    expected_tags: ["shape:validation", "domain:rust", "domain:testing", "hardness:high"]
+  - id: durable-template-agent-handoff
+    origin: user
+    input: "以后交给 Claude Code 的 UI handoff prompt 要包含组件、交互和验证清单。"
+    expected: candidate
+    expected_signal: template
+    expected_artifact_kind: workflow_skill
+    expected_hardness: medium
+    expected_terms: ["Claude Code", "prompt"]
+    expected_tags: ["shape:template", "target:skill-dir", "domain:ui", "domain:agent-behavior"]
+  - id: durable-decision-no-vector-db-v1
+    origin: user
+    input: "决定 v1 继续保持 file-native，不引入强制 vector database；索引只能是可重建缓存。"
+    expected: candidate
+    expected_signal: decision
+    expected_artifact_kind: always_on_rule
+    expected_hardness: high
+    expected_terms: ["file-native", "vector database"]
+    expected_tags: ["shape:decision", "domain:architecture", "hardness:high"]
+  - id: soft-personality-noise
+    origin: assistant
+    input: "以后保持热情积极、有自己的品味，让用户感觉更舒服。"
+    expected: noise
+    expected_signal: ""
+    expected_artifact_kind: reject
+    expected_hardness: low
+    expected_terms: []
+    expected_tags: []
+  - id: generic-quality-noise
+    origin: assistant
+    input: "Best practices are to keep code clean, communicate clearly, and write useful tests."
+    expected: noise
+    expected_signal: ""
+    expected_artifact_kind: reject
+    expected_hardness: low
+    expected_terms: []
+    expected_tags: []
+  - id: unresolved-ui-request-noise
+    origin: user
+    input: "有没有可能以后做一个更漂亮的 UI？先想想方案。"
+    expected: noise
+    expected_signal: ""
+    expected_artifact_kind: reject
+    expected_hardness: low
+    expected_terms: []
+    expected_tags: []
+  - id: raw-log-noise
+    origin: unknown
+    input: "stack trace: at renderInbox (src/main.tsx:42:10)"
+    expected: noise
+    expected_signal: ""
+    expected_artifact_kind: reject
+    expected_hardness: low
+    expected_terms: []
+    expected_tags: []

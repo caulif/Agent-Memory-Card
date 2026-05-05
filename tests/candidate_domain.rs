@@ -1,8 +1,9 @@
 use agent_kernel::candidate::{
-    CandidateStatus, ExtractionMetadata, NewCandidate, add_candidate,
+    CandidateStatus, ExtractionAction, ExtractionMetadata, NewCandidate, add_candidate,
     approve_candidate_to_skilllet, hide_candidate, list_visible_candidates, load_candidates,
     reject_candidate,
 };
+use agent_kernel::extract::classify::KnowledgeClassification;
 use agent_kernel::{draft, skilllet};
 
 fn new_candidate(id: &str) -> NewCandidate {
@@ -78,4 +79,51 @@ fn approve_candidate_creates_skilllet_and_marks_candidate_promoted() {
     assert!(skilllets[0].tags.contains(&"bun".to_string()));
     assert!(drafts.is_empty());
     assert_eq!(candidates[0].status, CandidateStatus::Promoted);
+}
+
+#[test]
+fn approve_candidate_preserves_extraction_provenance_on_skilllet() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut candidate = new_candidate("project:prefer-bun");
+    candidate.extraction = ExtractionMetadata {
+        origin: "user".to_string(),
+        matched_signal: "preference".to_string(),
+        reason: "User explicitly made this a future project default.".to_string(),
+        source_observations: vec!["obs:session-1".to_string()],
+        similar_record: None,
+        tags: vec!["shape:preference".to_string()],
+        classification: Some(KnowledgeClassification {
+            signal: "preference".to_string(),
+            artifact_kind: "always_on_rule".to_string(),
+            activation: "always_on".to_string(),
+            hardness: "low".to_string(),
+            control: "default".to_string(),
+            rationale: "project tool preference".to_string(),
+            tags: vec!["shape:preference".to_string()],
+        }),
+        suggested_action: Some(ExtractionAction::new_candidate_for_route("always_on_rule")),
+        ..ExtractionMetadata::default()
+    };
+    add_candidate(temp.path(), candidate).expect("add candidate");
+
+    let skilllet_record =
+        approve_candidate_to_skilllet(temp.path(), "project:prefer-bun").expect("approve");
+
+    let extraction = skilllet_record.extraction.expect("skilllet provenance");
+    assert_eq!(
+        skilllet_record.approved_from.as_deref(),
+        Some("project:prefer-bun")
+    );
+    assert_eq!(extraction.matched_signal, "preference");
+    assert_eq!(extraction.source_observations, vec!["obs:session-1"]);
+    let action = extraction.suggested_action.expect("skilllet route action");
+    assert_eq!(action.route, "always_on_rule");
+    assert_eq!(action.compile_enabled, Some(true));
+    assert_eq!(
+        extraction
+            .classification
+            .expect("classification")
+            .artifact_kind,
+        "always_on_rule"
+    );
 }

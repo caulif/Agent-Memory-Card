@@ -29,6 +29,8 @@ use incremental::{
     load_observation_index, read_incremental_conversation_text, save_observation_index,
 };
 
+const DAILY_CANDIDATE_LIMIT: usize = 5;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObservationRecord {
     pub id: String,
@@ -379,7 +381,7 @@ pub fn synthesize_observations_to_drafts_with_engine(
             &source,
             Some("local".to_string()),
             true,
-            12,
+            DAILY_CANDIDATE_LIMIT,
         )?,
         "llm" => extract::extract_high_value_text_to_drafts(
             project_root,
@@ -388,7 +390,7 @@ pub fn synthesize_observations_to_drafts_with_engine(
             &source,
             None,
             true,
-            12,
+            DAILY_CANDIDATE_LIMIT,
         )?,
         "claude-code" | "codex" => {
             let (prefiltered, filtered_material) = prefilter_agent_synthesis_material(
@@ -419,7 +421,7 @@ pub fn synthesize_observations_to_drafts_with_engine(
                         &source,
                         Some("local".to_string()),
                         true,
-                        12,
+                        DAILY_CANDIDATE_LIMIT,
                     )?
                 }
             }
@@ -431,29 +433,36 @@ pub fn synthesize_observations_to_drafts_with_engine(
             &source,
             Some("local".to_string()),
             true,
-            12,
+            DAILY_CANDIDATE_LIMIT,
         )?,
     };
-    // 对已有 skilllet 做语义去重，避免重复写入已批准的候选项
-    let existing_skilllets = skilllet::load_skilllets(project_root)?;
-    let original_count = extracted.candidates.len();
-    let synthesized_candidates: Vec<extract::ExtractCandidatePreview> = extracted
-        .candidates
-        .into_iter()
-        .filter(|candidate| {
-            for skilllet in &existing_skilllets {
-                if textutil::jaccard_similarity(&candidate.body, &skilllet.body) >= 0.75 {
-                    return false;
-                }
-            }
-            true
-        })
-        .collect();
-    let dedup_skipped = original_count - synthesized_candidates.len();
+    let synthesized_candidates = extracted.candidates;
     let mut created_ids = Vec::new();
-    let mut skipped_count = extracted.skipped.len() + dedup_skipped;
+    let mut skipped_count = extracted.skipped.len();
     if !dry_run {
         for candidate in &synthesized_candidates {
+            let source_observations = observations
+                .iter()
+                .map(|observation| observation.id.clone())
+                .collect::<Vec<_>>();
+            let extraction = candidate::ExtractionMetadata {
+                origin: "user".to_string(),
+                matched_signal: candidate
+                    .classification
+                    .as_ref()
+                    .map(|classification| classification.signal.clone())
+                    .unwrap_or_default(),
+                reason: candidate.reason.clone().unwrap_or_default(),
+                source_observations: source_observations.clone(),
+                score_breakdown: Default::default(),
+                classification: candidate.classification.clone(),
+                similar_record: candidate
+                    .suggested_action
+                    .as_ref()
+                    .and_then(|action| action.record_id.clone()),
+                tags: candidate.tags.clone(),
+                suggested_action: candidate.suggested_action.clone(),
+            };
             let result = candidate::add_candidate(
                 project_root,
                 NewCandidate {
@@ -463,18 +472,15 @@ pub fn synthesize_observations_to_drafts_with_engine(
                     scope: candidate.scope.clone(),
                     body: candidate.body.clone(),
                     brief: None,
-                    tags: Vec::new(),
+                    tags: candidate.tags.clone(),
                     language: None,
                     targets: targets.clone(),
                     evidence: candidate.evidence.clone(),
                     confidence: candidate.confidence,
                     reason: candidate.reason.clone(),
                     matched_template: candidate.matched_template.clone(),
-                    source_observations: observations
-                        .iter()
-                        .map(|observation| observation.id.clone())
-                        .collect(),
-                    extraction: candidate::ExtractionMetadata::default(),
+                    source_observations,
+                    extraction,
                 },
             );
             match result {
@@ -515,7 +521,7 @@ fn prefilter_agent_synthesis_material(
         source,
         Some("local".to_string()),
         true,
-        12,
+        DAILY_CANDIDATE_LIMIT,
     )?;
     let filtered_material = candidate_synthesis_material(&prefiltered.candidates, 8_000);
     Ok((prefiltered, filtered_material))
@@ -558,14 +564,18 @@ fn synthesize_with_agent_engine(
 ) -> Result<ObservationSynthesisReport> {
     let prompt = agent_synthesis_prompt(material);
     let output = run_agent_engine(engine, &prompt, Duration::from_secs(60))?;
-    let mut candidates = parse_agent_candidates(&output)?;
-    candidates.sort_by(|a, b| {
+    let mut candidates = filter_agent_candidates_through_local_gate(
+        project_root,
+        parse_agent_candidates(&output)?,
+        source,
+    )?;
+    candidates.sort_by(|(a, _, _), (b, _, _)| {
         b.confidence
             .unwrap_or(0.0)
             .total_cmp(&a.confidence.unwrap_or(0.0))
             .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
     });
-    candidates.truncate(8);
+    candidates.truncate(5);
 
     let mut report = ObservationSynthesisReport {
         engine: engine.to_string(),
@@ -577,7 +587,7 @@ fn synthesize_with_agent_engine(
         dry_run,
     };
 
-    for candidate in candidates {
+    for (candidate, score, action) in candidates {
         if !is_usable_agent_candidate(&candidate) {
             report.skipped += 1;
             continue;
@@ -587,6 +597,20 @@ fn synthesize_with_agent_engine(
         if dry_run {
             continue;
         }
+        let chunk = agent_candidate_chunk(&candidate, source);
+        let classification = extract::classify::classify_chunk(&chunk);
+        let routed_action = action.with_route(&classification.artifact_kind);
+        let extraction = candidate::ExtractionMetadata {
+            origin: chunk.origin.as_str().to_string(),
+            matched_signal: score.matched_signal.clone(),
+            reason: score.reason.clone(),
+            source_observations: Vec::new(),
+            score_breakdown: score.breakdown.clone(),
+            classification: Some(classification.clone()),
+            similar_record: routed_action.record_id.clone(),
+            tags: classification.tags,
+            suggested_action: Some(routed_action),
+        };
         candidate::add_candidate(
             project_root,
             NewCandidate {
@@ -608,7 +632,7 @@ fn synthesize_with_agent_engine(
                 }),
                 matched_template: Some(format!("agent-synthesis:{engine}")),
                 source_observations: Vec::new(),
-                extraction: candidate::ExtractionMetadata::default(),
+                extraction,
             },
         )?;
         report.created += 1;
@@ -616,6 +640,57 @@ fn synthesize_with_agent_engine(
     }
 
     Ok(report)
+}
+
+fn filter_agent_candidates_through_local_gate(
+    project_root: &Path,
+    candidates: Vec<AgentSkillletCandidate>,
+    source: &str,
+) -> Result<
+    Vec<(
+        AgentSkillletCandidate,
+        extract::scoring::ExtractionScore,
+        candidate::ExtractionAction,
+    )>,
+> {
+    let existing_skilllets = skilllet::load_skilllets(project_root)?;
+    let deduper = extract::embedding::SemanticDeduper::new(0.75, 0.65);
+    let mut retained = Vec::new();
+
+    for candidate in candidates {
+        if !is_usable_agent_candidate(&candidate) {
+            continue;
+        }
+        let chunk = agent_candidate_chunk(&candidate, source);
+        let score = extract::scoring::score_chunk(&chunk);
+        if score.disposition != extract::scoring::ExtractionDisposition::Candidate {
+            continue;
+        }
+        let action = match deduper.dedup_against_existing(&candidate.body, &existing_skilllets) {
+            extract::embedding::DedupResult::Duplicate {
+                similar_id,
+                similarity,
+            } => candidate::ExtractionAction::merge_into_existing(similar_id, similarity),
+            extract::embedding::DedupResult::Unique => candidate::ExtractionAction::new_candidate(),
+        };
+        let classification = extract::classify::classify_chunk(&chunk);
+        retained.push((candidate, score, action.with_route(&classification.artifact_kind)));
+    }
+
+    Ok(retained)
+}
+
+fn agent_candidate_chunk(
+    candidate: &AgentSkillletCandidate,
+    source: &str,
+) -> extract::chunk::EvidenceChunk {
+    extract::chunk::EvidenceChunk {
+        id: candidate.title.clone(),
+        text: format!("{}\n{}", candidate.title, candidate.body),
+        origin: extract::chunk::ChunkOrigin::AiSynthesis,
+        source_kind: source.to_string(),
+        source_observations: Vec::new(),
+    }
 }
 
 fn agent_synthesis_prompt(material: &str) -> String {

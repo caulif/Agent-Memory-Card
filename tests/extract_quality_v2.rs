@@ -44,7 +44,7 @@ fn high_quality_extraction_v2_meets_precision_gate() {
     );
 
     assert!(
-        report.precision_at_10 >= 0.80,
+        report.precision_at_10 >= 0.90,
         "precision_at_10 too low: {report:#?}"
     );
     assert!(
@@ -52,8 +52,8 @@ fn high_quality_extraction_v2_meets_precision_gate() {
         "noise entered candidate set: {report:#?}"
     );
     assert!(
-        report.visible_candidates <= 10,
-        "default extraction should stay small: {report:#?}"
+        report.visible_candidates <= 12,
+        "expanded corpus should still produce a compact positive set: {report:#?}"
     );
 }
 
@@ -187,7 +187,10 @@ fn dry_run_rejects_standalone_complaint_and_keeps_actionable_validation() {
 
     let report = extract::extract_to_drafts(
         temp.path(),
-        Some("你又忘了跑测试。以后涉及 Rust 提取逻辑时，先加质量 fixture，再跑 cargo test。".to_string()),
+        Some(
+            "你又忘了跑测试。以后涉及 Rust 提取逻辑时，先加质量 fixture，再跑 cargo test。"
+                .to_string(),
+        ),
         None,
         vec!["codex".to_string()],
         Some("local".to_string()),
@@ -238,5 +241,91 @@ fn dry_run_previews_include_classification_and_tags() {
         report
             .render()
             .contains("classification: signal=preference")
+    );
+}
+
+#[test]
+fn dry_run_duplicate_existing_skilllet_returns_merge_suggestion() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    agent_kernel::skilllet::add_skilllet(
+        temp.path(),
+        "project:prefer-bun",
+        "Prefer Bun",
+        "Use Bun for JavaScript package management and scripts.",
+        "preference",
+        "project",
+        vec!["codex".to_string()],
+    )
+    .expect("seed skilllet");
+
+    let report = extract::extract_to_drafts(
+        temp.path(),
+        Some(
+            "以后这个项目都用 Bun 管理 JavaScript 依赖和脚本，不要再建议 npm install。".to_string(),
+        ),
+        None,
+        vec!["codex".to_string()],
+        Some("local".to_string()),
+        true,
+    )
+    .expect("extract");
+
+    assert_eq!(report.candidates.len(), 1);
+    let action = report.candidates[0]
+        .suggested_action
+        .as_ref()
+        .expect("merge suggestion");
+    assert_eq!(action.action, "merge_into_existing");
+    assert_eq!(action.record_id.as_deref(), Some("project:prefer-bun"));
+    assert_eq!(action.target_record.as_deref(), Some("project:prefer-bun"));
+    assert_eq!(action.route, "always_on_rule");
+    assert_eq!(action.compile_enabled, Some(true));
+}
+
+#[test]
+fn future_value_gate_rejects_soft_personality_without_operational_trigger() {
+    let chunk = agent_kernel::extract::chunk::text_case_to_chunk(
+        "soft-personality-noise",
+        "assistant",
+        "以后保持热情积极、有自己的品味，让用户感觉更舒服。",
+    );
+
+    let decision = agent_kernel::extract::gate::future_value_gate(&chunk);
+
+    assert_eq!(decision.disposition, "reject");
+    assert_eq!(
+        decision.reason,
+        "soft-personality-without-operational-trigger"
+    );
+}
+
+#[test]
+fn dry_run_previews_include_route_and_compile_decision() {
+    let temp = tempfile::tempdir().expect("tempdir");
+
+    let report = extract::extract_to_drafts(
+        temp.path(),
+        Some("以后这个项目的前端 HTTP 请求统一用 Axios，不要再写裸 fetch。".to_string()),
+        None,
+        vec!["codex".to_string()],
+        Some("local".to_string()),
+        true,
+    )
+    .expect("extract");
+
+    let action = report.candidates[0]
+        .suggested_action
+        .as_ref()
+        .expect("suggested action");
+
+    assert_eq!(action.action, "new_candidate");
+    assert_eq!(action.route, "always_on_rule");
+    assert_eq!(action.compile_enabled, Some(true));
+    assert!(
+        action
+            .rationale
+            .as_deref()
+            .unwrap_or_default()
+            .contains("AGENTS.md")
     );
 }

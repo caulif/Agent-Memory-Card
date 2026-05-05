@@ -5,6 +5,7 @@ use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
+use crate::candidate::ExtractionMetadata;
 use crate::config::{self, SkillletRef};
 use crate::fsutil;
 
@@ -25,8 +26,23 @@ pub struct SkillletRecord {
     pub language: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_project: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extraction: Option<ExtractionMetadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approved_from: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
+    #[serde(default)]
+    pub merge_history: Vec<MergeEvent>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeEvent {
+    pub source_id: String,
+    pub merged_at: String,
+    pub action: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -95,6 +111,33 @@ pub fn add_skilllet(
     scope: &str,
     targets: Vec<String>,
 ) -> Result<()> {
+    add_skilllet_with_provenance(
+        project_root,
+        id,
+        title,
+        body,
+        kind,
+        scope,
+        targets,
+        None,
+        None,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn add_skilllet_with_provenance(
+    project_root: &Path,
+    id: &str,
+    title: &str,
+    body: &str,
+    kind: &str,
+    scope: &str,
+    targets: Vec<String>,
+    extraction: Option<ExtractionMetadata>,
+    approved_from: Option<String>,
+    evidence: Option<String>,
+) -> Result<()> {
     let root = fsutil::normalize_project_root(project_root)?;
     validate_skilllet_fields(&root, title, body, kind, scope, &targets)?;
     config::ensure_kernel_dir(&root)?;
@@ -129,6 +172,21 @@ pub fn add_skilllet(
         source_project: existing
             .as_ref()
             .and_then(|record| record.source_project.clone()),
+        extraction: extraction.or_else(|| {
+            existing
+                .as_ref()
+                .and_then(|record| record.extraction.clone())
+        }),
+        approved_from: approved_from.or_else(|| {
+            existing
+                .as_ref()
+                .and_then(|record| record.approved_from.clone())
+        }),
+        evidence: evidence.or_else(|| existing.as_ref().and_then(|record| record.evidence.clone())),
+        merge_history: existing
+            .as_ref()
+            .map(|record| record.merge_history.clone())
+            .unwrap_or_default(),
         created_at: existing
             .as_ref()
             .map(|record| record.created_at.clone())

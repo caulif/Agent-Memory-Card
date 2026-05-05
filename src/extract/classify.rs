@@ -84,10 +84,19 @@ fn artifact_kind_for(signal: &str, lower: &str) -> String {
     match signal {
         "" => "reject",
         "ai_project_improvement" => "review_only",
+        _ if lower.contains("skill_supplement")
+            || lower.contains("supplement")
+            || lower.contains("附加到已有")
+            || lower.contains("补充到已有")
+            || (lower.contains("skill") && lower.contains("补充")) =>
+        {
+            "skill_supplement"
+        }
         "template" => "workflow_skill",
         "procedure" if lower.contains("claude code") && lower.contains("codex") => "workflow_skill",
+        "procedure" => "workflow_skill",
         "validation" | "correction" | "constraint" | "decision" | "preference" => "always_on_rule",
-        _ => "memory_note",
+        _ => "reject",
     }
     .to_string()
 }

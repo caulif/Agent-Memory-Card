@@ -500,3 +500,45 @@ fn rejects_low_confidence_agent_candidates() {
 
     assert!(!is_usable_agent_candidate(&candidate));
 }
+
+#[test]
+fn agent_synthesis_candidates_must_pass_local_future_value_gate() {
+    let candidates = vec![
+        AgentSkillletCandidate {
+            title: "Warm Personality".to_string(),
+            body: "以后保持热情积极、有自己的品味，让用户感觉更舒服。".to_string(),
+            brief: None,
+            tags: Vec::new(),
+            language: None,
+            kind: "preference".to_string(),
+            scope: "project".to_string(),
+            confidence: Some(0.95),
+            reason: Some("Sounds nice but has no operational trigger.".to_string()),
+        },
+        AgentSkillletCandidate {
+            title: "Prefer Bun".to_string(),
+            body: "Always use Bun for JavaScript package management and scripts.".to_string(),
+            brief: None,
+            tags: Vec::new(),
+            language: None,
+            kind: "preference".to_string(),
+            scope: "project".to_string(),
+            confidence: Some(0.91),
+            reason: Some("Repeated project preference.".to_string()),
+        },
+    ];
+
+    let filtered = filter_agent_candidates_through_local_gate(
+        tempfile::tempdir().expect("tempdir").path(),
+        candidates,
+        "agent synthesis",
+    )
+    .expect("filter");
+
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].0.title, "Prefer Bun");
+    assert_eq!(
+        filtered[0].2.action, "new_candidate",
+        "agent output should still carry a local action decision"
+    );
+}

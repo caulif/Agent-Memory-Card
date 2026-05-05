@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::chunk::EvidenceChunk;
 use super::classify::{KnowledgeClassification, classify_chunk};
+use super::gate::future_value_gate;
 
 /// 评分处置结果：拒绝、边界或候选。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,6 +29,17 @@ pub struct ExtractionScore {
 /// 基于 classify_chunk 的分类结果，按计划维度打分。
 pub fn score_chunk(chunk: &EvidenceChunk) -> ExtractionScore {
     let mut breakdown = BTreeMap::new();
+    let gate = future_value_gate(chunk);
+    if gate.disposition == "reject" {
+        return ExtractionScore {
+            score: 0.0,
+            disposition: ExtractionDisposition::Reject,
+            matched_signal: String::new(),
+            reason: gate.reason,
+            breakdown,
+        };
+    }
+
     let classification = classify_chunk(chunk);
 
     // 噪音或空信号直接拒绝

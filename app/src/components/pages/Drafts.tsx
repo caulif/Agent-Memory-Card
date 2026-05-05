@@ -225,7 +225,9 @@ export function Drafts({
                       <span className="chip chip-signal">{draft.extraction.classification.signal}</span>
                     ) : null}
                     {draft.extraction.classification.artifact_kind ? (
-                      <span className="chip chip-artifact">{draft.extraction.classification.artifact_kind}</span>
+                      <span className="chip chip-artifact">
+                        {routeLabel(draft.extraction.classification.artifact_kind)}
+                      </span>
                     ) : null}
                     {draft.extraction.classification.hardness ? (
                       <span className="chip chip-hardness">{draft.extraction.classification.hardness}</span>
@@ -233,6 +235,19 @@ export function Drafts({
                     {draft.extraction.classification.activation ? (
                       <span className="chip chip-activation">{draft.extraction.classification.activation}</span>
                     ) : null}
+                  </div>
+                ) : null}
+                {draft.extraction?.suggested_action ? (
+                  <div className="tag-row classification-chips">
+                    <span className="chip chip-artifact">
+                      {routeLabel(draft.extraction.suggested_action.route)}
+                    </span>
+                    <span className="chip chip-activation">
+                      {compileLabel(draft.extraction.suggested_action.compile_enabled)}
+                    </span>
+                    <span className="chip chip-signal">
+                      {actionLabel(draft.extraction.suggested_action.action)}
+                    </span>
                   </div>
                 ) : null}
               </div>
@@ -304,6 +319,11 @@ function CandidateCard({
   const candidateBrief =
     candidate.brief?.trim() ||
     `这条系统建议沉淀了“${candidate.title}”，批准后会直接进入 Skilllet。`;
+  const suggestedAction = candidate.extraction?.suggested_action;
+  const mergeTarget =
+    suggestedAction?.action === "merge_into_existing"
+      ? suggestedAction.target_record || suggestedAction.record_id
+      : null;
   const sourceText = [
     candidate.reason ? `原因：${candidate.reason}` : null,
     candidate.evidence ? `证据：${candidate.evidence}` : null,
@@ -335,7 +355,31 @@ function CandidateCard({
             ))}
           </div>
         ) : null}
+        {candidate.extraction?.classification || suggestedAction ? (
+          <div className="tag-row classification-chips">
+            {candidate.extraction?.classification?.artifact_kind ? (
+              <span className="chip chip-artifact">
+                {routeLabel(candidate.extraction.classification.artifact_kind)}
+              </span>
+            ) : null}
+            {candidate.extraction?.classification?.hardness ? (
+              <span className="chip chip-hardness">{candidate.extraction.classification.hardness}</span>
+            ) : null}
+            {suggestedAction ? (
+              <span className="chip chip-activation">{compileLabel(suggestedAction.compile_enabled)}</span>
+            ) : null}
+            {suggestedAction ? (
+              <span className="chip chip-signal">{actionLabel(suggestedAction.action)}</span>
+            ) : null}
+          </div>
+        ) : null}
         <p>{candidate.body}</p>
+        {mergeTarget ? (
+          <p className="record-reason">
+            合并建议 · 已存在相近 Skilllet：{mergeTarget}
+            {suggestedAction?.similarity ? ` · 相似度 ${Math.round(suggestedAction.similarity * 100)}%` : ""}
+          </p>
+        ) : null}
         <small>{sourceText}</small>
         {candidate.extraction?.reason ? (
           <p className="record-reason">
@@ -390,6 +434,36 @@ function CandidateCard({
       </div>
     </article>
   );
+}
+
+function routeLabel(route?: string | null): string {
+  switch (route) {
+    case "always_on_rule":
+      return "写入规则";
+    case "workflow_skill":
+      return "生成 Skill 草稿";
+    case "skill_supplement":
+      return "补充 Skill";
+    case "review_only":
+      return "仅审阅";
+    default:
+      return "待分流";
+  }
+}
+
+function compileLabel(enabled?: boolean | null): string {
+  return enabled ? "会编译" : "不编译";
+}
+
+function actionLabel(action?: string | null): string {
+  switch (action) {
+    case "merge_into_existing":
+      return "合并建议";
+    case "new_candidate":
+      return "新 Skilllet";
+    default:
+      return "待审";
+  }
 }
 
 
