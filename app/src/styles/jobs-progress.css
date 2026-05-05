@@ -1,0 +1,350 @@
+/* ===== 任务进度区域 ===== */
+.progress-area {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+  gap: 8px;
+  min-width: 320px;
+  max-width: 420px;
+}
+
+.progress-section {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-glass-light);
+  backdrop-filter: blur(12px) saturate(1.2);
+  animation: progress-enter 0.3s ease;
+}
+
+@keyframes progress-enter {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.progress-label {
+  font-size: 12px;
+  font-weight: 720;
+  color: var(--color-accent);
+}
+
+.progress-percent {
+  font-size: 11px;
+  font-weight: 760;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-track {
+  width: 100%;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(115, 123, 134, 0.12);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-light), #6b9bc0);
+  background-size: 200% 100%;
+  animation: progress-shift 2s ease-in-out infinite;
+  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes progress-shift {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+
+.progress-description {
+  margin: 0;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.job-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.job-meta span {
+  max-width: 100%;
+  padding: 3px 7px;
+  border-radius: 7px;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-details {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border-light);
+}
+
+.task-details.compact {
+  opacity: 0.92;
+}
+
+.task-details-title {
+  font-size: 11px;
+  font-weight: 760;
+  color: var(--color-accent);
+}
+
+.task-detail-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.task-detail-dot {
+  width: 6px;
+  height: 6px;
+  margin-top: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  box-shadow: 0 0 0 4px var(--color-accent-soft);
+}
+
+.task-detail-row strong {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--color-text-primary);
+  font-size: 11px;
+  font-weight: 740;
+}
+
+.task-detail-row strong span {
+  color: var(--color-text-secondary);
+  font-weight: 680;
+}
+
+.task-detail-row p {
+  margin: 2px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.job-center-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(28, 32, 38, 0.24);
+  backdrop-filter: blur(6px);
+}
+
+.job-center {
+  width: min(440px, 100%);
+  height: 100%;
+  padding: 22px;
+  overflow: auto;
+  background: var(--color-bg-glass-strong);
+  border-left: 1px solid var(--color-border);
+  box-shadow: -24px 0 50px rgba(27, 31, 36, 0.18);
+}
+
+.job-center-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.job-center-head h2 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.job-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.job-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-glass);
+}
+
+.job-card-head,
+.job-card-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.job-card-head strong {
+  display: block;
+  color: var(--color-text-primary);
+  font-size: 14px;
+}
+
+.job-card-head span,
+.job-card p,
+.job-card-meta span {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.job-lifecycle {
+  align-self: flex-start;
+  padding: 3px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-soft);
+  color: var(--color-accent) !important;
+  font-weight: 740;
+  white-space: nowrap;
+}
+
+.job-card p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.job-card-meta {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.job-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border-light);
+}
+
+.job-log-row {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.job-log-row > span {
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.job-log-row strong {
+  color: var(--color-text-primary);
+  font-size: 11px;
+}
+
+.cancel-job {
+  align-self: flex-start;
+  min-height: 32px;
+}
+
+/* ===== 任务中心筛选栏 ===== */
+.job-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.job-filter button {
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-glass-light);
+  font-size: 11px;
+  font-weight: 620;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.job-filter button:hover {
+  background: var(--color-accent-soft);
+}
+
+.job-filter button.active {
+  color: #f8fafc;
+  background: var(--color-accent);
+  box-shadow: 0 4px 12px rgba(63, 81, 72, 0.18);
+}
+
+/* ===== 精确重试标记 ===== */
+.job-card-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.retry-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+@media (max-width: 1180px) {
+  .progress-area {
+    min-width: 260px;
+    max-width: 280px;
+  }
+
+  .topbar-actions {
+    flex-direction: column;
+    align-items: flex-end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin,
+  .progress-fill {
+    animation: none;
+  }
+
+  .progress-fill {
+    transition: none;
+  }
+}

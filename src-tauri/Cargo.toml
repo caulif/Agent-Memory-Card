@@ -1,0 +1,27 @@
+[package]
+name = "agent-kernel-desktop"
+version = "0.1.0"
+edition = "2024"
+description = "Agent-Kernel Tauri desktop shell"
+license = "MIT"
+
+[lib]
+name = "agent_kernel_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "agent-kernel-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.6.0", features = [] }
+
+[dependencies]
+agent-kernel = { path = ".." }
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tauri = { version = "2.11.0", features = [] }
+
+[dev-dependencies]
+tempfile = "3.23"

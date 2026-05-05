@@ -3,13 +3,29 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
-use regex::Regex;
 use serde::Deserialize;
 
+use crate::candidate;
 use crate::config;
 use crate::draft::{self, NewDraft};
 use crate::fsutil;
 use crate::provider;
+use crate::skilllet;
+use crate::textutil;
+
+pub mod chunk;
+pub mod classify;
+mod dedupe;
+mod embedding;
+mod llm;
+pub mod quality;
+pub mod scoring;
+mod signals;
+
+pub use quality::{QualityReport, QualityTextCase, quality_report_for_text_cases};
+
+use dedupe::dedupe_candidates;
+use signals::{has_explicit_memory_marker, looks_like_project_improvement_signal, split_sentences};
 
 #[derive(Debug)]
 pub struct ExtractReport {
@@ -43,6 +59,18 @@ impl ExtractReport {
                     if let Some(reason) = candidate.reason.as_deref() {
                         out.push_str(&format!("  reason: {reason}\n"));
                     }
+                    if let Some(classification) = candidate.classification.as_ref() {
+                        out.push_str(&format!(
+                            "  classification: signal={}, artifact={}, hardness={}, activation={}\n",
+                            classification.signal,
+                            classification.artifact_kind,
+                            classification.hardness,
+                            classification.activation,
+                        ));
+                    }
+                    if !candidate.tags.is_empty() {
+                        out.push_str(&format!("  tags: {}\n", candidate.tags.join(", ")));
+                    }
                 }
             } else {
                 out.push_str("No drafts created.\n");
@@ -74,6 +102,8 @@ pub struct ExtractCandidatePreview {
     pub confidence: Option<f32>,
     pub reason: Option<String>,
     pub matched_template: Option<String>,
+    pub classification: Option<classify::KnowledgeClassification>,
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -146,7 +176,7 @@ impl PreferenceRegistryValidationReport {
 }
 
 #[derive(Debug, Clone)]
-struct Candidate {
+pub(super) struct Candidate {
     title: String,
     body: String,
     kind: String,
@@ -313,22 +343,31 @@ pub fn extract_text_to_drafts(
             .map(|cfg| cfg.default)
             .unwrap_or_else(|_| "local".to_string())
     });
-    if provider_name != "local" && provider::provider_exists(project_root, &provider_name)? {
-        return Ok(ExtractReport {
-            created: Vec::new(),
-            skipped: vec![format!(
-                "provider `{provider_name}` is configured but not implemented yet; use `--provider local`"
-            )],
-            candidates: Vec::new(),
-            dry_run,
-            provider: provider_name,
-            redacted: false,
-        });
-    }
-    if provider_name != "local" {
-        return Err(anyhow!("unknown provider `{provider_name}`"));
+
+    if provider_name == "local" {
+        return extract_local_text_to_drafts(project_root, input, targets, source, dry_run);
     }
 
+    // LLM 引擎路径
+    extract_llm_text_to_drafts(
+        project_root,
+        input,
+        targets,
+        source,
+        &provider_name,
+        dry_run,
+        None,
+    )
+}
+
+/// 本地正则提取引擎（保持向后兼容）
+fn extract_local_text_to_drafts(
+    project_root: &Path,
+    input: &str,
+    targets: Vec<String>,
+    source: &str,
+    dry_run: bool,
+) -> Result<ExtractReport> {
     let provider_cfg = provider::load_or_default_provider_config(project_root)?;
     let redacted_input = if provider_cfg.privacy.redact_secrets {
         provider::redact_secrets(input)
@@ -338,18 +377,70 @@ pub fn extract_text_to_drafts(
     let redacted = redacted_input != input;
     let preferences = load_known_preferences(project_root)?;
     let candidates = extract_candidates_with_preferences(&redacted_input, &preferences);
-    let previews = candidates
+
+    // 对已有 skilllet 做语义去重，避免重复生成
+    let existing_skilllets = skilllet::load_skilllets(project_root)?;
+    let deduper = embedding::SemanticDeduper::new(0.75, 0.65);
+    let candidates: Vec<Candidate> = candidates
+        .into_iter()
+        .filter(|candidate| {
+            if let embedding::DedupResult::Duplicate { .. } =
+                deduper.dedup_against_existing(&candidate.body, &existing_skilllets)
+            {
+                return false;
+            }
+            true
+        })
+        .collect();
+
+    // 应用质量评分门控：将每个候选转为 EvidenceChunk（使用原始证据文本），评分，仅保留 Candidate 级别
+    let mut scored_candidates: Vec<(Candidate, scoring::ExtractionScore)> = Vec::new();
+    for candidate in candidates {
+        let chunk = chunk::EvidenceChunk {
+            id: candidate.title.clone(),
+            text: candidate.evidence.clone(),
+            origin: chunk::ChunkOrigin::User,
+            source_kind: source.to_string(),
+            source_observations: Vec::new(),
+        };
+        let score = scoring::score_chunk(&chunk);
+        if score.disposition == scoring::ExtractionDisposition::Candidate {
+            scored_candidates.push((candidate, score));
+        }
+    }
+    // 按 confidence 降序排序，截断到 10 条
+    scored_candidates.sort_by(|(a, _), (b, _)| {
+        b.confidence
+            .unwrap_or(0.0)
+            .partial_cmp(&a.confidence.unwrap_or(0.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    scored_candidates.truncate(10);
+
+    let previews = scored_candidates
         .iter()
-        .map(|candidate| ExtractCandidatePreview {
-            id: draft_id(candidate),
-            title: candidate.title.clone(),
-            body: candidate.body.clone(),
-            kind: candidate.kind.clone(),
-            scope: candidate.scope.clone(),
-            evidence: format!("{source}: {}", candidate.evidence),
-            confidence: candidate.confidence,
-            reason: candidate.reason.clone(),
-            matched_template: candidate.matched_template.clone(),
+        .map(|(candidate, _score)| {
+            let chunk = chunk::EvidenceChunk {
+                id: candidate.title.clone(),
+                text: candidate.evidence.clone(),
+                origin: chunk::ChunkOrigin::User,
+                source_kind: source.to_string(),
+                source_observations: Vec::new(),
+            };
+            let classification = classify::classify_chunk(&chunk);
+            ExtractCandidatePreview {
+                id: draft_id(candidate),
+                title: candidate.title.clone(),
+                body: candidate.body.clone(),
+                kind: candidate.kind.clone(),
+                scope: candidate.scope.clone(),
+                evidence: format!("{source}: {}", candidate.evidence),
+                confidence: candidate.confidence,
+                reason: candidate.reason.clone(),
+                matched_template: candidate.matched_template.clone(),
+                classification: Some(classification.clone()),
+                tags: classification.tags.clone(),
+            }
         })
         .collect::<Vec<_>>();
     if dry_run {
@@ -358,7 +449,375 @@ pub fn extract_text_to_drafts(
             skipped: Vec::new(),
             candidates: previews,
             dry_run,
-            provider: provider_name,
+            provider: "local".to_string(),
+            redacted,
+        });
+    }
+
+    let mut created = Vec::new();
+    let mut skipped = Vec::new();
+    for (candidate, score) in scored_candidates {
+        let id = draft_id(&candidate);
+        let chunk = chunk::EvidenceChunk {
+            id: candidate.title.clone(),
+            text: candidate.evidence.clone(),
+            origin: chunk::ChunkOrigin::User,
+            source_kind: source.to_string(),
+            source_observations: Vec::new(),
+        };
+        let extraction = extraction_metadata_for_chunk(&chunk, &score, None);
+        let result = draft::add_draft(
+            project_root,
+            NewDraft {
+                id: id.clone(),
+                title: candidate.title,
+                kind: candidate.kind,
+                scope: candidate.scope,
+                body: candidate.body,
+                targets: targets.clone(),
+                evidence: format!("{source}: {}", candidate.evidence),
+                confidence: candidate.confidence,
+                reason: candidate.reason,
+                matched_template: candidate.matched_template,
+                extraction,
+            },
+        );
+        match result {
+            Ok(()) => created.push(id),
+            Err(error) => skipped.push(format!("{id}: {error}")),
+        }
+    }
+    Ok(ExtractReport {
+        created,
+        skipped,
+        candidates: previews,
+        dry_run,
+        provider: "local".to_string(),
+        redacted,
+    })
+}
+
+/// LLM 驱动提取引擎
+fn extract_llm_text_to_drafts(
+    project_root: &Path,
+    input: &str,
+    targets: Vec<String>,
+    source: &str,
+    provider_name: &str,
+    dry_run: bool,
+    max_candidates: Option<usize>,
+) -> Result<ExtractReport> {
+    let provider_cfg = provider::load_or_default_provider_config(project_root)?;
+    let redacted_input = if provider_cfg.privacy.redact_secrets {
+        provider::redact_secrets(input)
+    } else {
+        input.to_string()
+    };
+    let redacted = redacted_input != input;
+
+    // 第一层+第二层：过滤噪音，检测候选段落
+    let paragraphs = signals::split_into_paragraphs(&redacted_input);
+    let candidate_paragraphs = signals::detect_candidate_paragraphs(&paragraphs);
+
+    if candidate_paragraphs.is_empty() {
+        return Ok(ExtractReport {
+            created: Vec::new(),
+            skipped: vec!["No candidate paragraphs detected.".to_string()],
+            candidates: Vec::new(),
+            dry_run,
+            provider: provider_name.to_string(),
+            redacted,
+        });
+    }
+
+    // 第三层：LLM 提取（分批）
+    let max_per_batch = provider_cfg.max_candidates_per_batch;
+    let min_confidence = provider_cfg.min_confidence;
+    let mut all_knowledge = Vec::new();
+
+    for batch in candidate_paragraphs.chunks(max_per_batch) {
+        match llm::run_llm_extraction(project_root, batch, 2048) {
+            Ok(items) => all_knowledge.extend(items),
+            Err(e) => {
+                // LLM 提取失败时跳过该批次
+                return Ok(ExtractReport {
+                    created: Vec::new(),
+                    skipped: vec![format!("LLM extraction failed: {e}")],
+                    candidates: Vec::new(),
+                    dry_run,
+                    provider: provider_name.to_string(),
+                    redacted,
+                });
+            }
+        }
+    }
+
+    // 筛选可用知识
+    let usable = llm::filter_usable_knowledge(all_knowledge, min_confidence);
+
+    // 第四层：语义去重
+    let skilllets = skilllet::load_skilllets(project_root)?;
+    let deduper = embedding::SemanticDeduper::new(0.75, 0.65);
+    let mut deduped_items: Vec<embedding::LlmKnowledgeItem> = Vec::new();
+    for item in usable {
+        if item.is_noise {
+            continue;
+        }
+        // 和已有 Skilllet 去重
+        if let embedding::DedupResult::Duplicate { .. } =
+            deduper.dedup_against_existing(&item.body, &skilllets)
+        {
+            continue;
+        }
+        deduped_items.push(embedding::LlmKnowledgeItem {
+            title: item.title.clone(),
+            body: item.body.clone(),
+            kind: llm::knowledge_kind_to_str(&item.kind).to_string(),
+            scope: "project".to_string(),
+            confidence: item.confidence,
+            evidence: format!("{source}: LLM extraction"),
+            reason: item.rationale.clone(),
+            matched_signal: format!("{:?}", item.kind),
+            is_noise: item.is_noise,
+        });
+    }
+
+    // 同批次去重
+    let retained = deduper.dedup_within_batch(&mut deduped_items);
+
+    // 按 confidence 排序
+    let mut final_items: Vec<&embedding::LlmKnowledgeItem> =
+        retained.iter().map(|&i| &deduped_items[i]).collect();
+    final_items.sort_by(|a, b| {
+        b.confidence
+            .partial_cmp(&a.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // 应用 max_candidates 限制
+    if let Some(limit) = max_candidates {
+        final_items.truncate(limit);
+    }
+
+    // 应用质量评分门控：将 LLM 输出转为 EvidenceChunk（assistant 来源），评分，仅保留 Candidate 级别
+    let mut scored_items: Vec<(&embedding::LlmKnowledgeItem, scoring::ExtractionScore)> =
+        Vec::new();
+    for item in &final_items {
+        let chunk = chunk::EvidenceChunk {
+            id: item.title.clone(),
+            text: item.body.clone(),
+            origin: chunk::ChunkOrigin::Assistant,
+            source_kind: source.to_string(),
+            source_observations: Vec::new(),
+        };
+        let score = scoring::score_chunk(&chunk);
+        if score.disposition == scoring::ExtractionDisposition::Candidate {
+            scored_items.push((item, score));
+        }
+    }
+    // 按 confidence 降序排序，截断到 10 条
+    scored_items.sort_by(|(a, _), (b, _)| {
+        b.confidence
+            .partial_cmp(&a.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    scored_items.truncate(10);
+
+    // 生成预览
+    let previews = scored_items
+        .iter()
+        .map(|(item, score)| {
+            let chunk = chunk::EvidenceChunk {
+                id: item.title.clone(),
+                text: item.body.clone(),
+                origin: chunk::ChunkOrigin::Assistant,
+                source_kind: source.to_string(),
+                source_observations: Vec::new(),
+            };
+            let classification = classify::classify_chunk(&chunk);
+            ExtractCandidatePreview {
+                id: format!("project:{}", textutil::slug(&item.title)),
+                title: item.title.clone(),
+                body: item.body.clone(),
+                kind: item.kind.clone(),
+                scope: item.scope.clone(),
+                evidence: item.evidence.clone(),
+                confidence: Some(item.confidence),
+                reason: Some(score.reason.clone()),
+                matched_template: Some(item.matched_signal.clone()),
+                classification: Some(classification.clone()),
+                tags: classification.tags.clone(),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if dry_run {
+        return Ok(ExtractReport {
+            created: Vec::new(),
+            skipped: Vec::new(),
+            candidates: previews,
+            dry_run,
+            provider: provider_name.to_string(),
+            redacted,
+        });
+    }
+
+    // 写入 Candidate（附带提取元数据）
+    let mut created = Vec::new();
+    let mut skipped = Vec::new();
+    for (item, score) in scored_items {
+        let id = format!("project:{}", textutil::slug(&item.title));
+        let chunk = chunk::EvidenceChunk {
+            id: item.title.clone(),
+            text: item.body.clone(),
+            origin: chunk::ChunkOrigin::Assistant,
+            source_kind: source.to_string(),
+            source_observations: Vec::new(),
+        };
+        let extraction = extraction_metadata_for_chunk(&chunk, &score, None);
+        let result = candidate::add_candidate(
+            project_root,
+            candidate::NewCandidate {
+                id: id.clone(),
+                title: item.title.clone(),
+                kind: item.kind.clone(),
+                scope: item.scope.clone(),
+                body: item.body.clone(),
+                brief: None,
+                tags: Vec::new(),
+                language: None,
+                targets: targets.clone(),
+                evidence: item.evidence.clone(),
+                confidence: Some(item.confidence),
+                reason: Some(item.reason.clone()),
+                matched_template: Some(item.matched_signal.clone()),
+                source_observations: Vec::new(),
+                extraction,
+            },
+        );
+        match result {
+            Ok(()) => created.push(id),
+            Err(error) => skipped.push(format!("{id}: {error}")),
+        }
+    }
+
+    Ok(ExtractReport {
+        created,
+        skipped,
+        candidates: previews,
+        dry_run,
+        provider: provider_name.to_string(),
+        redacted,
+    })
+}
+
+pub fn extract_high_value_text_to_drafts(
+    project_root: &Path,
+    input: &str,
+    targets: Vec<String>,
+    source: &str,
+    provider_name: Option<String>,
+    dry_run: bool,
+    max_candidates: usize,
+) -> Result<ExtractReport> {
+    let provider_name = provider_name.unwrap_or_else(|| {
+        provider::load_or_default_provider_config(project_root)
+            .map(|cfg| cfg.extraction_provider)
+            .unwrap_or_else(|_| "local".to_string())
+    });
+
+    if provider_name == "local" {
+        return extract_local_high_value_text_to_drafts(
+            project_root,
+            input,
+            targets,
+            source,
+            dry_run,
+            max_candidates,
+        );
+    }
+
+    // LLM 路径：复用 extract_llm_text_to_drafts，加上 max_candidates 限制
+    extract_llm_text_to_drafts(
+        project_root,
+        input,
+        targets,
+        source,
+        &provider_name,
+        dry_run,
+        Some(max_candidates),
+    )
+}
+
+/// 本地正则高价值提取引擎（保持向后兼容）
+fn extract_local_high_value_text_to_drafts(
+    project_root: &Path,
+    input: &str,
+    targets: Vec<String>,
+    source: &str,
+    dry_run: bool,
+    max_candidates: usize,
+) -> Result<ExtractReport> {
+    let provider_cfg = provider::load_or_default_provider_config(project_root)?;
+    let redacted_input = if provider_cfg.privacy.redact_secrets {
+        provider::redact_secrets(input)
+    } else {
+        input.to_string()
+    };
+    let redacted = redacted_input != input;
+    let preferences = load_known_preferences(project_root)?;
+    let candidates = extract_high_value_candidates_with_preferences(
+        &redacted_input,
+        &preferences,
+        max_candidates,
+    );
+
+    // 对已有 skilllet 做语义去重
+    let existing_skilllets = skilllet::load_skilllets(project_root)?;
+    let deduper = embedding::SemanticDeduper::new(0.75, 0.65);
+    let candidates: Vec<Candidate> = candidates
+        .into_iter()
+        .filter(|candidate| {
+            !matches!(
+                deduper.dedup_against_existing(&candidate.body, &existing_skilllets),
+                embedding::DedupResult::Duplicate { .. }
+            )
+        })
+        .collect();
+
+    let previews = candidates
+        .iter()
+        .map(|candidate| {
+            let chunk = chunk::EvidenceChunk {
+                id: candidate.title.clone(),
+                text: candidate.evidence.clone(),
+                origin: chunk::ChunkOrigin::User,
+                source_kind: source.to_string(),
+                source_observations: Vec::new(),
+            };
+            let classification = classify::classify_chunk(&chunk);
+            ExtractCandidatePreview {
+                id: draft_id(candidate),
+                title: candidate.title.clone(),
+                body: candidate.body.clone(),
+                kind: candidate.kind.clone(),
+                scope: candidate.scope.clone(),
+                evidence: format!("{source}: {}", candidate.evidence),
+                confidence: candidate.confidence,
+                reason: candidate.reason.clone(),
+                matched_template: candidate.matched_template.clone(),
+                classification: Some(classification.clone()),
+                tags: classification.tags.clone(),
+            }
+        })
+        .collect::<Vec<_>>();
+    if dry_run {
+        return Ok(ExtractReport {
+            created: Vec::new(),
+            skipped: Vec::new(),
+            candidates: previews,
+            dry_run,
+            provider: "local".to_string(),
             redacted,
         });
     }
@@ -380,6 +839,7 @@ pub fn extract_text_to_drafts(
                 confidence: candidate.confidence,
                 reason: candidate.reason,
                 matched_template: candidate.matched_template,
+                extraction: candidate::ExtractionMetadata::default(),
             },
         );
         match result {
@@ -392,7 +852,7 @@ pub fn extract_text_to_drafts(
         skipped,
         candidates: previews,
         dry_run,
-        provider: provider_name,
+        provider: "local".to_string(),
         redacted,
     })
 }
@@ -409,11 +869,40 @@ fn extract_candidates_with_preferences(
 ) -> Vec<Candidate> {
     let mut candidates = Vec::new();
     for sentence in split_sentences(input) {
-        if !looks_like_rule(sentence) {
+        if let Some(candidate) = high_value_prompt_candidate(sentence) {
+            candidates.push(candidate);
             continue;
         }
+
+        if looks_like_project_improvement_signal(sentence) {
+            let body = normalize_project_improvement_body(sentence);
+            if body.len() >= 28 && body.len() <= 360 {
+                candidates.push(Candidate {
+                    title: title_from_project_improvement(&body),
+                    body,
+                    kind: "procedure".to_string(),
+                    scope: infer_scope(sentence).to_string(),
+                    evidence: sentence.to_string(),
+                    confidence: Some(0.82),
+                    reason: Some(
+                        "Matched high-value project improvement record: reusable fix, decision, or execution pattern."
+                            .to_string(),
+                    ),
+                    matched_template: Some("project-improvement".to_string()),
+                });
+            }
+            continue;
+        }
+
         if let Some(candidate) = normalize_known_preference(sentence, preferences) {
             candidates.push(candidate);
+            continue;
+        }
+        if let Some(candidate) = scored_signal_candidate(sentence, chunk::ChunkOrigin::User) {
+            candidates.push(candidate);
+            continue;
+        }
+        if !looks_like_rule(sentence) {
             continue;
         }
         let body = normalize_body(sentence);
@@ -433,6 +922,170 @@ fn extract_candidates_with_preferences(
         });
     }
     dedupe_candidates(candidates)
+}
+
+fn extract_high_value_candidates_with_preferences(
+    input: &str,
+    preferences: &[KnownPreference],
+    max_candidates: usize,
+) -> Vec<Candidate> {
+    let mut candidates = Vec::new();
+    let mut weak_counts = std::collections::BTreeMap::<String, usize>::new();
+    let mut weak_candidates = std::collections::BTreeMap::<String, Candidate>::new();
+
+    for sentence in split_sentences(input) {
+        if let Some(candidate) = high_value_prompt_candidate(sentence) {
+            candidates.push(candidate);
+            continue;
+        }
+
+        if looks_like_project_improvement_signal(sentence) {
+            let body = normalize_project_improvement_body(sentence);
+            if body.len() >= 28 && body.len() <= 360 {
+                candidates.push(Candidate {
+                    title: title_from_project_improvement(&body),
+                    body,
+                    kind: "procedure".to_string(),
+                    scope: infer_scope(sentence).to_string(),
+                    evidence: sentence.to_string(),
+                    confidence: Some(0.82),
+                    reason: Some(
+                        "Matched high-value project improvement record: reusable fix, decision, or execution pattern."
+                            .to_string(),
+                    ),
+                    matched_template: Some("project-improvement".to_string()),
+                });
+            }
+            continue;
+        }
+
+        if let Some(candidate) = normalize_known_preference(sentence, preferences) {
+            candidates.push(candidate);
+            continue;
+        }
+        if let Some(candidate) = scored_signal_candidate(sentence, chunk::ChunkOrigin::User) {
+            candidates.push(candidate);
+            continue;
+        }
+        if !looks_like_rule(sentence) {
+            continue;
+        }
+        if !looks_like_skilllet_signal(sentence) {
+            continue;
+        }
+        let body = normalize_body(sentence);
+        if body.len() < 18 || body.len() > 220 {
+            continue;
+        }
+        let key = body.to_lowercase();
+        *weak_counts.entry(key.clone()).or_default() += 1;
+        weak_candidates.entry(key).or_insert_with(|| Candidate {
+            title: title_from_body(&body),
+            body,
+            kind: classify_kind(sentence).to_string(),
+            scope: infer_scope(sentence).to_string(),
+            evidence: sentence.to_string(),
+            confidence: Some(0.78),
+            reason: Some(
+                "Matched high-value Skilllet signal: durable preference, constraint, or workflow."
+                    .to_string(),
+            ),
+            matched_template: None,
+        });
+    }
+
+    for (key, count) in weak_counts {
+        let Some(candidate) = weak_candidates.remove(&key) else {
+            continue;
+        };
+        if count >= 2 || has_explicit_memory_marker(&candidate.evidence) {
+            candidates.push(candidate);
+        }
+    }
+
+    let mut deduped = dedupe_candidates(candidates);
+    deduped.sort_by(|a, b| {
+        let left = a.confidence.unwrap_or(0.0);
+        let right = b.confidence.unwrap_or(0.0);
+        right
+            .total_cmp(&left)
+            .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+    });
+    deduped.truncate(max_candidates);
+    deduped
+}
+
+fn high_value_prompt_candidate(sentence: &str) -> Option<Candidate> {
+    if !looks_like_high_value_prompt_signal(sentence) {
+        return None;
+    }
+
+    let body = normalize_high_value_prompt_body(sentence);
+    if body.len() < 28 || body.len() > 360 {
+        return None;
+    }
+
+    Some(Candidate {
+        title: title_from_high_value_prompt(&body),
+        body,
+        kind: "procedure".to_string(),
+        scope: infer_scope(sentence).to_string(),
+        evidence: sentence.to_string(),
+        confidence: Some(0.84),
+        reason: Some(
+            "Matched high-value prompt pattern: reusable agent handoff or project-improving workflow."
+                .to_string(),
+        ),
+        matched_template: Some("high-value-prompt".to_string()),
+    })
+}
+
+fn scored_signal_candidate(sentence: &str, origin: chunk::ChunkOrigin) -> Option<Candidate> {
+    let chunk = chunk::EvidenceChunk {
+        id: textutil::slug(sentence),
+        text: sentence.trim().to_string(),
+        origin,
+        source_kind: "local-text".to_string(),
+        source_observations: Vec::new(),
+    };
+    let score = scoring::score_chunk(&chunk);
+    if score.disposition != scoring::ExtractionDisposition::Candidate {
+        return None;
+    }
+
+    let body = normalize_body(sentence);
+    if body.len() < 12 || body.len() > 400 {
+        return None;
+    }
+
+    Some(Candidate {
+        title: title_from_scored_signal(&body, &score.matched_signal),
+        body,
+        kind: kind_from_scored_signal(&score.matched_signal).to_string(),
+        scope: infer_scope(sentence).to_string(),
+        evidence: sentence.to_string(),
+        confidence: Some((score.score / 5.0).clamp(0.7, 0.94)),
+        reason: Some(score.reason),
+        matched_template: Some(format!("score:{}", score.matched_signal)),
+    })
+}
+
+fn kind_from_scored_signal(signal: &str) -> &'static str {
+    match signal {
+        "constraint" => "constraint",
+        "procedure" | "correction" | "decision" | "ai_project_improvement" => "procedure",
+        _ => "preference",
+    }
+}
+
+fn title_from_scored_signal(body: &str, signal: &str) -> String {
+    if signal == "ai_project_improvement" {
+        "Review AI-Origin Project Improvement".to_string()
+    } else if signal == "constraint" && body.contains("AGENTS.md") {
+        "Protect AGENTS.md Drift Review".to_string()
+    } else {
+        title_from_body(body)
+    }
 }
 
 fn normalize_known_preference(
@@ -634,13 +1287,33 @@ fn strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| value.to_string()).collect()
 }
 
-fn split_sentences(input: &str) -> Vec<&str> {
-    input
-        .split(['\n', '。', '！', '？', '.', '!', '?'])
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect()
+fn draft_id(candidate: &Candidate) -> String {
+    let slug = textutil::slug(&candidate.title);
+    format!("project:{slug}")
 }
+
+/// 从证据块和评分结果构建提取元数据，用于记录溯源信息。
+fn extraction_metadata_for_chunk(
+    chunk: &chunk::EvidenceChunk,
+    score: &scoring::ExtractionScore,
+    similar_record: Option<String>,
+) -> candidate::ExtractionMetadata {
+    let classification = classify::classify_chunk(chunk);
+    candidate::ExtractionMetadata {
+        origin: chunk.origin.as_str().to_string(),
+        matched_signal: score.matched_signal.clone(),
+        reason: score.reason.clone(),
+        source_observations: chunk.source_observations.clone(),
+        score_breakdown: score.breakdown.clone(),
+        similar_record,
+        tags: classification.tags.clone(),
+        classification: Some(classification),
+    }
+}
+
+// ============================================================
+// 旧版正则提取函数（从 signals.rs 移入，供 local engine 使用）
+// ============================================================
 
 fn looks_like_rule(sentence: &str) -> bool {
     let lower = sentence.to_lowercase();
@@ -666,18 +1339,158 @@ fn looks_like_rule(sentence: &str) -> bool {
     markers.iter().any(|marker| lower.contains(marker))
 }
 
-fn classify_kind(sentence: &str) -> &'static str {
+fn looks_like_skilllet_signal(sentence: &str) -> bool {
     let lower = sentence.to_lowercase();
-    if lower.contains("不要")
-        || lower.contains("禁止")
-        || lower.contains("never")
-        || lower.contains("do not")
-        || lower.contains("don't")
-    {
-        "constraint"
-    } else {
-        "preference"
+    if signals::is_low_value_task_sentence(&lower) {
+        return false;
     }
+    if signals::looks_like_unresolved_user_request(&lower)
+        && !signals::has_strong_memory_marker(&lower)
+    {
+        return false;
+    }
+
+    let durable_markers = [
+        "以后",
+        "所有项目",
+        "每次",
+        "总是",
+        "默认",
+        "统一",
+        "优先",
+        "禁止",
+        "不要",
+        "必须",
+        "记住",
+        "always",
+        "never",
+        "prefer",
+        "by default",
+        "default to",
+        "for every",
+        "for all",
+        "must",
+        "do not",
+    ];
+    let domain_markers = [
+        "agent",
+        "skill",
+        "skilllet",
+        "claude",
+        "codex",
+        "cursor",
+        "bun",
+        "cargo",
+        "rust",
+        "typescript",
+        "react",
+        "tauri",
+        "test",
+        "ui",
+        "api",
+        "http",
+        "git",
+        "mcp",
+        "智能体",
+        "技能",
+        "规则",
+        "项目",
+        "测试",
+        "前端",
+        "后端",
+        "界面",
+        "代理",
+    ];
+
+    durable_markers.iter().any(|marker| lower.contains(marker))
+        && domain_markers.iter().any(|marker| lower.contains(marker))
+}
+
+fn looks_like_high_value_prompt_signal(sentence: &str) -> bool {
+    let lower = sentence.to_lowercase();
+    if signals::is_low_value_task_sentence(&lower) {
+        return false;
+    }
+    if signals::looks_like_unresolved_user_request(&lower)
+        && !signals::has_explicit_memory_marker(&lower)
+    {
+        return false;
+    }
+
+    let prompt_markers = [
+        "提示",
+        "prompt",
+        "可以先",
+        "先让",
+        "再由",
+        "让 claude",
+        "由 codex",
+        "交给 claude",
+        "codex 做",
+        "输出",
+        "清单",
+        "步骤",
+        "检查",
+        "复用",
+        "模式",
+        "减少返工",
+        "显著减少",
+        "提高质量",
+        "降低理解成本",
+        "减少误解",
+        "handoff",
+        "checklist",
+        "playbook",
+        "workflow",
+    ];
+    let domain_markers = [
+        "claude",
+        "codex",
+        "agent",
+        "skilllet",
+        "skill",
+        "ui",
+        "组件",
+        "状态流",
+        "按钮",
+        "rust",
+        "tauri",
+        "react",
+        "测试",
+        "集成测试",
+        "架构",
+        "前端",
+        "后端",
+        "重构",
+        "agent",
+        "frontend",
+        "backend",
+        "architecture",
+        "test",
+        "refactor",
+    ];
+    let outcome_markers = [
+        "减少返工",
+        "显著减少",
+        "提高质量",
+        "降低理解成本",
+        "减少误解",
+        "更稳定",
+        "更清晰",
+        "可复用",
+        "避免遗漏",
+        "avoid rework",
+        "reduce rework",
+        "improve",
+    ];
+
+    prompt_markers
+        .iter()
+        .filter(|marker| lower.contains(**marker))
+        .count()
+        >= 2
+        && domain_markers.iter().any(|marker| lower.contains(marker))
+        && outcome_markers.iter().any(|marker| lower.contains(marker))
 }
 
 fn normalize_body(sentence: &str) -> String {
@@ -700,6 +1513,35 @@ fn normalize_body(sentence: &str) -> String {
     body
 }
 
+fn normalize_project_improvement_body(sentence: &str) -> String {
+    let mut body = normalize_body(sentence);
+    let replacements = [
+        ("这次", ""),
+        ("最终做法是", "Reusable approach:"),
+        ("根因是", "Root cause:"),
+        ("原因是", "Root cause:"),
+    ];
+    for (from, to) in replacements {
+        body = body.replace(from, to);
+    }
+    body.trim_matches(['，', ',', ' ']).trim().to_string()
+}
+
+fn normalize_high_value_prompt_body(sentence: &str) -> String {
+    let body = normalize_body(sentence);
+    let replacements = [
+        ("这个提示能", "This prompt can "),
+        ("这个提示可以", "This prompt can "),
+        ("可以先", "Start by "),
+        ("再由", "then hand off to "),
+    ];
+    let mut normalized = body;
+    for (from, to) in replacements {
+        normalized = normalized.replace(from, to);
+    }
+    normalized.trim_matches(['，', ',', ' ']).trim().to_string()
+}
+
 fn title_from_body(body: &str) -> String {
     let words = body.split_whitespace().collect::<Vec<_>>();
     if words.len() >= 3 {
@@ -708,394 +1550,58 @@ fn title_from_body(body: &str) -> String {
     body.chars().take(24).collect()
 }
 
-fn draft_id(candidate: &Candidate) -> String {
-    let slug = slug(&candidate.title);
-    format!("project:{slug}")
-}
-
-fn slug(input: &str) -> String {
-    let re = Regex::new(r"[^a-zA-Z0-9\u4e00-\u9fff]+").expect("valid regex");
-    let slug = re
-        .replace_all(&input.to_lowercase(), "-")
-        .trim_matches('-')
-        .to_string();
-    if slug.is_empty() {
-        "draft".to_string()
+fn title_from_project_improvement(body: &str) -> String {
+    let lower = body.to_lowercase();
+    if lower.contains("卡死") || lower.contains("卡顿") || lower.contains("freeze") {
+        "Keep UI Responsive During Long Tasks".to_string()
+    } else if lower.contains("增量") || lower.contains("incremental") {
+        "Use Incremental Local Processing".to_string()
+    } else if lower.contains("跨平台") || lower.contains("windows") || lower.contains("mac") {
+        "Handle Cross-Platform Runtime Differences".to_string()
+    } else if lower.contains("测试") || lower.contains("test") {
+        "Preserve Regression Tests For Fixes".to_string()
     } else {
-        slug.chars().take(48).collect()
+        title_from_body(body)
     }
 }
 
-fn dedupe_candidates(candidates: Vec<Candidate>) -> Vec<Candidate> {
-    let mut seen = std::collections::BTreeSet::new();
-    let mut out = Vec::new();
-    for candidate in candidates {
-        let key = candidate.body.to_lowercase();
-        if seen.insert(key) {
-            out.push(candidate);
-        }
+fn title_from_high_value_prompt(body: &str) -> String {
+    let lower = body.to_lowercase();
+    if lower.contains("claude") && lower.contains("codex") && lower.contains("ui") {
+        "Use Agent Handoff Prompts For UI Refactors".to_string()
+    } else if lower.contains("checklist") || lower.contains("清单") {
+        "Use Checklist Prompts For Complex Agent Tasks".to_string()
+    } else if lower.contains("架构") || lower.contains("architecture") {
+        "Use Architecture Prompts Before Implementation".to_string()
+    } else {
+        title_from_body(body)
     }
-    out
+}
+
+fn classify_kind(sentence: &str) -> &'static str {
+    let lower = sentence.to_lowercase();
+    if lower.contains("不要")
+        || lower.contains("禁止")
+        || lower.contains("never")
+        || lower.contains("do not")
+        || lower.contains("don't")
+    {
+        "constraint"
+    } else {
+        "preference"
+    }
+}
+
+fn infer_scope(sentence: &str) -> &'static str {
+    let lower = sentence.to_lowercase();
+    if lower.contains("所有项目") || lower.contains("全局") || lower.contains("for all") {
+        "global"
+    } else if lower.contains("claude") || lower.contains("codex") || lower.contains("agent") {
+        "agent"
+    } else {
+        "project"
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn extracts_chinese_rule_candidate() {
-        let candidates = extract_candidates("以后前端请求统一使用 Axios，不要再用 Fetch。");
-
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(draft_id(&candidates[0]), "project:use-axios");
-        assert_eq!(candidates[0].title, "Use Axios");
-        assert_eq!(candidates[0].body, "Use Axios for frontend HTTP requests.");
-    }
-
-    #[test]
-    fn extract_command_creates_draft() {
-        let temp = tempfile::tempdir().expect("tempdir");
-
-        let report = extract_to_drafts(
-            temp.path(),
-            Some("Always use Bun for JavaScript package management and scripts.".to_string()),
-            None,
-            vec!["codex".to_string()],
-            Some("local".to_string()),
-            false,
-        )
-        .expect("extract");
-
-        assert_eq!(report.created.len(), 1);
-        let drafts = draft::load_drafts(temp.path()).expect("drafts");
-        assert_eq!(drafts[0].targets, vec!["codex"]);
-    }
-
-    #[test]
-    fn extracted_preference_draft_includes_explainability() {
-        let temp = tempfile::tempdir().expect("tempdir");
-
-        extract_to_drafts(
-            temp.path(),
-            Some("以后前端请求统一使用 Axios，不要再用 Fetch。".to_string()),
-            None,
-            vec!["codex".to_string()],
-            Some("local".to_string()),
-            false,
-        )
-        .expect("extract");
-
-        let drafts = draft::load_drafts(temp.path()).expect("drafts");
-
-        assert_eq!(
-            drafts[0].matched_template.as_deref(),
-            Some("built-in:Use Axios")
-        );
-        assert_eq!(drafts[0].confidence, Some(0.92));
-        assert!(
-            drafts[0]
-                .reason
-                .as_deref()
-                .unwrap_or_default()
-                .contains("required: axios")
-        );
-    }
-
-    #[test]
-    fn dry_run_previews_preference_explainability() {
-        let temp = tempfile::tempdir().expect("tempdir");
-
-        let report = extract_to_drafts(
-            temp.path(),
-            Some("以后前端请求统一使用 Axios，不要再用 Fetch。".to_string()),
-            None,
-            vec!["codex".to_string()],
-            Some("local".to_string()),
-            true,
-        )
-        .expect("extract");
-
-        assert_eq!(
-            report.candidates[0].matched_template.as_deref(),
-            Some("built-in:Use Axios")
-        );
-        assert_eq!(report.candidates[0].confidence, Some(0.92));
-        assert!(
-            report
-                .render()
-                .contains("Matched preference template; required: axios")
-        );
-    }
-
-    #[test]
-    fn dry_run_does_not_create_drafts() {
-        let temp = tempfile::tempdir().expect("tempdir");
-
-        let report = extract_to_drafts(
-            temp.path(),
-            Some("Always use Bun for JavaScript package management and scripts.".to_string()),
-            None,
-            vec!["codex".to_string()],
-            Some("local".to_string()),
-            true,
-        )
-        .expect("extract");
-
-        assert_eq!(report.candidates.len(), 1);
-        assert!(draft::load_drafts(temp.path()).expect("drafts").is_empty());
-    }
-
-    #[test]
-    fn normalizes_bun_package_manager_preference() {
-        let temp = tempfile::tempdir().expect("tempdir");
-
-        let report = extract_to_drafts(
-            temp.path(),
-            Some("以后把 npm 改为 Bun，所有 JS 脚本都用 bun run。".to_string()),
-            None,
-            vec!["codex".to_string()],
-            Some("local".to_string()),
-            true,
-        )
-        .expect("extract");
-
-        assert_eq!(report.candidates.len(), 1);
-        assert_eq!(report.candidates[0].id, "project:prefer-bun");
-        assert_eq!(report.candidates[0].title, "Prefer Bun");
-        assert_eq!(
-            report.candidates[0].body,
-            "Use Bun for JavaScript package management and scripts."
-        );
-    }
-
-    #[test]
-    fn normalizes_vitest_unit_test_preference() {
-        let temp = tempfile::tempdir().expect("tempdir");
-
-        let report = extract_to_drafts(
-            temp.path(),
-            Some("以后前端单元测试默认使用 Vitest，不要再写 Jest 配置。".to_string()),
-            None,
-            vec!["codex".to_string()],
-            Some("local".to_string()),
-            true,
-        )
-        .expect("extract");
-
-        assert_eq!(report.candidates.len(), 1);
-        assert_eq!(report.candidates[0].id, "project:use-vitest");
-        assert_eq!(report.candidates[0].title, "Use Vitest");
-        assert_eq!(
-            report.candidates[0].body,
-            "Use Vitest for frontend unit tests."
-        );
-    }
-
-    #[test]
-    fn uses_project_preference_registry() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let registry_dir = temp.path().join(".agent-kernel");
-        fs::create_dir_all(&registry_dir).expect("registry dir");
-        fs::write(
-            registry_dir.join("preference-registry.yml"),
-            r#"preferences:
-  - title: Use Playwright
-    body: Use Playwright for browser automation tests.
-    required:
-      - playwright
-    context:
-      - cypress
-      - browser automation
-      - 浏览器自动化
-"#,
-        )
-        .expect("write registry");
-
-        let report = extract_to_drafts(
-            temp.path(),
-            Some("以后浏览器自动化测试统一使用 Playwright，不要再用 Cypress。".to_string()),
-            None,
-            vec!["codex".to_string()],
-            Some("local".to_string()),
-            true,
-        )
-        .expect("extract");
-
-        assert_eq!(report.candidates.len(), 1);
-        assert_eq!(report.candidates[0].id, "project:use-playwright");
-        assert_eq!(report.candidates[0].title, "Use Playwright");
-        assert_eq!(
-            report.candidates[0].body,
-            "Use Playwright for browser automation tests."
-        );
-    }
-
-    #[test]
-    fn project_preference_registry_overrides_built_ins() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let registry_dir = temp.path().join(".agent-kernel");
-        fs::create_dir_all(&registry_dir).expect("registry dir");
-        fs::write(
-            registry_dir.join("preference-registry.yml"),
-            r#"preferences:
-  - title: Use Bun Runtime
-    body: Use Bun for package management, scripts, and JavaScript runtime tasks.
-    required:
-      - bun
-    context:
-      - npm
-      - package management
-"#,
-        )
-        .expect("write registry");
-
-        let report = extract_to_drafts(
-            temp.path(),
-            Some("Always use Bun instead of npm for package management.".to_string()),
-            None,
-            vec!["codex".to_string()],
-            Some("local".to_string()),
-            true,
-        )
-        .expect("extract");
-
-        assert_eq!(report.candidates.len(), 1);
-        assert_eq!(report.candidates[0].id, "project:use-bun-runtime");
-        assert_eq!(report.candidates[0].title, "Use Bun Runtime");
-        assert_eq!(
-            report.candidates[0].body,
-            "Use Bun for package management, scripts, and JavaScript runtime tasks."
-        );
-    }
-
-    #[test]
-    fn preference_templates_list_project_before_built_ins() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let registry_dir = temp.path().join(".agent-kernel");
-        fs::create_dir_all(&registry_dir).expect("registry dir");
-        fs::write(
-            registry_dir.join("preference-registry.yml"),
-            r#"preferences:
-  - title: Use Playwright
-    body: Use Playwright for browser automation tests.
-    required:
-      - playwright
-    context:
-      - cypress
-"#,
-        )
-        .expect("write registry");
-
-        let templates = preference_templates(temp.path()).expect("templates");
-
-        assert_eq!(templates[0].source, "project");
-        assert_eq!(templates[0].title, "Use Playwright");
-        assert!(
-            templates
-                .iter()
-                .any(|template| template.source == "built-in")
-        );
-    }
-
-    #[test]
-    fn init_preference_registry_writes_example() {
-        let temp = tempfile::tempdir().expect("tempdir");
-
-        let created = init_preference_registry(temp.path()).expect("init registry");
-        let path = config::kernel_dir(temp.path()).join("preference-registry.yml");
-
-        assert!(created);
-        assert!(path.exists());
-        let text = fs::read_to_string(path).expect("registry");
-        assert!(text.contains("Use Playwright"));
-        assert!(text.contains("preferences:"));
-    }
-
-    #[test]
-    fn validate_preference_registry_reports_errors_and_warnings() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let registry_dir = temp.path().join(".agent-kernel");
-        fs::create_dir_all(&registry_dir).expect("registry dir");
-        fs::write(
-            registry_dir.join("preference-registry.yml"),
-            r#"preferences:
-  - title: Use Playwright
-    body: Use Playwright for browser automation tests.
-    required: []
-    context: []
-  - title: Use Playwright
-    body: Duplicate title.
-    required:
-      - playwright
-    context:
-      - cypress
-  - title: ""
-    body: Missing title.
-    required:
-      - vitest
-"#,
-        )
-        .expect("write registry");
-
-        let report = validate_preference_registry(temp.path()).expect("validate");
-
-        assert_eq!(report.errors, 3);
-        assert_eq!(report.warnings, 2);
-        assert!(
-            report
-                .messages
-                .iter()
-                .any(|message| message.contains("duplicate title"))
-        );
-    }
-
-    #[test]
-    fn test_preference_text_reports_match_reason() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let registry_dir = temp.path().join(".agent-kernel");
-        fs::create_dir_all(&registry_dir).expect("registry dir");
-        fs::write(
-            registry_dir.join("preference-registry.yml"),
-            r#"preferences:
-  - title: Use Playwright
-    body: Use Playwright for browser automation tests.
-    required:
-      - playwright
-    context:
-      - cypress
-"#,
-        )
-        .expect("write registry");
-
-        let report = test_preference_text(
-            temp.path(),
-            "以后浏览器自动化测试统一使用 Playwright，不要再用 Cypress。",
-        )
-        .expect("test preference");
-
-        assert_eq!(report.matches.len(), 1);
-        assert_eq!(report.matches[0].draft_id, "project:use-playwright");
-        assert_eq!(report.matches[0].source, "project");
-        assert_eq!(report.matches[0].required, vec!["playwright"]);
-        assert_eq!(report.matches[0].context, vec!["cypress"]);
-    }
-
-    #[test]
-    fn extraction_redacts_secret_evidence() {
-        let temp = tempfile::tempdir().expect("tempdir");
-
-        extract_to_drafts(
-            temp.path(),
-            Some("Always use token=supersecret123456789 before pushing.".to_string()),
-            None,
-            vec!["codex".to_string()],
-            Some("local".to_string()),
-            false,
-        )
-        .expect("extract");
-
-        let drafts = draft::load_drafts(temp.path()).expect("drafts");
-        assert!(drafts[0].evidence.contains("[REDACTED]"));
-        assert!(!drafts[0].evidence.contains("supersecret123456789"));
-    }
-}
+mod tests;

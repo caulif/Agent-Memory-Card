@@ -66,6 +66,8 @@ test("package metadata prefers Bun wrapper and scripts", () => {
   assert.equal(pkg.bin["agent-kernel"], "bun/agent-kernel.js");
   assert.equal(pkg.scripts.build, "bun bun/cargo.js build");
   assert.match(pkg.scripts.test, /^bun test bun\/agent-kernel-lib\.test\.js/);
+  assert.match(pkg.scripts.test, /bun run --cwd app test/);
+  assert.equal(pkg.scripts["app:test"], "bun run --cwd app test");
   assert.equal(pkg.scripts.start, "bun bun/cargo.js run --");
 });
 
@@ -75,7 +77,7 @@ test("ci workflow verifies windows macos and linux", () => {
   assert.match(ci, /windows-latest/);
   assert.match(ci, /ubuntu-latest/);
   assert.match(ci, /macos-latest/);
-  assert.match(ci, /Install Linux desktop dependencies/);
+  assert.match(ci, /Install Linux Tauri dependencies/);
 });
 
 test("release workflow packages the supported targets", () => {
@@ -87,5 +89,5 @@ test("release workflow packages the supported targets", () => {
   for (const target of supportedPackagedTargets()) {
     assert.match(release, new RegExp(target));
   }
-  assert.match(release, /Install Linux desktop dependencies/);
+  assert.match(release, /Install Linux Tauri dependencies/);
 });

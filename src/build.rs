@@ -7,6 +7,7 @@ use chrono::Utc;
 
 use serde::{Deserialize, Serialize};
 
+use crate::candidate::ExtractionMetadata;
 use crate::config::{self, ArtifactState, MirrorState, ProjectLock, SkillRecord};
 use crate::draft;
 use crate::fsutil;
@@ -155,6 +156,7 @@ pub fn build_project(project_root: &Path, preview: bool) -> Result<BuildReport> 
         .iter()
         .map(|skill| (skill.id.clone(), skill.clone()))
         .collect::<BTreeMap<_, _>>();
+    let previous_lock = config::load_lock(&root)?;
 
     let mut actions = Vec::new();
     let mut warnings = Vec::new();
@@ -257,6 +259,7 @@ pub fn build_project(project_root: &Path, preview: bool) -> Result<BuildReport> 
                 ));
             }
             if !preview {
+                ensure_generated_artifact_is_safe_to_write(&path, &previous_lock)?;
                 if let Some(parent) = path.parent() {
                     fs::create_dir_all(parent)?;
                 }
@@ -280,6 +283,7 @@ pub fn build_project(project_root: &Path, preview: bool) -> Result<BuildReport> 
                 fsutil::path_to_slash(&path)
             ));
             if !preview {
+                ensure_generated_artifact_is_safe_to_write(&path, &previous_lock)?;
                 if let Some(parent) = path.parent() {
                     fs::create_dir_all(parent)?;
                 }
@@ -320,7 +324,7 @@ fn render_rules_artifact(
 
     let mut rendered = 0;
     for item in skilllet_refs {
-        if !item.targets.is_empty() && !item.targets.iter().any(|target| target == agent_name) {
+        if !item.targets.iter().any(|target| target == agent_name) {
             continue;
         }
         if let Some(record) = skilllets.get(&item.id) {
@@ -364,7 +368,7 @@ fn render_instructions(
     out.push_str("\n## Enabled Skilllets\n\n");
     let mut rendered = 0;
     for item in skilllet_refs {
-        if !item.targets.is_empty() && !item.targets.iter().any(|target| target == agent_name) {
+        if !item.targets.iter().any(|target| target == agent_name) {
             continue;
         }
         if let Some(record) = skilllets.get(&item.id) {
@@ -472,6 +476,7 @@ pub fn import_artifact_drifts(project_root: &Path) -> Result<ArtifactImportRepor
                 confidence: None,
                 reason: None,
                 matched_template: None,
+                extraction: ExtractionMetadata::default(),
             },
         )?;
         drafts.push(id);
@@ -621,6 +626,38 @@ fn expected_artifacts(
     artifacts
 }
 
+fn ensure_generated_artifact_is_safe_to_write(
+    path: &Path,
+    previous_lock: &ProjectLock,
+) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let path_label = fsutil::path_to_slash(path);
+    let Some(previous) = previous_lock
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.path == path_label)
+    else {
+        return Err(anyhow!(
+            "unmanaged generated artifact exists at {}; import or review it before sync",
+            path_label
+        ));
+    };
+
+    let current = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let current_hash = fsutil::sha256_text(&current);
+    if current_hash != previous.hash {
+        return Err(anyhow!(
+            "artifact drift detected at {}; run artifact import before sync",
+            path_label
+        ));
+    }
+
+    Ok(())
+}
+
 fn extract_added_lines(expected: &str, actual: &str) -> String {
     let mut expected_counts = BTreeMap::<&str, usize>::new();
     for line in expected.lines() {
@@ -730,11 +767,16 @@ mod tests {
         skilllets.insert(
             "project:use-axios".to_string(),
             SkillletRecord {
+                schema_version: 1,
                 id: "project:use-axios".to_string(),
                 title: "Use Axios".to_string(),
                 kind: "preference".to_string(),
                 scope: "project".to_string(),
                 body: "Use Axios for frontend requests.".to_string(),
+                brief: "Use Axios for similar future work.".to_string(),
+                tags: vec!["frontend".to_string()],
+                language: "en".to_string(),
+                source_project: None,
                 created_at: "now".to_string(),
                 updated_at: "now".to_string(),
             },
@@ -845,6 +887,31 @@ mod tests {
                 .iter()
                 .any(|row| row.path.ends_with("AGENTS.md") && row.status == "artifact drifted")
         );
+    }
+
+    #[test]
+    fn sync_project_blocks_generated_artifact_drift_before_overwrite() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        skilllet::add_skilllet(
+            temp.path(),
+            "project:codex-rule",
+            "Codex Rule",
+            "Use Bun for JavaScript package management and scripts.",
+            "preference",
+            "project",
+            vec!["codex".to_string()],
+        )
+        .expect("add skilllet");
+
+        sync_project(temp.path()).expect("initial sync");
+        let path = temp.path().join("AGENTS.md");
+        fs::write(&path, "manual edit that should be imported first").expect("manual edit");
+
+        let err = sync_project(temp.path()).expect_err("drifted artifact must not be overwritten");
+
+        assert!(err.to_string().contains("artifact drift"));
+        let preserved = fs::read_to_string(&path).expect("read agents");
+        assert_eq!(preserved, "manual edit that should be imported first");
     }
 
     #[test]

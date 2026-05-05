@@ -1,0 +1,100 @@
+cases:
+  - id: durable-preference-bun
+    origin: user
+    input: "以后这个项目都用 Bun 管理 JavaScript 依赖和脚本，不要再建议 npm install。"
+    expected: candidate
+    expected_signal: preference
+    expected_artifact_kind: always_on_rule
+    expected_hardness: low
+    expected_terms: ["Bun", "JavaScript"]
+    expected_tags: ["shape:preference", "domain:build", "target:agents-md", "hardness:low"]
+  - id: durable-constraint-artifact
+    origin: user
+    input: "不要直接覆盖 AGENTS.md；发现漂移时先导入成 Draft，让我确认后再同步。"
+    expected: candidate
+    expected_signal: constraint
+    expected_artifact_kind: always_on_rule
+    expected_hardness: high
+    expected_terms: ["AGENTS.md", "Draft"]
+    expected_tags: ["shape:constraint", "domain:governance", "target:agents-md", "hardness:high"]
+  - id: durable-procedure-ui-polish
+    origin: user
+    input: "UI 视觉优化先让 Claude Code 做一轮组件和交互建议，再由 Codex 集成验证。这个流程以后保留。"
+    expected: candidate
+    expected_signal: procedure
+    expected_artifact_kind: workflow_skill
+    expected_hardness: medium
+    expected_terms: ["Claude Code", "Codex"]
+    expected_tags: ["shape:procedure", "domain:ui", "domain:agent-behavior", "target:skill-dir", "hardness:medium"]
+  - id: durable-correction-tests
+    origin: user
+    input: "你又忘了跑测试。以后涉及 Rust 提取逻辑时，先加质量 fixture，再跑 cargo test。"
+    expected: candidate
+    expected_signal: correction
+    expected_artifact_kind: always_on_rule
+    expected_hardness: high
+    expected_terms: ["fixture", "cargo test"]
+    expected_tags: ["shape:correction", "shape:validation", "domain:rust", "domain:testing", "hardness:high"]
+  - id: ai-project-improvement-accepted
+    origin: assistant
+    input: "建议把高质量提取做成 Observation -> EvidenceChunk -> Noise Gate -> Signal Gate -> Value Score -> Candidate 的漏斗。用户确认这是项目核心。"
+    expected: candidate
+    expected_signal: ai_project_improvement
+    expected_artifact_kind: review_only
+    expected_hardness: high
+    expected_terms: ["EvidenceChunk", "Noise Gate"]
+    expected_tags: ["shape:decision", "domain:extraction", "evidence:accepted-ai", "hardness:high"]
+  - id: ai-generic-advice-noise
+    origin: assistant
+    input: "一般来说，软件项目应该保持代码整洁、测试充分、文档完善。"
+    expected: noise
+    expected_signal: ""
+    expected_artifact_kind: reject
+    expected_hardness: low
+    expected_terms: []
+    expected_tags: []
+  - id: one-off-task-noise
+    origin: user
+    input: "把这个按钮颜色改成蓝色，然后帮我看看页面有没有报错。"
+    expected: noise
+    expected_signal: ""
+    expected_artifact_kind: reject
+    expected_hardness: low
+    expected_terms: []
+    expected_tags: []
+  - id: unresolved-request-noise
+    origin: user
+    input: "能不能以后做一个很厉害的多智能体系统？先想想。"
+    expected: noise
+    expected_signal: ""
+    expected_artifact_kind: reject
+    expected_hardness: low
+    expected_terms: []
+    expected_tags: []
+  - id: shell-output-noise
+    origin: unknown
+    input: "error[E0425]: cannot find value `foo` in this scope\n   --> src/main.rs:10:5"
+    expected: noise
+    expected_signal: ""
+    expected_artifact_kind: reject
+    expected_hardness: low
+    expected_terms: []
+    expected_tags: []
+  - id: english-durable-decision
+    origin: user
+    input: "Keep Agent-Kernel file-native for v1. Do not introduce a mandatory vector database; indexes must remain rebuildable caches."
+    expected: candidate
+    expected_signal: decision
+    expected_artifact_kind: always_on_rule
+    expected_hardness: high
+    expected_terms: ["file-native", "rebuildable"]
+    expected_tags: ["shape:decision", "domain:architecture", "hardness:high"]
+  - id: ai-skilllet-worthy-workflow
+    origin: assistant
+    input: "基于用户确认，项目应该把 AI 生成的高质量项目改善也送入 Candidate/Draft，而不是直接写 Skilllet；这能保留审阅边界。"
+    expected: candidate
+    expected_signal: ai_project_improvement
+    expected_artifact_kind: review_only
+    expected_hardness: high
+    expected_terms: ["Candidate/Draft", "Skilllet"]
+    expected_tags: ["shape:constraint", "domain:governance", "evidence:accepted-ai", "hardness:high"]

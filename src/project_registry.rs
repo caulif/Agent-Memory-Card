@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::fsutil;
 
@@ -26,7 +27,7 @@ pub struct RegisteredProject {
     pub last_seen: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ProjectScanReport {
     pub registry_path: PathBuf,
     pub discovered: Vec<RegisteredProject>,
@@ -93,6 +94,12 @@ pub fn load_registry(home: &Path) -> Result<ProjectRegistry> {
     Ok(dedupe_registry(registry))
 }
 
+pub fn load_registry_with_agent_projects(home: &Path) -> Result<ProjectRegistry> {
+    let mut registry = load_registry(home)?;
+    registry.projects.extend(discover_agent_projects(home)?);
+    Ok(dedupe_registry(registry))
+}
+
 pub fn save_registry(home: &Path, registry: &ProjectRegistry) -> Result<()> {
     let path = registry_path(home);
     if let Some(parent) = path.parent() {
@@ -125,6 +132,10 @@ pub fn scan_and_register(
             registry.projects.push(project.clone());
             discovered.push(project);
         }
+    }
+    for project in discover_agent_projects(home)? {
+        registry.projects.push(project.clone());
+        discovered.push(project);
     }
 
     save_registry(home, &registry)?;
@@ -161,6 +172,46 @@ pub fn discover_projects(root: &Path, max_depth: usize) -> Result<Vec<Registered
         let project = RegisteredProject::from_path(path, markers)?;
         projects.insert(project.path.clone(), project);
     }
+
+    Ok(projects.into_values().collect())
+}
+
+pub fn discover_agent_projects(home: &Path) -> Result<Vec<RegisteredProject>> {
+    let mut projects = BTreeMap::new();
+
+    collect_project_paths_from_jsonl(
+        &home.join(".claude").join("history.jsonl"),
+        &["project", "cwd"],
+        "claude-code",
+        &mut projects,
+    )?;
+    collect_project_paths_from_jsonl(
+        &home.join(".codex").join("history.jsonl"),
+        &["cwd", "project"],
+        "codex",
+        &mut projects,
+    )?;
+    collect_project_paths_from_jsonl(
+        &home.join(".codex").join("session_index.jsonl"),
+        &["cwd", "project"],
+        "codex",
+        &mut projects,
+    )?;
+    collect_project_paths_from_session_files(
+        &home.join(".claude").join("projects"),
+        "claude-code",
+        &mut projects,
+    )?;
+    collect_project_paths_from_session_files(
+        &home.join(".claude").join("sessions"),
+        "claude-code",
+        &mut projects,
+    )?;
+    collect_project_paths_from_session_files(
+        &home.join(".codex").join("sessions"),
+        "codex",
+        &mut projects,
+    )?;
 
     Ok(projects.into_values().collect())
 }
@@ -236,17 +287,31 @@ fn markers_for_project(path: &Path) -> Vec<String> {
     markers
 }
 
+fn markers_for_agent_project(path: &Path, agent: &str) -> Vec<String> {
+    let mut markers = markers_for_project(path);
+    match agent {
+        "claude-code" => markers.push("claude-code/session".to_string()),
+        "codex" => markers.push("codex/session".to_string()),
+        _ => markers.push("agent/session".to_string()),
+    }
+    markers.sort();
+    markers.dedup();
+    markers
+}
+
 fn agents_from_markers(markers: &[String]) -> Vec<String> {
     let mut agents = BTreeSet::new();
     if markers
         .iter()
         .any(|marker| marker == "CLAUDE.md" || marker == ".claude/skills")
+        || markers.iter().any(|marker| marker == "claude-code/session")
     {
         agents.insert("claude-code".to_string());
     }
     if markers
         .iter()
         .any(|marker| marker == "AGENTS.md" || marker == ".agents/skills")
+        || markers.iter().any(|marker| marker == "codex/session")
     {
         agents.insert("codex".to_string());
     }
@@ -254,6 +319,99 @@ fn agents_from_markers(markers: &[String]) -> Vec<String> {
         agents.insert("unknown".to_string());
     }
     agents.into_iter().collect()
+}
+
+fn collect_project_paths_from_session_files(
+    dir: &Path,
+    agent: &str,
+    projects: &mut BTreeMap<String, RegisteredProject>,
+) -> Result<()> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    for entry in walkdir::WalkDir::new(dir).follow_links(false) {
+        let entry = entry?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        if entry.path().extension().and_then(|value| value.to_str()) != Some("jsonl") {
+            continue;
+        }
+        collect_project_paths_from_jsonl(entry.path(), &["cwd", "project"], agent, projects)?;
+    }
+    Ok(())
+}
+
+fn collect_project_paths_from_jsonl(
+    file: &Path,
+    keys: &[&str],
+    agent: &str,
+    projects: &mut BTreeMap<String, RegisteredProject>,
+) -> Result<()> {
+    if !file.exists() {
+        return Ok(());
+    }
+    let text = fs::read_to_string(file).with_context(|| format!("read {}", file.display()))?;
+    for line in text.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        for path in extract_project_paths_from_value(&value, keys) {
+            if !looks_like_local_project_path(&path) {
+                continue;
+            }
+            let path = PathBuf::from(path);
+            let markers = markers_for_agent_project(&path, agent);
+            let Ok(project) = RegisteredProject::from_path(&path, markers) else {
+                continue;
+            };
+            projects
+                .entry(project.path.clone())
+                .and_modify(|existing| {
+                    existing.markers.extend(project.markers.clone());
+                    existing.markers.sort();
+                    existing.markers.dedup();
+                    existing.agents = agents_from_markers(&existing.markers);
+                    existing.last_seen = Utc::now().to_rfc3339();
+                })
+                .or_insert(project);
+        }
+    }
+    Ok(())
+}
+
+fn extract_project_paths_from_value(value: &Value, keys: &[&str]) -> Vec<String> {
+    let mut paths = Vec::new();
+    match value {
+        Value::Object(map) => {
+            for key in keys {
+                if let Some(Value::String(path)) = map.get(*key) {
+                    paths.push(path.clone());
+                }
+            }
+            for child in map.values() {
+                paths.extend(extract_project_paths_from_value(child, keys));
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                paths.extend(extract_project_paths_from_value(item, keys));
+            }
+        }
+        _ => {}
+    }
+    paths
+}
+
+fn looks_like_local_project_path(path: &str) -> bool {
+    let trimmed = path.trim();
+    if trimmed.len() < 3 {
+        return false;
+    }
+    trimmed.contains(":\\")
+        || trimmed.starts_with("\\\\")
+        || trimmed.starts_with('/')
+        || trimmed.starts_with("~/")
 }
 
 #[cfg(test)]
@@ -280,6 +438,44 @@ mod tests {
                 .markers
                 .contains(&".agent-kernel/project".to_string())
         );
+    }
+
+    #[test]
+    fn discovers_projects_from_agent_histories() {
+        let home = tempfile::tempdir().expect("home");
+        let claude_project = home.path().join("claude-project");
+        let codex_project = home.path().join("codex-project");
+        fs::create_dir_all(&claude_project).expect("claude project");
+        fs::create_dir_all(&codex_project).expect("codex project");
+        fs::create_dir_all(home.path().join(".claude")).expect("claude home");
+        fs::create_dir_all(home.path().join(".codex").join("sessions")).expect("codex sessions");
+        fs::write(
+            home.path().join(".claude").join("history.jsonl"),
+            serde_json::json!({ "project": claude_project.to_string_lossy() }).to_string(),
+        )
+        .expect("claude history");
+        fs::write(
+            home.path()
+                .join(".codex")
+                .join("sessions")
+                .join("rollout.jsonl"),
+            serde_json::json!({
+                "type": "session_meta",
+                "payload": { "cwd": codex_project.to_string_lossy() }
+            })
+            .to_string(),
+        )
+        .expect("codex session");
+
+        let discovered = discover_agent_projects(home.path()).expect("discover");
+
+        assert!(discovered.iter().any(|project| {
+            project.path == fsutil::path_to_slash(&claude_project)
+                && project.agents == vec!["claude-code"]
+        }));
+        assert!(discovered.iter().any(|project| {
+            project.path == fsutil::path_to_slash(&codex_project) && project.agents == vec!["codex"]
+        }));
     }
 
     #[test]

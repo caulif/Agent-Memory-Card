@@ -10,6 +10,7 @@ use crate::rule_test;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::candidate::ExtractionMetadata;
     use crate::skilllet;
 
     #[test]
@@ -28,6 +29,7 @@ mod tests {
                 confidence: None,
                 reason: None,
                 matched_template: None,
+                extraction: ExtractionMetadata::default(),
             },
         )
         .expect("add draft");
@@ -55,6 +57,7 @@ mod tests {
                 confidence: None,
                 reason: None,
                 matched_template: None,
+                extraction: ExtractionMetadata::default(),
             },
         )
         .expect("add draft");

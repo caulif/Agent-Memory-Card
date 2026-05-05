@@ -7,12 +7,88 @@
 
 这轮讨论后，Agent-Kernel 的定位应该再往前推一步：它不是“修补现有规则文件”的小工具，而是一个面向 Claude Code 和 Codex 的“本地 Skilllet 进化引擎”。
 
+### 0.0 v1 可用版架构重置
+
+当前项目已经证明很多单点能力可行，但真正可用版不能继续横向堆功能。v1 的产品主线必须收敛为一个日常可重复工作流：
+
+1. 选择本地 Claude Code / Codex 项目。
+2. 立即看到轻量项目 Dashboard，而不是等待完整 snapshot。
+3. 手动启动“整理历史与规则”，后台 Job 展示阶段、进度、日志和结果。
+4. 得到少量高价值 Draft Skilllets，默认只展示 Top 候选。
+5. 用户编辑、合并、批准或拒绝 Draft。
+6. 将已批准 Skilllet 分配给 Claude Code / Codex。
+7. 编译生成 `CLAUDE.md` / `AGENTS.md` / skills artifacts，并运行本地验证。
+
+因此 v1 架构从“功能模块集合”调整为：
+
+```mermaid
+flowchart TD
+  UI["Tauri React UI"] --> IPC["Tauri IPC Commands"]
+  IPC --> AppService["Application Service Layer"]
+  AppService --> ReadModels["Lightweight Read Models"]
+  AppService --> Jobs["Job Manager"]
+  AppService --> Core["Rust Core Domain"]
+  Core --> Observation["Observation Pipeline"]
+  Core --> Synthesis["Candidate / Draft Synthesis"]
+  Core --> Skilllet["Skilllet Domain"]
+  Core --> Compiler["Compiler / Artifact Drift"]
+  Core --> Policy["Policy / Audit"]
+```
+
+关键原则：
+
+- UI 首屏只读轻量 Read Model，不能把完整 `ProjectSnapshot` 当成切项目主路径。
+- 扫描、整理历史、AI 精炼、同步编译都必须是后台 Job。
+- `Observation -> Candidate -> Draft -> Skilllet -> Assignment -> Artifact` 必须分层，不能把本地历史直接粗暴变成 Draft。
+- Catalog / App Store 降级为次要能力，先把 Review Inbox 和 Assignment Matrix 做可靠。
+- Canvas / 白板隐喻保留为后续可视化层，v1 默认界面以 Inbox、Library、Assignment Matrix 为主。
+
+### 0.0.1 存储原则修正：File-native，而不是绝对 Zero DB
+
+“零数据库”容易被误解为不允许索引和缓存。更准确的工程原则是：
+
+> Agent-Kernel 使用 file-native local store，并且不要求任何外部数据库、向量库或后台服务作为必需依赖。
+
+合理边界：
+
+- 不强制 SQLite、Postgres、Vector DB。
+- Source of Truth 仍然是 `.agent-kernel/` 和 `~/.agent-kernel/` 下可读、可 diff、可迁移的 YAML / Markdown / JSONL 文件。
+- 允许维护结构化索引、read-model cache、job files、audit log，以保证 UI 足够快。
+- 后续如果接 Mem0 / Graphiti / SQLite，只能作为可选 adapter，不能成为个人开发者使用 v1 的必需条件。
+
+建议文件布局：
+
+```text
+~/.agent-kernel/
+  projects.yml
+  global-skilllets/
+  jobs/
+  cache/
+
+project/.agent-kernel/
+  project.yml
+  observations/
+  candidates/
+  drafts/
+  skilllets/
+  assignments.yml
+  indexes/
+    observation-index.yml
+    draft-index.yml
+    skilllet-index.yml
+  cache/
+    dashboard.json
+    search-index.json
+  artifacts.lock.yml
+  audit.jsonl
+```
+
 关键决策：
 
 - Rust 内核：核心解析、分类、diff、build、Rule CI、文件操作都用 Rust，保证速度、单二进制分发和工程可靠性；`bunx agent-kernel` 是优先的跨平台安装与启动入口。
-- 可视化优先：UI 不是后期锦上添花，而是建立信任的核心产品面。当前主入口改为 Rust 编译出的本地桌面 app，不依赖浏览器或 localhost；旧 Web Canvas 保留为 legacy/dev 辅助入口。
+- 可视化优先：UI 不是后期锦上添花，而是建立信任的核心产品面。当前主入口从 egui 收敛到 Tauri 2 桌面架构：Rust 继续负责本地内核和文件系统能力，Web 前端负责现代交互和视觉表达；旧 egui app 仅保留为迁移期 fallback，旧 Web Canvas 保留为 legacy/dev 辅助入口。
 - Native App 第一屏：安装后优先展示本机可发现的项目列表，用户选择某个项目后再进入 Project-centered Canvas / Inspector / App Store / Draft Inbox。第一体验不是“打开某个仓库再配置”，而是“先看到我的本地 Agent 工作区地图”。
-- UI 双入口：原生 app 第一屏是 Project Console + Canvas；同时提供 App Store/包管理器界面，用于浏览、安装、启用和更新 Skills/Skilllets。Web `ui` 命令后续只作为调试和兼容入口。
+- UI 双入口：Tauri 原生 app 第一屏是 Project Console + Canvas；同时提供 App Store/包管理器界面，用于浏览、安装、启用和更新 Skills/Skilllets。Web `ui` 命令后续只作为调试和兼容入口。
 - 编译产物思维：`CLAUDE.md`、`AGENTS.md` 默认视为 build artifacts，由 `~/.agent-kernel/skilllets` 和项目 `.agent-kernel/project.yml` 全量编译生成；Cursor 等其他 Agent 保留 adapter 扩展接口，MVP 不进入默认目标。
 - 首个入口：先从用户现有规则文件和 Skills 导入，后续再通过 MCP/session log 自动提炼对话中的 Draft Skilllets。
 - Skill 管理默认引用模式：第三方或已有 Skill 保持原位置，Agent-Kernel 建立索引、启用关系、导出关系和 overlay，不直接改源文件。
@@ -69,10 +145,22 @@
 - v0.47 范围：将 Windows / macOS / Linux 支持变成工程约束。CI 在三大系统上跑 Rust 与 Bun wrapper 测试，release 输出 `win32-x64`、`linux-x64`、`darwin-x64`、`darwin-arm64` 四类预编译包，其他架构走 Cargo fallback。
 - v0.48 范围：让原生 app 成为真正的 Review Inbox。选中项目后直接展示 Draft Inbox，支持 approve / reject，并复用 CLI review 协议刷新摘要，继续坚持“自动提炼只进 Draft，不静默启用”的信任边界。
 - v0.49 范围：把 Skilllet Catalog / App Store 接入原生 app。选中项目后展示 Catalog Health、package provenance、安装状态，并支持把 catalog package 安装或分配给 Codex / Claude Code；重复分配时合并 targets，不覆盖已有 Agent 分配。
+- v0.50 范围：将桌面第一屏产品语义收敛为“智能体记忆整理台”。UI 明确说明它不是聊天记录摘要器，而是过滤一次性任务，只保留稳定偏好、硬约束、工作流、项目约定、反复纠正和可补充到 Skill 的能力片段。
+- v0.51 范围：项目发现读取 Claude Code / Codex 的本地历史索引。除了常规目录扫描，还解析 `~/.claude/history.jsonl`、`~/.claude/projects`、`~/.claude/sessions`、`~/.codex/history.jsonl`、`~/.codex/sessions` 中可发现的 `project` / `cwd`，让安装后更接近“看到我所有本地 Agent 项目”。
+- v0.52 范围：Observation 导入过滤 system/base instructions、本地命令回显、token 计数和 session metadata 噪声，避免把 agent 自身提示词或终端输出误判成用户 Skilllet。
+- v0.53 范围：Observation Synthesis 从逐条生成改为聚合式高价值提炼。默认最多生成 24 个候选，只保留命中 Known Preference Registry 或强 Skilllet 信号的内容，并在 UI 隐藏低置信度碎片，解决一千多个草稿无法审阅的问题。
+- v0.54 范围：桌面提炼入口加入整理引擎选择，默认 Claude Code，保留 Codex 与本地过滤入口。Claude Code / Codex 通过非交互命令生成结构化 JSON 候选，失败或超时时回落到本地高价值过滤，避免 UI 卡死或因外部 CLI 不可用中断整理。
+- v0.55 范围：加入首次启动静默增量整理。Tauri 桌面端启动后在后台处理已发现 Claude Code / Codex 项目的本地会话，首次全量生成 Draft Skilllets，后续通过 `.agent-kernel/observation-index.yml` 记录 source path、hash、processed bytes，只读取新增或追加内容，避免同一批历史反复生成草稿。
+- v0.56 范围：修正会话归属。Observation 导入会读取 JSONL 中的 `cwd` / `project`，只把某个会话导入它所属的项目，避免“当前选中项目”吃进所有 Claude/Codex 历史导致记忆污染。
+- v0.57 范围：扩展“高价值”定义，不再只等同于长期偏好、硬约束、项目约定、流程和反复纠正。凡是对项目未来执行质量有明显改善的记录，例如 root cause、成功修复路径、架构决策、性能/卡顿处理、跨平台坑、测试策略、UI 可用性改进，也可以提炼成 Draft Skilllet。
 - v0.50 范围：把 Skilllet × Agent target matrix 接入原生 app。选中项目后可以直接点击矩阵单元格给 Codex / Claude Code 分配或取消分配 Skilllet；同时防止通过 UI 产生空 targets，因为当前声明式语义中空 targets 表示“所有启用 Agent”。
 - v0.51 范围：让 Draft Inbox 具备可解释性。自动提炼出来的 Draft 需要保存并展示 `confidence`、`matched_template`、`reason`，dry-run 与原生 app 都能说明“为什么建议固化这条 Skilllet”，把进化系统的信任边界从“可审批”推进到“可审计”。
 - v0.52 范围：让 Draft Inbox 支持审批前编辑。CLI 提供 `draft update` 修改 title、body、kind、scope、targets，同时保留 evidence、confidence、matched_template、reason；原生 app 的 Draft 卡片提供 Edit / Save / Cancel，让用户能先修正候选，再决定 approve/reject。
 - v0.53 范围：让 Draft Inbox 支持保守合并。CLI 提供 `draft merge` 把两个或更多 Draft 合成一个新的 reviewable Draft；源 Draft 不删除、不批准，原生 app 支持勾选多个候选、预填目标 Agent 并创建合并候选。
+- v0.54 范围：将桌面 UI 从 egui 迁移到 Tauri 2。Rust 核心抽成 `agent-kernel` library 供 CLI 和 Tauri 后端共享；`src-tauri` 只暴露本地项目扫描、Draft 审批、Skilllet 分配、Catalog 安装、Observation evolve、build/sync 等命令；`app/` 使用 Bun + Vite + React 构建中文优先的现代桌面前端。
+- v0.67 范围：后台 Job 记录持久化可重放 replay payload。扫描、历史整理和同步任务在创建时记录原始 Tauri command 与参数，Job Center 重试时直接调用后端保存的命令，不再根据中文任务名猜测项目路径、engine、targets 或 policy。
+- v0.68 范围：Skilllet 融合进入后台 Job。`fuse_skilllets_to_draft` 不再同步阻塞 UI，而是创建“融合Skilllet”任务、记录 replay payload、展示读取源 Skilllet / 写入融合草稿阶段，并在完成后自动刷新页面读模型。
+- v0.69 范围：Job Center 增加状态/类型筛选和精确重试标记。用户可以按运行中、失败、已完成、已取消，以及扫描、整理历史、同步、融合 Skilllet 快速定位任务；带 replay payload 的任务会显示“可重试”徽章。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
 - Skilllet Registry：长期看，skilllet 可以像 JavaScript registry 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。
@@ -1581,6 +1669,303 @@ Patch:
 ```
 
 这会比一开始做“全平台完美支持”更容易获得早期用户。
+
+### 13.1 最新迭代重点：高价值 Prompt 与可编辑进化视图
+
+Skilllet 的含义需要继续放宽：它不只是“以后/必须/always/prefer”这类显式规则，也应该包含能明显改善项目质量的高价值 prompt、成功协作模式、根因复盘、测试策略、UI 性能经验、跨平台修复路径和 agent 交接流程。
+
+当前产品体验应遵循：
+
+- 提取器先过滤一次性任务噪声，再识别长期偏好、硬约束、项目约定、流程、反复纠正、项目改善记录和高价值 prompt。
+- 高价值 prompt 不要求出现规则词，只要它描述了可复用的 agent 协作方式，并带来减少返工、提高质量、降低理解成本等结果，就可以进入 Draft Inbox。
+- 分配页不再只是矩阵展示，而是用户可直接决定每个 Skilllet 是否分配给 Claude Code / Codex。
+- Skilllet 说明优先用常用语言解释，让用户一眼知道“它以后会怎样帮我”，而不是只展示抽象分类。
+- Skilllet 进化视图采用工程化的“进化树/时间线”隐喻：展示来源、置信度、稳定度、活跃/休眠、冲突预警、提升候选，但避免游戏化术语喧宾夺主。
+
+下一步建议：
+
+- 将 evolution insight 从前端启发式推导下沉到 Rust 数据模型，记录真实 observation lineage、approval timeline、merge history 和 target history。
+- 给分配页增加批量操作：多选 Skilllets 后统一分配给 Claude Code、Codex，或合并为一个更高层级 Skilllet。
+- 增加“提升候选”审阅流：项目级 Skilllet 多次被不同项目复用后，建议提升为 global preference。
+- 增加“休眠候选”审阅流：长期未被触发或不再分配给任何 Agent 的 Skilllet，建议归档但不删除。
+
+### 13.2 v0.60：Visible Evolution & Reusable Skilllets
+
+这一版的目标是把 Agent-Kernel 从“能整理”推进到“用户知道它在做什么，并且能把沉淀出的能力拿到别的项目继续用”。
+
+#### 启动与长任务可见化
+
+首次启动时系统会读取项目注册表、从 Claude Code / Codex 本地历史中补全项目、对已登记项目做增量会话导入和本地提炼、再加载当前项目快照。现在这些操作看起来像“卡住”，下一版要改为任务中心：
+
+- 每个慢操作都有阶段、进度、状态文案和完成/失败记录。
+- 首次启动显示“建立本地记忆索引”，后续启动显示“检查增量”。
+- UI 不应该被后台任务整体锁死，只有相关按钮进入等待状态。
+- 手动扫描、整理历史、调用 Claude Code/Codex、融合 Skilllet、同步编译都进入同一个任务中心。
+
+#### Draft Brief 与轻量精炼
+
+待批准草稿需要有面向人的简短简介，而不是只展示给 Agent 编译用的正文。
+
+- `brief`：用用户主要语言写，一两句话说明“以后遇到什么场景，怎么用这条经验”。
+- `body`：继续作为编译给 Claude Code / Codex 的精炼指令。
+- `language`：记录简介语言，默认根据内容推断为 `zh` 或 `en`。
+- `tags`：由引擎建议，也允许用户手动编辑。
+
+#### Tags 与筛选
+
+Skilllet / Draft 都要支持 tag，作为分类、筛选、推荐和全局复用的基础。初始建议 tags：
+
+- `ui-design`
+- `frontend`
+- `backend`
+- `rust`
+- `tauri`
+- `testing`
+- `performance`
+- `agent-handoff`
+- `code-style`
+- `workflow`
+- `safety`
+
+#### 可暂停的 Skilllet 分配
+
+技能分配不再强制至少保留一个目标。空 targets 表示“已保存但未启用”，UI 显示为未分配/休眠，而不是阻止用户取消。
+
+#### 全局 Skilllet Library
+
+某个项目产生的 Skilllet 应该可以给别的项目使用。推荐采用 Hybrid：
+
+- 项目 Skilllet 仍保存在项目 `.agent-kernel/skilllets/`。
+- 全局 Skilllet 保存在 `~/.agent-kernel/skilllets/`。
+- 项目可以引用全局 Skilllet，也可以把全局 Skilllet fork 成项目本地版本。
+- 项目 Skilllet 可以被提升为全局库项，保留来源项目和 lineage。
+
+#### 融合与推荐
+
+Skilllet 融合不应该只是拼接文本，而是调用当前整理引擎生成新的融合草稿：
+
+- 用户多选多个 Skilllet。
+- 引擎生成新的 `title / brief / body / tags / conflict_notes / source_ids`。
+- 原 Skilllet 保留，融合结果进入 Draft Inbox。
+
+项目推荐功能在“项目构思完成后”触发：
+
+- 读取项目技术栈、目录结构、已有规则、历史会话和已安装 Skills。
+- 推荐应该启用的已有 Skilllets。
+- 推荐适合安装或镜像的 Skills。
+- 推荐需要新建的项目级 Skilllets。
+- 标出冲突、过时、过窄或可以提升为全局的内容。
+
+### 13.3 v0.61：真实任务中心与全局复用闭环
+
+这一版把 v0.60 的体验进一步落地：前端不再只用动作名猜测进度，而是从 Tauri 后端读取真实任务状态；全局 Skilllet Library 也不再只是展示，而是能被加入当前项目继续使用。
+
+#### Desktop Task Center
+
+- Rust/Tauri 后端维护 `DesktopTaskStatus`，包含 `key / label / description / percent / running / message`。
+- 首次启动的静默增量整理、项目扫描、历史整理、同步编译都写入同一个任务状态。
+- 前端每隔固定时间轻量轮询 `get_task_status`，优先显示后端进度，后端不可用时回退到本地启发式进度。
+- 后续可以升级为事件推送或任务队列，但 MVP 先用稳定、易调试的状态快照。
+
+#### Global Skilllet Reuse
+
+- 项目 Skilllet 可以被提升到 `~/.agent-kernel/skilllets/`，保留 `source_project`。
+- 全局 Skilllet 可以一键加入当前项目，复制为项目本地 Skilllet 并写入目标 Agent 分配。
+- 加入后的全局 Skilllet 可继续在项目内编辑、分配、休眠、融合，避免全局库变成只读收藏夹。
+- 后续再加入“引用模式”：项目只引用全局 Skilllet，不复制正文；当全局项更新时可以提示受影响项目。
+
+#### 下一步
+
+- 把任务状态从单个全局状态升级为多任务列表，支持并行扫描、整理、推荐和编译。
+- 给全局 Skilllet 加版本号和来源 lineage，支持项目 fork 后对比差异。
+- 给 Draft / Skilllet 增加 UI 编辑器，允许直接修改 `brief / body / tags / targets`。
+- 融合功能接入 Claude Code / Codex 引擎，生成真正压缩后的融合草稿，而不是简单拼接。
+
+### 13.4 v0.62：Agent Skills Kernel Architecture
+
+这一版把 Agent-Kernel 的定位从“桌面管理器”进一步收束为“Agent Skills 的本地内核”。后端是可被 Claude Code / Codex / CLI / 未来 MCP 调用的强类型治理接口；前端是高级个人开发者的驾驶舱，既能手动管理，也能把部分权限交给 AI。
+
+#### 三层驱动模型
+
+```text
+Observation Store
+  ↓
+Rule Engine（确定性规则）
+  ↓
+AI Engine（语义精炼）
+  ↓
+Governance Layer（人/AI 决策）
+  ↓
+Skilllet Kernel Store
+  ↓
+Compiler / AI Interface / Human UI
+```
+
+底层规则驱动：
+
+- 噪声过滤：过滤“继续优化”“帮我修一下”“再来一版”这类一次性对话。
+- tag 分类：为 Draft / Skilllet 自动建议 `ui-design`、`testing`、`workflow`、`agent-handoff` 等标签。
+- scope 推断：判断内容更适合 `global`、`project`、`directory` 还是 `agent-specific`。
+- risk 分级：区分只读、生成草稿、修改内核存储、编译写文件等风险。
+- 结构校验：检查 Skilllet schema、目标 Agent、token 预算和编译产物漂移。
+
+中层 AI 驱动：
+
+- 生成用户主要语言的 `brief`。
+- 精炼 `body`，把对话式表达转成可编译指令。
+- 语义融合多个 Skilllet，保留来源和冲突说明。
+- 识别高价值 Prompt、项目改善记录、复用工作流。
+- 给项目推荐应启用的 Skilllets / Skills / 包。
+
+上层治理驱动：
+
+- `Manual`：只生成草稿，所有写入都由用户确认。
+- `Assisted`：AI 给建议，用户审阅、编辑、批准。
+- `Guarded Auto`：低风险自动执行，高风险进入 Draft Inbox。
+- `Agent Managed`：AI 可以管理内核，但所有命令经过规则评估、审计记录和可回滚写入。
+
+#### Kernel API
+
+未来所有入口都应调用统一 Kernel API，而不是直接改 `.agent-kernel/*.yml`：
+
+- `kernel.observe(...)`
+- `kernel.plan_command(...)`
+- `kernel.update_draft(...)`
+- `kernel.approve_draft(...)`
+- `kernel.merge_skilllets(...)`
+- `kernel.assign_skilllet(...)`
+- `kernel.compile_project(...)`
+- `kernel.explain_decision(...)`
+
+Tauri UI、Bun CLI、未来 MCP Server 和 Claude Code/Codex 调用入口都应该复用这层 API。这样可以给 AI 完整能力，同时让权限、风险、审计和回滚保持一致。
+
+#### 第一阶段实现
+
+- 新增 `src/kernel/` 模块。
+- 提供 `KernelPolicy`、`AutomationMode`、`KernelCommand`、`KernelDecision`。
+- 提供确定性 `RuleAssessment`，用于 command 风险分级和文本分类。
+- Tauri 暴露 `plan_kernel_command`，给 UI 或未来 AI 工具查看“这个动作是否可自动执行、为什么需要审阅”。
+- 暂不替换所有旧命令，先作为兼容门面存在，后续再逐步让 Draft 编辑器、Skilllet 融合和 MCP 工具迁移到内核层。
+
+### 13.5 v0.63：多角色自治迭代协议
+
+从这一版开始，项目进入多角色协作模式。Leader 负责架构、整合和最终验证；PM、Rust Kernel Engineer、UI Engineer、QA/User Advocate 作为专门角色参与迭代。完整协作协议保存在 `docs/multi-agent-collaboration.md`。
+
+#### 角色分工
+
+- Leader / Kernel Architect：维护 Local-first、Rust core、Tauri UI、Bun tooling、Kernel API、编译产物模型和用户信任边界。
+- PM / Developer Experience Strategist：定义高级个人开发者的体验、PRD、验收标准和隐私/信任要求。
+- Rust Kernel Engineer：实现 Draft、Skilllet、Kernel Policy、Rule Engine、Compiler、Provider、Tauri command 等核心能力。
+- UI / Desktop Experience Engineer：实现 Tauri + React 桌面体验；涉及视觉 polish 时优先调用 Claude Code，Codex 负责审核、集成和测试。
+- QA / User Advocate：审查数据丢失、静默覆盖、重复处理、噪声草稿、UI 卡顿、跨平台路径和 Rule CI 风险。
+
+#### 协作规则
+
+- PM 先说明 What / Why / Acceptance Criteria。
+- Leader 将需求转为数据结构、KernelCommand、Tauri IPC 和任务边界。
+- Rust core 先实现强类型能力，UI 只通过 IPC 消费。
+- QA 先列阻断风险，再给回归测试建议。
+- 所有 AI 自动化必须经过 Kernel Policy，不允许绕过 `.agent-kernel` 源事实直接改生成产物。
+
+#### 当前迭代目标
+
+- Draft / Skilllet 可视化编辑器：允许编辑 `brief / body / tags / targets`，并支持清空 targets 作为休眠。
+- Skilllet 语义融合：由 Claude Code / Codex 做精炼，但结果进入 Draft Inbox，不直接覆盖原 Skilllet。
+- UI 接入 Kernel Policy：在执行高风险动作前展示决策原因和审阅要求。
+
+### 13.6 v0.64：Kernel Policy 强制门禁与写入审计
+
+这一版把 Kernel Policy 从“前端提示”升级为后端强制边界。Tauri UI、未来 CLI/MCP/AI 入口都不能绕过 Rust 内核直接写项目记忆。
+
+已落地的核心约束：
+
+- Tauri 写命令需要携带 confirmed policy；未确认时默认按 Manual policy 拦截。
+- `approve_draft`、`reject_draft`、`update_draft`、`update_skilllet`、`set_skilllet_targets`、`merge/fuse`、`promote/install`、`evolve_project`、`import_artifact_drifts`、`sync_project` 等项目级 mutation 都先构造 `KernelCommand` 并经过 `KernelPolicy`。
+- React UI 在用户触发写操作时传递 confirmed policy；编辑器仍保留“审查变更 -> 确认保存”的流程。
+- 新增 `.agent-kernel/audit-log.jsonl`，记录 Tauri 项目 mutation 的 authorized / blocked 决策、风险等级、policy mode、原因和时间。
+- `sync_project` 写 `AGENTS.md` / `CLAUDE.md` / rules 前会检查 `project.lock.yml`。如果生成产物被手动修改，会阻止覆盖并要求先走 artifact import / reverse parse。
+
+下一步：
+
+- confirmed policy 已升级为 command payload hash / decision token：plan 阶段签发 token，执行阶段校验 project + command + payload，并一次性消费，避免前端或 AI 入口复用“已确认”。
+- Draft 批准已增加同 ID Skilllet 冲突保护：不会再直接覆盖已有 Skilllet，而是要求先审查或合并。
+- Draft / Skilllet 编辑已增加 schema 防线：空标题/空正文、未知 kind/scope、未知 Agent target 会被后端拒绝。
+- 在 UI 中展示 Audit Log，并基于 audit entry 提供回滚/checkpoint。
+- 将启动静默整理的写入也接入 audit，保持“静默增量”和“可追踪”同时成立。
+
+### 13.7 v0.65：非阻塞任务层与页面级 Read Models
+
+这一版继续修复“功能能做但体验不够像真实产品”的根因：UI 不能被扫描、整理、同步这类长任务拖住，项目切换也不能每次都依赖完整 `ProjectSnapshot`。
+
+已落地的架构推进：
+
+- `DesktopTaskStore` 升级为 Job Manager v1：任务有 `job_id`、`stage`、`lifecycle`、进度、日志、开始/结束时间和结果摘要。
+- Tauri 暴露 `get_job_history` 与 `cancel_job`，前端新增“任务中心”抽屉，展示后台任务历史、日志和取消请求。
+- `scan_projects` 不再在 IPC 调用中同步递归扫描，而是立即返回 job ticket，扫描在线程中完成；完成后 UI 自动刷新项目列表。
+- `sync_project` 不再阻塞按钮点击，而是先通过 Kernel Policy，再启动后台编译任务；完成后 UI 自动刷新当前项目快照。
+- `evolve_project` 保持后台整理，并在任务完成后自动刷新 Dashboard / Snapshot，让新 Draft 出现在审阅区。
+- Job History 写入 `~/.agent-kernel/jobs/history.jsonl`，重启后仍可恢复最近任务记录。
+- Application Service 新增页面级读模型：`ProjectReviewInbox`、`ProjectSkillletLibrary`、`ProjectAssignmentView`、`ProjectQualityView`。后续前端可以按页面加载，而不是切换项目时拉取全量 snapshot。
+
+这一版确认的产品原则：
+
+- 扫描、整理、同步、融合、推荐都应是后台 Job，前端只显示 job ticket 和进度。
+- `ProjectSnapshot` 保留为兼容调试接口，不再作为长期 UI 主路径。
+- Job History 采用本地 JSONL 持久化，符合 file-native 原则；后续可增加按项目过滤和日志清理策略。
+- `cancel_job` 是安全检查点式取消，不承诺强杀外部 Agent。后续 Claude Code / Codex 深度精炼需要把子进程句柄纳入 Job Manager。
+
+下一步大版本建议：
+
+- 把 Draft、Skilllet、Assignment、Quality 页面切到对应 read model，进一步降低切项目和页面切换成本。
+- 将 Skilllet 融合、项目推荐和 Claude Code / Codex 深度整理全部接入 Job Manager。
+- 在 UI 中增加按项目/状态筛选 Job History，并支持清理过期日志。
+- 增加“重试”能力：失败任务可以用同一 payload 重新排队，但仍要经过 Kernel Policy。
+
+### 13.8 v0.66：页面级数据接入与可恢复任务操作
+
+这一版把 v0.65 的后端能力真正接入到 Tauri React 前端，让 UI 从“完整项目快照驱动”过渡到“页面级读模型驱动”。
+
+已落地：
+
+- Draft Inbox 页面优先读取 `get_project_review_inbox`，只加载待审草稿。
+- Skilllet Library / Catalog 页面优先读取 `get_project_skilllet_library`，共享项目 Skilllets、全局 Skilllets 和包状态。
+- Assignment 页面优先读取 `get_project_assignment_view`，只加载目标 Agent 和 Skilllet target matrix。
+- 右侧质量状态优先读取 `get_project_quality_view`，避免为了显示 Rule CI / warnings 拉取整个项目。
+- 完整 `ProjectSnapshot` 仍作为兼容 fallback 和调试路径存在；后续可以逐页移除对它的主路径依赖。
+- 任务中心增加失败/取消任务的“重试”入口，先支持扫描、整理历史和同步三类主任务。
+
+这带来的体验变化：
+
+- 切换项目后先加载 Dashboard，再按当前页面加载最小数据，完整 snapshot 退到后台。
+- 用户进入草稿、技能库、分配矩阵时，不再必须等待 build preview、Rule CI、observations 等全部数据。
+- 任务失败或被取消后，用户可以在任务中心继续操作，不需要回到工作台重新找按钮。
+
+下一步建议：
+
+- 给每个页面 read model 增加 loading / stale 标记，让 UI 明确显示“正在刷新本页数据”。
+- 把 `ProjectSnapshot` 从页面 props 中继续下沉，只在 Settings / debug / export preview 中使用。
+- Retry 需要从“按任务 key 重新执行”升级为“保存原始 command payload 后精确重放”，并仍通过 Kernel Policy。
+- Job Center 增加按项目、状态和时间过滤，避免历史任务积累后难以阅读。
+
+### 13.9 v0.67-v0.68：精确重试与融合任务后台化
+
+这一轮把 Job Center 从“能看任务”推进到“能可靠恢复任务”。之前重试是根据中文任务名猜测入口，容易丢失项目路径、目标 Agent、整理引擎和 policy；这会让失败任务看似能重试，实际却可能重跑到错误上下文。
+
+已落地：
+
+- `DesktopTaskStatus` 增加 `replay` 字段，保存原始 Tauri command 和 args。
+- Job history JSONL 持久化 replay payload，重启后仍能精确重试。
+- `scan_projects`、`evolve_project`、`sync_project` 创建任务时写入 replay payload。
+- 前端 Job Center 重试改为直接调用 `job.replay.command` 和 `job.replay.args`，不再根据 `job.key` 猜测。
+- `fuse_skilllets_to_draft` 改为后台 Job，立即返回 job ticket；任务中心展示读取源 Skilllet、写入融合草稿和完成/失败结果。
+- 融合任务也保存 replay payload，并在完成后刷新 Dashboard、页面读模型和兼容 snapshot。
+- Job Center 增加状态筛选、类型筛选和“可重试”标记，让任务历史积累后仍然能快速定位失败任务或确认哪些任务支持精确重放。
+
+下一步：
+
+- Job History 增加按项目、状态、任务类型过滤和清理。
+- 所有外部 AI 精炼、推荐、批量融合都进入 Job Manager，并记录 engine、输入摘要、输出草稿 ID 和失败原因。
+- Replay payload 后续应附带 project hash / command version，避免版本升级后盲目重放旧参数。
 
 ## 14. 参考资料
 

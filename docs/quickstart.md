@@ -17,14 +17,13 @@ bun run test
 cargo run -- preference list --project .
 ```
 
-如果想直接体验本地编译 UI，可以先扫描项目并打开原生桌面 app：
+如果想直接体验桌面 UI，可以打开当前 Tauri 工作台；启动后先读取项目索引，不会自动扫描所有目录，点击“扫描本地项目”才会执行扫描：
 
 ```bash
-cargo run -- project scan --root . --max-depth 4
-cargo run -- app --scan-root .
+bun run app:dev
 ```
 
-`app` 是 Rust/egui 编译出来的本地桌面程序，不是 Web UI。它会读取 `~/.agent-kernel/projects.yml`，在第一屏展示本地项目列表；选择项目后可以查看 Review 摘要、处理带置信度和原因解释的 Draft Inbox、安装 Catalog Skilllets、调整 Skilllet × Agent 分配矩阵，并一键把 Claude Code / Codex 本地历史对话整理进 Draft Inbox。
+Tauri 桌面工作台会读取 `~/.agent-kernel/projects.yml`，在第一屏展示本地项目列表；选择项目后可以查看 Review 摘要、处理带置信度和原因解释的 Draft Inbox、安装 Catalog Skilllets、调整 Skilllet × Agent 分配矩阵，并手动触发 Claude Code / Codex 本地历史对话整理进 Draft Inbox。
 
 ## 1. 初始化项目状态
 
@@ -138,7 +137,7 @@ cargo run -- draft list --project .
 cargo run -- draft update --id project:use-axios --title "Use Axios" --body "Use Axios for frontend HTTP requests." --target codex --target claude-code --project .
 ```
 
-也可以打开原生 app，在选中的项目页直接查看 `Draft Inbox`，点击 `Edit` 修改标题、类型、作用域、正文和目标 Agent，再点击 `Save`。保存只更新 Draft，不会自动批准或启用；确认无误后再点击 `Approve`，不想保留则点击 `Reject`。
+也可以打开 Tauri 桌面工作台，在选中的项目页直接查看 `Draft Inbox`，点击“编辑”修改标题、类型、作用域、正文和目标 Agent，再点击“保存变更”。保存只更新 Draft，不会自动批准或启用；确认无误后再点击“批准”，不想保留则点击“删除”。
 
 如果多个候选其实是同一组项目偏好，可以先合并为一个新的待审 Draft：
 
@@ -146,7 +145,7 @@ cargo run -- draft update --id project:use-axios --title "Use Axios" --body "Use
 cargo run -- draft merge --id project:frontend-defaults --title "Frontend Defaults" --source project:use-axios --source project:prefer-bun --target codex --target claude-code --project .
 ```
 
-`draft merge` 至少需要两个 source。它只创建一个新的 Draft，不会删除源 Draft，也不会自动批准。原生 app 的 `Draft Inbox` 也可以勾选多个候选，点击 `Merge Selected` 后编辑合并 Draft 的 ID、标题和目标 Agent，再创建新的合并候选。
+`draft merge` 至少需要两个 source。它只创建一个新的 Draft，不会删除源 Draft，也不会自动批准。Tauri 桌面工作台的 `Draft Inbox` 也可以勾选多个候选，点击批量操作后继续审阅生成结果。
 
 高置信模板生成的 Draft 会带上可解释信息：
 
@@ -175,7 +174,7 @@ cargo run -- skilllet matrix --project .
 cargo run -- skilllet targets --id project:use-axios --target codex --target claude-code --project .
 ```
 
-同样可以在原生 app 的 `Skilllet Target Matrix` 区块里点击矩阵单元格切换分配。注意：当前声明式配置里空 targets 表示“所有启用 Agent”，所以原生 app 不允许通过矩阵关掉最后一个 target；要完全移除某个 Skilllet，后续会提供专门的 remove/disable 操作。
+同样可以在 Tauri 桌面工作台的“分配”页面点击矩阵单元格切换分配。注意：当前声明式配置里空 targets 表示“所有启用 Agent”，所以工作台不允许通过矩阵关掉最后一个 target；要完全移除某个 Skilllet，后续会提供专门的 remove/disable 操作。
 
 ## 5.1 从 Catalog 安装 Skilllet
 
@@ -192,7 +191,7 @@ cargo run -- catalog validate --project .
 cargo run -- catalog install --id core:rust-quality-gate --target codex --project .
 ```
 
-也可以在原生 app 的 `Skilllet Catalog` 区块里点击 `Install to Codex` 或 `Install to Claude Code`。如果同一个 package 已经安装，再分配给另一个 Agent 会合并 targets，不会覆盖之前的分配。
+也可以在 Tauri 桌面工作台的“包管理”页面安装 Catalog Skilllet。如果同一个 package 已经安装，再分配给另一个 Agent 会合并 targets，不会覆盖之前的分配。
 
 安装后可以用矩阵检查：
 
@@ -250,7 +249,7 @@ cargo run -- observe evolve --target codex --target claude-code --project .
 
 这个流程仍然不会自动启用 Skilllet。所有自动提炼的内容都会先进 Draft Inbox，由你批准。
 
-同一个动作也可以在原生 app 里完成：选择项目后点击 `Preview Conversation Evolution` 先预览，再点击 `Evolve Conversations to Drafts` 写入 Draft Inbox。生成后可以在同一页的 `Draft Inbox` 里批准或拒绝。
+同一个动作也可以在 Tauri 桌面工作台里完成：选择项目后在“审阅”页点击“提炼候选”写入 Draft Inbox。生成后可以在同一页批准、编辑、隐藏或拒绝候选。
 
 ## 8. 推荐体验顺序
 
@@ -281,7 +280,7 @@ cargo run -- test-rules --project .
 - 不会静默启用自动提炼内容，必须先进入 Draft Inbox
 - LLM provider 仍是配置地基，本地提取器是主路径
 - Cursor / Cline 不在当前 MVP 主线
-- 原生 app 已经能浏览项目、Review、触发对话进化，并处理 Draft Inbox；更细的 Canvas 拖拽、App Store、Preference Registry 编辑体验仍会继续补强
-- 原生 app 已经接入 Skilllet Catalog、Skilllet target matrix、Draft explainability、Draft inline editing 和 Draft merge；后续还需要把包详情编辑、Skilllet remove/disable、lineage 展示做得更顺手
+- Tauri 桌面工作台已经能浏览项目、Review、触发对话进化，并处理 Draft Inbox；更细的 Canvas 拖拽、App Store、Preference Registry 编辑体验仍会继续补强
+- Tauri 桌面工作台已经接入 Skilllet Catalog、Skilllet target matrix、Draft explainability、Draft inline editing 和 Draft merge；后续还需要把包详情编辑、Skilllet remove/disable、lineage 展示做得更顺手
 
 下一步最值得补的是更完整的 Skilllet lineage，让审查体验继续靠近一个可解释的进化系统。
