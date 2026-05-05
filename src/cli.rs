@@ -324,6 +324,16 @@ mod tests {
             _ => panic!("expected draft merge command"),
         }
     }
+
+    #[test]
+    fn cli_accepts_mcp_command() {
+        let cli = Cli::parse_from(["agent-kernel", "mcp", "--project", "."]);
+
+        match cli.command {
+            Commands::Mcp { project } => assert_eq!(project, PathBuf::from(".")),
+            _ => panic!("expected mcp command"),
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -490,6 +500,13 @@ pub(crate) enum Commands {
 
     /// Run local Rule CI assertions against generated Agent artifacts.
     TestRules {
+        /// Project root.
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
+    /// Serve a minimal MCP stdio endpoint for Agent-Kernel workflows.
+    Mcp {
         /// Project root.
         #[arg(long, default_value = ".")]
         project: PathBuf,

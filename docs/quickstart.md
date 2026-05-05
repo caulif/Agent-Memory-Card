@@ -238,6 +238,18 @@ cargo run -- test-rules --project .
 
 `SKILL.md` 包含 `name` 和 `description` frontmatter，详细规则放在 `references/`，这样 Claude Code / Codex 可以按需加载，而不是把所有流程都塞进启动上下文。
 
+如果某条 Skilllet 需要编译成 Claude Code hook，可以把它的 `activation` 设为 `hook`，并在 `tags` 里声明事件，例如：
+
+```yaml
+activation: hook
+tags:
+  - hook:event:session-end
+  - hook:matcher:git commit
+body: cargo clippy --quiet -- -D warnings
+```
+
+这类 Skilllet 会写入 `.claude/settings.local.json`，并保留该文件里不属于 Agent-Kernel 的其他配置键。
+
 这些是编译产物。手动改了以后，可以用下面命令回流成 Draft：
 
 ```bash
@@ -259,6 +271,22 @@ cargo run -- observe evolve --target codex --target claude-code --project .
 ```
 
 这个流程仍然不会自动启用 Skilllet。所有自动提炼的内容都会先进 Draft Inbox，由你批准。
+
+## 7.1 通过 MCP 接入外部 Agent
+
+如果想让支持 MCP 的客户端直接调用 Agent-Kernel，可以在项目根目录启动：
+
+```bash
+cargo run -- mcp --project .
+```
+
+当前最小工具集包括：
+
+- `list_drafts`
+- `approve_draft`
+- `build_artifacts`
+
+这样 Claude Code 一类客户端可以直接列出 Draft Inbox、批准 Draft，并触发一次 build / preview。
 
 同一个动作也可以在 Tauri 桌面工作台里完成：选择项目后在“审阅”页点击“提炼候选”写入 Draft Inbox。生成后可以在同一页批准、编辑、隐藏或拒绝候选。
 

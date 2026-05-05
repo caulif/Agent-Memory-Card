@@ -195,6 +195,47 @@ fn build_compiles_procedure_skilllets_as_agent_skills() {
     assert!(reference.contains("Use Axios for frontend HTTP requests"));
 }
 
+#[test]
+fn build_compiles_hook_skilllets_into_claude_settings_local() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    skilllet::add_skilllet(
+        temp.path(),
+        "project:run-clippy-before-session-end",
+        "Run Clippy Before Session End",
+        "cargo clippy --quiet -- -D warnings",
+        "workflow",
+        "project",
+        vec!["claude-code".to_string()],
+    )
+    .expect("add skilllet");
+
+    let path = temp
+        .path()
+        .join(".agent-kernel")
+        .join("skilllets")
+        .join("project")
+        .join("run-clippy-before-session-end.yml");
+    let text = fs::read_to_string(&path).expect("skilllet yaml");
+    let mut record: SkillletRecord = serde_yaml::from_str(&text).expect("parse skilllet yaml");
+    record.activation = "hook".to_string();
+    record.tags = vec![
+        "hook:event:session-end".to_string(),
+        "hook:matcher:git commit".to_string(),
+        "workflow".to_string(),
+    ];
+    fs::write(&path, serde_yaml::to_string(&record).expect("serialize skilllet"))
+        .expect("rewrite skilllet yaml");
+
+    sync_project(temp.path()).expect("sync");
+
+    let settings = fs::read_to_string(temp.path().join(".claude/settings.local.json"))
+        .expect("settings local");
+    assert!(settings.contains("\"SessionEnd\""));
+    assert!(settings.contains("cargo clippy --quiet -- -D warnings"));
+    assert!(settings.contains("\"matcher\": \"git commit\""));
+    assert!(!settings.contains("AGENTS.md"));
+}
+
 fn test_skilllet_with_artifact_kind(
     id: &str,
     title: &str,

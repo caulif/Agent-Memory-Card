@@ -9,6 +9,7 @@ pub mod hooks;
 pub mod index;
 pub mod kernel;
 pub mod migration;
+pub mod mcp;
 pub mod observation;
 pub mod project_registry;
 pub mod provider;

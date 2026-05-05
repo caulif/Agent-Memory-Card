@@ -89,3 +89,35 @@ fn install_project_hooks_preserves_existing_settings_keys() {
     assert!(settings.contains("Bash(cargo test:*)"));
     assert!(settings.contains("\"PreCompact\""));
 }
+
+#[test]
+fn write_command_hooks_supports_matchers_and_managed_rewrites() {
+    let temp = tempfile::tempdir().expect("tempdir");
+
+    hooks::write_claude_project_command_hooks(
+        temp.path(),
+        &[hooks::ClaudeCommandHook {
+            event: hooks::ClaudeHookEvent::SessionEnd,
+            matcher: Some("git commit".to_string()),
+            command: "cargo clippy --quiet -- -D warnings".to_string(),
+        }],
+        false,
+    )
+    .expect("write command hooks");
+    hooks::write_claude_project_command_hooks(
+        temp.path(),
+        &[hooks::ClaudeCommandHook {
+            event: hooks::ClaudeHookEvent::SessionEnd,
+            matcher: Some("git commit".to_string()),
+            command: "cargo test --quiet".to_string(),
+        }],
+        false,
+    )
+    .expect("rewrite command hooks");
+
+    let settings = fs::read_to_string(temp.path().join(".claude/settings.local.json"))
+        .expect("settings local");
+    assert!(settings.contains("cargo test --quiet"));
+    assert!(!settings.contains("cargo clippy --quiet -- -D warnings"));
+    assert!(settings.contains("\"matcher\": \"git commit\""));
+}

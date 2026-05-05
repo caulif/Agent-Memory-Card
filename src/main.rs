@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use agent_kernel::{
     build, candidate, catalog, config, draft, extract, hooks, index, migration, observation,
-    project_registry, provider, review, rule_test, scanner, skilllet,
+    mcp, project_registry, provider, review, rule_test, scanner, skilllet,
 };
 use anyhow::Result;
 use clap::Parser;
@@ -458,6 +458,9 @@ async fn main() -> Result<()> {
             if report.failed > 0 {
                 std::process::exit(1);
             }
+        }
+        Commands::Mcp { project } => {
+            mcp::serve_stdio(&project)?;
         }
         Commands::Review {
             json,

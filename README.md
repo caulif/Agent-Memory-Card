@@ -16,6 +16,7 @@ Build output is split by activation:
 
 - Always-on preferences and constraints compile into `AGENTS.md` and `CLAUDE.md`.
 - Reusable procedures, templates, and workflows compile into Agent Skills under `.agents/skills/<name>/SKILL.md` and `.claude/skills/<name>/SKILL.md`, with full rule text in `references/`.
+- Hook-oriented Skilllets with `activation: hook` compile into Claude Code project hooks in `.claude/settings.local.json`. Use tags such as `hook:event:stop`, `hook:event:precompact`, `hook:event:session-end`, and optional `hook:matcher:<text>`.
 - Generated Agent Skill folders use the open `SKILL.md` shape: frontmatter with `name` and `description`, plus only `references/`, `scripts/`, and `assets/` support folders.
 
 ## Architecture
@@ -72,7 +73,10 @@ cargo run -- skilllet list --project .
 cargo run -- catalog list --project .
 cargo run -- build --preview --project .
 cargo run -- sync --project .
+cargo run -- mcp --project .
 ```
+
+The `mcp` command serves a minimal stdio MCP endpoint with `list_drafts`, `approve_draft`, and `build_artifacts` tools, so Claude Code or other MCP clients can review and advance the local Draft Inbox without shelling out ad hoc commands.
 
 The old native app and legacy web UI have been removed. New visual work belongs in `app/` and `src-tauri/`.
 

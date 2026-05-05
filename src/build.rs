@@ -14,10 +14,12 @@ use crate::fsutil;
 use crate::skilllet::{self, SkillletRecord};
 
 mod agent_skills;
+mod hook_artifacts;
 #[cfg(test)]
 mod tests;
 
 use agent_skills::{compile_skilllets_as_agent_skills, skilllet_compiles_to_agent_skill};
+use hook_artifacts::{compile_skilllet_hooks, expected_hook_artifact};
 
 const INSTRUCTION_ARTIFACT_BUDGET_BYTES: usize = 32 * 1024;
 
@@ -316,6 +318,18 @@ pub fn build_project(project_root: &Path, preview: bool) -> Result<BuildReport> 
             warnings.extend(compiled.warnings);
             lock.artifacts.extend(compiled.artifacts);
         }
+
+        let compiled_hooks = compile_skilllet_hooks(
+            &root,
+            agent_name,
+            &config.skilllets.include,
+            &skilllets,
+            preview,
+            &previous_lock,
+        )?;
+        actions.extend(compiled_hooks.actions);
+        warnings.extend(compiled_hooks.warnings);
+        lock.artifacts.extend(compiled_hooks.artifacts);
     }
 
     if !preview {
@@ -486,7 +500,7 @@ pub fn import_artifact_drifts(project_root: &Path) -> Result<ArtifactImportRepor
     let root = fsutil::normalize_project_root(project_root)?;
     let config = config::load_or_default_project_config(&root)?;
     let skilllets = skilllet::skilllet_map(&root)?;
-    let expected = expected_artifacts(&root, &config, &skilllets);
+    let expected = expected_artifacts(&root, &config, &skilllets)?;
 
     let mut created = 0;
     let mut skipped = 0;
@@ -648,7 +662,7 @@ fn expected_artifacts(
     root: &Path,
     config: &config::ProjectConfig,
     skilllets: &BTreeMap<String, SkillletRecord>,
-) -> Vec<ExpectedArtifact> {
+) -> Result<Vec<ExpectedArtifact>> {
     let mut artifacts = Vec::new();
     for (agent_name, agent) in &config.agents {
         if !agent.enabled {
@@ -679,8 +693,17 @@ fn expected_artifacts(
                 ),
             });
         }
+        if let Some((path, content)) =
+            expected_hook_artifact(root, agent_name, &config.skilllets.include, skilllets)?
+        {
+            artifacts.push(ExpectedArtifact {
+                agent: agent_name.clone(),
+                path,
+                expected_content: content,
+            });
+        }
     }
-    artifacts
+    Ok(artifacts)
 }
 
 pub(super) fn ensure_generated_artifact_is_safe_to_write(

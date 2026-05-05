@@ -2,6 +2,41 @@ use std::fs;
 use std::path::Path;
 
 #[test]
+fn rust_source_files_stay_within_1000_lines() {
+    let roots = ["src", "src-tauri/src"];
+    let mut violations = Vec::new();
+
+    for root in roots {
+        let path = Path::new(root);
+        if !path.exists() {
+            continue;
+        }
+        for entry in walkdir::WalkDir::new(path).follow_links(false) {
+            let entry = entry.expect("walkdir entry");
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            if entry.path().extension().and_then(|value| value.to_str()) != Some("rs") {
+                continue;
+            }
+            let lines = fs::read_to_string(entry.path())
+                .expect("source file")
+                .lines()
+                .count();
+            if lines > 1000 {
+                violations.push(format!("{} ({lines} lines)", entry.path().display()));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "Rust source files exceeded 1000 lines:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
 fn generated_agent_skills_follow_open_structure() {
     let temp = tempfile::tempdir().expect("tempdir");
     agent_kernel::skilllet::add_skilllet(
