@@ -24,6 +24,10 @@ pub struct SkillletRecord {
     pub tags: Vec<String>,
     #[serde(default = "default_language")]
     pub language: String,
+    #[serde(default = "default_activation")]
+    pub activation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger_description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_project: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -169,6 +173,13 @@ pub fn add_skilllet_with_provenance(
         brief: metadata.brief,
         tags: metadata.tags,
         language: metadata.language,
+        activation: existing
+            .as_ref()
+            .map(|record| record.activation.clone())
+            .unwrap_or_else(|| infer_activation(kind).to_string()),
+        trigger_description: existing
+            .as_ref()
+            .and_then(|record| record.trigger_description.clone()),
         source_project: existing
             .as_ref()
             .and_then(|record| record.source_project.clone()),
@@ -252,6 +263,9 @@ pub fn update_skilllet(
     }
     if let Some(scope) = update.scope {
         record.scope = scope;
+    }
+    if record.activation == "model-decision" {
+        record.activation = infer_activation(&record.kind).to_string();
     }
     validate_skilllet_fields(
         &root,
@@ -550,6 +564,25 @@ mod matrix_tests {
         assert_eq!(matrix.rows[0].targets.get("codex"), Some(&true));
         assert_eq!(matrix.rows[0].targets.get("claude-code"), Some(&true));
     }
+
+    #[test]
+    fn new_procedure_skilllet_defaults_to_skill_activation() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        add_skilllet(
+            temp.path(),
+            "project:frontend-workflow",
+            "Frontend Workflow",
+            "Use Axios for frontend HTTP requests.",
+            "procedure",
+            "project",
+            vec!["claude-code".to_string()],
+        )
+        .expect("add skilllet");
+
+        let records = load_skilllets(temp.path()).expect("records");
+
+        assert_eq!(records[0].activation, "skill");
+    }
 }
 
 const MAX_SKILLLET_ID_LEN: usize = 128;
@@ -626,6 +659,8 @@ fn validate_kind(kind: &str) -> Result<()> {
         "preference",
         "constraint",
         "procedure",
+        "template",
+        "workflow",
         "convention",
         "correction",
         "anti-pattern",
@@ -771,6 +806,18 @@ fn concise_en_summary(body: &str) -> String {
 
 fn default_language() -> String {
     "zh".to_string()
+}
+
+fn default_activation() -> String {
+    "model-decision".to_string()
+}
+
+pub fn infer_activation(kind: &str) -> &'static str {
+    match kind {
+        "preference" | "constraint" => "always-on",
+        "procedure" | "template" | "workflow" => "skill",
+        _ => "model-decision",
+    }
 }
 
 fn current_schema_version() -> u32 {

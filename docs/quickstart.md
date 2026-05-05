@@ -227,6 +227,17 @@ cargo run -- test-rules --project .
 - `.agents/skills`
 - `.claude/skills`
 
+编译器会按 Skilllet 的 activation 分流：`preference` / `constraint` 默认进入 always-on 指令文件，`procedure` / `template` / `workflow` 默认生成标准 Agent Skill 目录。生成的 Skill 形态如下：
+
+```text
+.claude/skills/frontend-workflow/
+  SKILL.md
+  references/
+    project-frontend-workflow.md
+```
+
+`SKILL.md` 包含 `name` 和 `description` frontmatter，详细规则放在 `references/`，这样 Claude Code / Codex 可以按需加载，而不是把所有流程都塞进启动上下文。
+
 这些是编译产物。手动改了以后，可以用下面命令回流成 Draft：
 
 ```bash

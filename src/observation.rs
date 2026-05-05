@@ -18,6 +18,7 @@ use crate::textutil;
 
 mod conversation;
 mod incremental;
+mod sessions_index;
 
 use conversation::{
     collect_jsonl, collect_single_jsonl, conversation_belongs_to_project,
@@ -674,7 +675,11 @@ fn filter_agent_candidates_through_local_gate(
             extract::embedding::DedupResult::Unique => candidate::ExtractionAction::new_candidate(),
         };
         let classification = extract::classify::classify_chunk(&chunk);
-        retained.push((candidate, score, action.with_route(&classification.artifact_kind)));
+        retained.push((
+            candidate,
+            score,
+            action.with_route(&classification.artifact_kind),
+        ));
     }
 
     Ok(retained)

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -8,6 +9,7 @@ use serde_json::Value;
 use crate::fsutil;
 
 use super::ConversationFile;
+use super::sessions_index;
 pub(super) fn collect_jsonl(
     dir: &Path,
     agent: &str,
@@ -17,6 +19,17 @@ pub(super) fn collect_jsonl(
     if !dir.exists() {
         return Ok(());
     }
+    let indexed = sessions_index::load_sessions_index(dir)?;
+    let mut indexed_paths = HashSet::new();
+    for entry in indexed {
+        indexed_paths.insert(entry.jsonl_path.clone());
+        files.push(ConversationFile {
+            agent: agent.to_string(),
+            source_kind: source_kind.to_string(),
+            project_path: Some(entry.project_path),
+            path: entry.jsonl_path,
+        });
+    }
     for entry in walkdir::WalkDir::new(dir).follow_links(false) {
         let entry = entry?;
         if !entry.file_type().is_file() {
@@ -24,6 +37,9 @@ pub(super) fn collect_jsonl(
         }
         if entry.path().extension().and_then(|value| value.to_str()) == Some("jsonl") {
             let path = entry.path().to_path_buf();
+            if indexed_paths.contains(&path) {
+                continue;
+            }
             files.push(ConversationFile {
                 agent: agent.to_string(),
                 source_kind: source_kind.to_string(),
@@ -51,6 +67,47 @@ pub(super) fn collect_single_jsonl(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_path_from_jsonl_uses_sessions_index_metadata() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let project_dir = temp.path().join("-C-Users-alex-Projects-myapp");
+        fs::create_dir_all(&project_dir).expect("project dir");
+        let jsonl = project_dir.join("session-1.jsonl");
+        fs::write(&jsonl, "{}\n").expect("jsonl");
+        fs::write(
+            project_dir.join("sessions-index.json"),
+            r#"{
+  "sessions": {
+    "session-1": {
+      "summary": "use axios",
+      "messageCount": 12,
+      "gitBranch": "main",
+      "lastModified": 1710000000000
+    }
+  }
+}"#,
+        )
+        .expect("sessions index");
+
+        let project_path = project_path_from_jsonl(&jsonl)
+            .expect("project path")
+            .expect("path from sessions index");
+
+        assert!(
+            project_path.ends_with(
+                Path::new("Users")
+                    .join("alex")
+                    .join("Projects")
+                    .join("myapp")
+            )
+        );
+    }
+}
+
 pub(super) fn conversation_belongs_to_project(
     file: &ConversationFile,
     project_root: &Path,
@@ -68,6 +125,9 @@ pub(super) fn conversation_belongs_to_project(
 }
 
 pub(super) fn project_path_from_jsonl(file: &Path) -> Result<Option<PathBuf>> {
+    if let Some(project_path) = sessions_index::session_project_path(file)? {
+        return Ok(Some(project_path));
+    }
     let handle = fs::File::open(file).with_context(|| format!("open {}", file.display()))?;
     let reader = BufReader::new(handle);
     let mut scanned_bytes = 0usize;

@@ -12,6 +12,12 @@ The product flow is:
 
 The app is intentionally not a chat-log summarizer. It filters out one-off task chatter and keeps durable agent knowledge: preferences, constraints, reusable workflows, repeated corrections, architecture decisions, and Skill supplement material.
 
+Build output is split by activation:
+
+- Always-on preferences and constraints compile into `AGENTS.md` and `CLAUDE.md`.
+- Reusable procedures, templates, and workflows compile into Agent Skills under `.agents/skills/<name>/SKILL.md` and `.claude/skills/<name>/SKILL.md`, with full rule text in `references/`.
+- Generated Agent Skill folders use the open `SKILL.md` shape: frontmatter with `name` and `description`, plus only `references/`, `scripts/`, and `assets/` support folders.
+
 ## Architecture
 
 The v1 domain model is:
