@@ -1,4 +1,5 @@
 use super::*;
+use crate::config;
 
 fn candidate_with_body(title: &str, body: &str, confidence: f32) -> Candidate {
     Candidate {
