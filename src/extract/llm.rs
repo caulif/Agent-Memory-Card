@@ -52,11 +52,13 @@ pub(super) struct LlmExtractRequest {
     pub max_tokens: usize,
 }
 
-/// 构建 LLM 提取的 prompt
-pub(super) fn build_extraction_prompt(paragraphs: &[CandidateParagraph]) -> String {
+/// 构建 LLM 提取请求，分离稳定 system prompt 和变化的 user prompt，便于缓存。
+pub(super) fn build_extraction_prompt(
+    paragraphs: &[CandidateParagraph],
+) -> provider::ProviderRequest {
     let material = build_extraction_material(paragraphs);
-    format!(
-        r#"你是一个从 Agent 编程对话中提取可复用知识的助手。
+    provider::ProviderRequest {
+        system_prompt: r#"你是一个从 Agent 编程对话中提取可复用知识的助手。
 
 请分析以下被标记为"可能有价值"的对话段落。对每个段落：
 1. 判断它是否真的包含可复用的 agent 知识（一次性的任务指令、抱怨、未解决的请求不算）
@@ -77,11 +79,10 @@ pub(super) fn build_extraction_prompt(paragraphs: &[CandidateParagraph]) -> Stri
 - confidence 取值 0.0-1.0，低于 0.75 的知识项通常不值得保留
 - body 必须简洁、通用、命令式、可复用
 - title 跟随原文语言（中文原文用中文标题，英文原文用英文标题）
-- 只提取对以后任务有用的内容，忽略所有一次性指令
-
-待分析的对话段落：
-{material}"#
-    )
+- 只提取对以后任务有用的内容，忽略所有一次性指令"#
+            .to_string(),
+        user_prompt: format!("待分析的对话段落：\n{material}"),
+    }
 }
 
 /// 将候选段落格式化为 LLM 输入
@@ -343,8 +344,9 @@ That concludes the extraction."#;
         }];
 
         let prompt = build_extraction_prompt(&paragraphs);
-        assert!(prompt.contains("Always use Bun"));
-        assert!(prompt.contains("偏好声明"));
+        assert!(prompt.user_prompt.contains("Always use Bun"));
+        assert!(prompt.user_prompt.contains("偏好声明"));
+        assert!(prompt.system_prompt.contains("可复用知识类型"));
     }
 
     #[test]

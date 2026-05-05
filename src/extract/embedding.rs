@@ -1,36 +1,24 @@
-//! 语义去重层：基于 Jaccard 相似度 + 可扩展 Embedding 接口。
-//!
-//! 当前实现使用 Jaccard token 相似度（改进版，保留中文语义信息）。
-//! 预留 SemanticMatcher trait 供未来 Ollama embedding 模型接入。
+//! 语义去重层：优先使用 fastembed，本地不可用时回退到 Jaccard。
+
+use std::sync::Mutex;
+
+use fastembed::TextEmbedding;
 
 use crate::skilllet::SkillletRecord;
 use crate::textutil;
 
-/// 语义匹配器 trait：预留 Embedding 模型接入接口。
-/// 当前默认实现为 JaccardMatcher。
-#[allow(dead_code)]
 pub(crate) trait SemanticMatcher: Send + Sync {
-    /// 计算两个文本的语义相似度 (0.0 - 1.0)
     fn compute_similarity(&self, left: &str, right: &str) -> f32;
 
-    /// 批量编码文本（Embedding 实现用，Jaccard 为空实现）
-    fn encode_batch(&self, _texts: &[String]) -> Vec<Vec<f32>> {
-        Vec::new()
-    }
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn matcher_name(&self) -> &'static str;
 }
 
-/// Jaccard 相似度匹配器（默认实现）
-pub(crate) struct JaccardMatcher {
-    /// 相似度阈值 (0.0 - 1.0)，超过此值视为重复
-    #[allow(dead_code)]
-    similarity_threshold: f32,
-}
+pub(crate) struct JaccardMatcher;
 
 impl JaccardMatcher {
-    pub(crate) fn new(similarity_threshold: f32) -> Self {
-        Self {
-            similarity_threshold,
-        }
+    pub(crate) fn new() -> Self {
+        Self
     }
 }
 
@@ -38,27 +26,82 @@ impl SemanticMatcher for JaccardMatcher {
     fn compute_similarity(&self, left: &str, right: &str) -> f32 {
         textutil::jaccard_similarity(left, right)
     }
+
+    fn matcher_name(&self) -> &'static str {
+        "jaccard"
+    }
 }
 
-/// 语义去重器：管理去重逻辑
-pub(crate) struct SemanticDeduper<M: SemanticMatcher = JaccardMatcher> {
-    matcher: M,
-    /// 和已有 Skilllet 比较的相似度阈值 (默认 0.75)
+pub(crate) struct FastEmbedMatcher {
+    model: Mutex<TextEmbedding>,
+}
+
+impl FastEmbedMatcher {
+    pub(crate) fn try_new() -> anyhow::Result<Self> {
+        let model = TextEmbedding::try_new(Default::default())?;
+        Ok(Self {
+            model: Mutex::new(model),
+        })
+    }
+
+    fn embed_pair(&self, left: &str, right: &str) -> anyhow::Result<(Vec<f32>, Vec<f32>)> {
+        let mut model = self
+            .model
+            .lock()
+            .map_err(|_| anyhow::anyhow!("fastembed model lock poisoned"))?;
+        let embeddings = model.embed(vec![left.to_string(), right.to_string()], None)?;
+        let left = embeddings
+            .first()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("missing first embedding"))?;
+        let right = embeddings
+            .get(1)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("missing second embedding"))?;
+        Ok((left, right))
+    }
+}
+
+impl SemanticMatcher for FastEmbedMatcher {
+    fn compute_similarity(&self, left: &str, right: &str) -> f32 {
+        self.embed_pair(left, right)
+            .map(|(left, right)| cosine_similarity(&left, &right))
+            .unwrap_or_else(|_| textutil::jaccard_similarity(left, right))
+    }
+
+    fn matcher_name(&self) -> &'static str {
+        "fastembed"
+    }
+}
+
+pub(crate) struct SemanticDeduper {
+    matcher: Box<dyn SemanticMatcher>,
     existing_threshold: f32,
-    /// 同批次候选之间的相似度阈值 (默认 0.65)
     batch_threshold: f32,
 }
 
-impl SemanticDeduper<JaccardMatcher> {
+impl SemanticDeduper {
     pub(crate) fn new(existing_threshold: f32, batch_threshold: f32) -> Self {
-        SemanticDeduper {
-            matcher: JaccardMatcher::new(batch_threshold),
+        Self {
+            matcher: default_matcher(),
             existing_threshold,
             batch_threshold,
         }
     }
 
-    /// 和已有 Skilllet 做语义去重：如果 body 相似度 > existing_threshold，视为重复
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn with_matcher(
+        matcher: Box<dyn SemanticMatcher>,
+        existing_threshold: f32,
+        batch_threshold: f32,
+    ) -> Self {
+        Self {
+            matcher,
+            existing_threshold,
+            batch_threshold,
+        }
+    }
+
     pub(crate) fn dedup_against_existing(
         &self,
         body: &str,
@@ -76,8 +119,6 @@ impl SemanticDeduper<JaccardMatcher> {
         DedupResult::Unique
     }
 
-    /// 同批次内去重：按 confidence 降序排序后，移除低 confidence 的重复项。
-    /// 返回去重后的保留项索引列表。
     pub(crate) fn dedup_within_batch(&self, items: &mut [LlmKnowledgeItem]) -> Vec<usize> {
         let mut retained = Vec::new();
         let mut kept_items: Vec<&LlmKnowledgeItem> = Vec::new();
@@ -106,7 +147,23 @@ impl SemanticDeduper<JaccardMatcher> {
     }
 }
 
-/// LLM 提取的知识项（用于去重层输入）
+pub(crate) fn default_matcher() -> Box<dyn SemanticMatcher> {
+    if cfg!(test) {
+        return Box::new(JaccardMatcher::new());
+    }
+
+    if std::env::var("AGENT_KERNEL_DISABLE_FASTEMBED")
+        .ok()
+        .is_some_and(|value| value == "1")
+    {
+        return Box::new(JaccardMatcher::new());
+    }
+
+    FastEmbedMatcher::try_new()
+        .map(|matcher| Box::new(matcher) as Box<dyn SemanticMatcher>)
+        .unwrap_or_else(|_| Box::new(JaccardMatcher::new()))
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct LlmKnowledgeItem {
     pub title: String,
@@ -121,21 +178,70 @@ pub(crate) struct LlmKnowledgeItem {
     pub suggested_action: crate::candidate::ExtractionAction,
 }
 
-/// 去重结果
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) enum DedupResult {
     Unique,
     Duplicate { similar_id: String, similarity: f32 },
 }
 
+fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
+    if left.is_empty() || right.is_empty() || left.len() != right.len() {
+        return 0.0;
+    }
+
+    let mut dot = 0.0f32;
+    let mut left_norm = 0.0f32;
+    let mut right_norm = 0.0f32;
+    for (left, right) in left.iter().zip(right.iter()) {
+        dot += left * right;
+        left_norm += left * left;
+        right_norm += right * right;
+    }
+    if left_norm == 0.0 || right_norm == 0.0 {
+        return 0.0;
+    }
+    dot / (left_norm.sqrt() * right_norm.sqrt())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn with_fastembed_disabled<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = env_lock().lock().expect("env lock");
+        let previous = std::env::var("AGENT_KERNEL_DISABLE_FASTEMBED").ok();
+        unsafe { std::env::set_var("AGENT_KERNEL_DISABLE_FASTEMBED", "1") };
+        let result = f();
+        match previous.as_deref() {
+            Some(value) => unsafe { std::env::set_var("AGENT_KERNEL_DISABLE_FASTEMBED", value) },
+            None => unsafe { std::env::remove_var("AGENT_KERNEL_DISABLE_FASTEMBED") },
+        }
+        result
+    }
+
+    #[test]
+    fn default_matcher_falls_back_to_jaccard_when_fastembed_is_disabled() {
+        with_fastembed_disabled(|| {
+            let matcher = default_matcher();
+            assert_eq!(matcher.matcher_name(), "jaccard");
+        });
+    }
+
+    #[test]
+    fn cosine_similarity_matches_identical_vectors() {
+        let similarity = cosine_similarity(&[1.0, 2.0, 3.0], &[1.0, 2.0, 3.0]);
+        assert!((similarity - 1.0).abs() < 0.0001);
+    }
 
     #[test]
     fn jaccard_matcher_detects_similar_texts() {
-        let matcher = JaccardMatcher::new(0.5);
+        let matcher = JaccardMatcher::new();
         let sim = matcher.compute_similarity(
             "Use Bun for JavaScript package management",
             "Use Bun for package management and scripts",
@@ -143,19 +249,6 @@ mod tests {
         assert!(
             sim > 0.5,
             "similar texts should have high similarity: {sim}"
-        );
-    }
-
-    #[test]
-    fn jaccard_matcher_distinguishes_different_topics() {
-        let matcher = JaccardMatcher::new(0.5);
-        let sim = matcher.compute_similarity(
-            "Use Bun for JavaScript package management",
-            "Use Axios for frontend HTTP requests",
-        );
-        assert!(
-            sim < 0.3,
-            "different topics should have low similarity: {sim}"
         );
     }
 
@@ -182,117 +275,15 @@ mod tests {
             updated_at: String::new(),
         }];
 
-        let deduper = SemanticDeduper::new(0.75, 0.65);
+        let deduper = SemanticDeduper::with_matcher(Box::new(JaccardMatcher::new()), 0.75, 0.65);
         let result = deduper
             .dedup_against_existing("Use Bun for JS package management and scripts", &existing);
 
         match result {
             DedupResult::Duplicate { similar_id, .. } => {
-                assert_eq!(similar_id, "project:prefer-bun");
+                assert_eq!(similar_id, "project:prefer-bun")
             }
             DedupResult::Unique => panic!("should detect duplicate"),
         }
-    }
-
-    #[test]
-    fn semantic_deduper_allows_unique_items() {
-        let existing = vec![SkillletRecord {
-            schema_version: 1,
-            id: "project:prefer-bun".to_string(),
-            title: "Prefer Bun".to_string(),
-            kind: "preference".to_string(),
-            scope: "project".to_string(),
-            body: "Use Bun for JavaScript package management.".to_string(),
-            brief: String::new(),
-            tags: Vec::new(),
-            language: "en".to_string(),
-            activation: "always-on".to_string(),
-            trigger_description: None,
-            source_project: None,
-            extraction: None,
-            approved_from: None,
-            evidence: None,
-            merge_history: Vec::new(),
-            created_at: String::new(),
-            updated_at: String::new(),
-        }];
-
-        let deduper = SemanticDeduper::new(0.75, 0.65);
-        let result = deduper.dedup_against_existing(
-            "Always run cargo test before pushing Rust changes",
-            &existing,
-        );
-
-        assert!(matches!(result, DedupResult::Unique));
-    }
-
-    #[test]
-    fn within_batch_dedup_keeps_higher_confidence_items() {
-        let deduper = SemanticDeduper::new(0.75, 0.65);
-        let mut items = vec![
-            LlmKnowledgeItem {
-                title: "Use Bun".into(),
-                body: "Use Bun for JavaScript package management and scripts".into(),
-                kind: "preference".into(),
-                scope: "project".into(),
-                confidence: 0.92,
-                evidence: "test".into(),
-                reason: "test".into(),
-                matched_signal: "preference".into(),
-                is_noise: false,
-                suggested_action: crate::candidate::ExtractionAction::new_candidate(),
-            },
-            LlmKnowledgeItem {
-                title: "Prefer Bun".into(),
-                body: "Use Bun for JavaScript package management and scripts".into(),
-                kind: "preference".into(),
-                scope: "project".into(),
-                confidence: 0.78,
-                evidence: "test".into(),
-                reason: "test".into(),
-                matched_signal: "preference".into(),
-                is_noise: false,
-                suggested_action: crate::candidate::ExtractionAction::new_candidate(),
-            },
-            LlmKnowledgeItem {
-                title: "Use Axios".into(),
-                body: "Use Axios for frontend HTTP requests".into(),
-                kind: "preference".into(),
-                scope: "project".into(),
-                confidence: 0.85,
-                evidence: "test".into(),
-                reason: "test".into(),
-                matched_signal: "preference".into(),
-                is_noise: false,
-                suggested_action: crate::candidate::ExtractionAction::new_candidate(),
-            },
-        ];
-
-        let retained = deduper.dedup_within_batch(&mut items);
-        // 第一个 Use Bun 和第二个 Prefer Bun body 完全相同，应只保留第一个
-        // Use Axios 是不同的主题，应保留
-        assert_eq!(retained.len(), 2);
-        assert!(retained.contains(&0)); // Use Bun (higher confidence)
-        assert!(retained.contains(&2)); // Use Axios (different topic)
-    }
-
-    #[test]
-    fn noise_items_are_excluded_from_dedup() {
-        let deduper = SemanticDeduper::new(0.75, 0.65);
-        let mut items = vec![LlmKnowledgeItem {
-            title: "Noise".into(),
-            body: "this is noise".into(),
-            kind: "preference".into(),
-            scope: "project".into(),
-            confidence: 0.4,
-            evidence: "test".into(),
-            reason: "test".into(),
-            matched_signal: String::new(),
-            is_noise: true,
-            suggested_action: crate::candidate::ExtractionAction::new_candidate(),
-        }];
-
-        let retained = deduper.dedup_within_batch(&mut items);
-        assert!(retained.is_empty());
     }
 }

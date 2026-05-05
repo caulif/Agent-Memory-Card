@@ -1,12 +1,11 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{Read, Write};
-use std::net::TcpStream;
 use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use regex::Regex;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 
 use crate::config;
@@ -23,6 +22,12 @@ pub struct ProviderConfig {
     pub min_confidence: f32,
     pub providers: BTreeMap<String, Provider>,
     pub privacy: PrivacyConfig,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderRequest {
+    pub system_prompt: String,
+    pub user_prompt: String,
 }
 
 fn default_extraction_provider() -> String {
@@ -46,6 +51,16 @@ pub enum Provider {
         model: String,
         api_key_env: String,
     },
+    Anthropic {
+        model: String,
+        api_key_env: String,
+        #[serde(default = "default_cache_system_prompt")]
+        cache_system_prompt: bool,
+    },
+}
+
+fn default_cache_system_prompt() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,6 +73,12 @@ pub struct PrivacyConfig {
 
 impl Default for ProviderConfig {
     fn default() -> Self {
+        Self::local_default()
+    }
+}
+
+impl ProviderConfig {
+    fn local_default() -> Self {
         let mut providers = BTreeMap::new();
         providers.insert("local".to_string(), Provider::LocalHeuristic);
         providers.insert(
@@ -82,6 +103,26 @@ impl Default for ProviderConfig {
             },
         }
     }
+
+    pub fn auto_detect() -> Self {
+        let mut cfg = Self::local_default();
+        if std::env::var("ANTHROPIC_API_KEY")
+            .ok()
+            .is_some_and(|value| !value.trim().is_empty())
+        {
+            cfg.providers.insert(
+                "anthropic".to_string(),
+                Provider::Anthropic {
+                    model: "claude-sonnet-4-5".to_string(),
+                    api_key_env: "ANTHROPIC_API_KEY".to_string(),
+                    cache_system_prompt: true,
+                },
+            );
+            cfg.default = "anthropic".to_string();
+            cfg.extraction_provider = "anthropic".to_string();
+        }
+        cfg
+    }
 }
 
 pub fn provider_config_path(project_root: &Path) -> Result<std::path::PathBuf> {
@@ -92,7 +133,7 @@ pub fn provider_config_path(project_root: &Path) -> Result<std::path::PathBuf> {
 pub fn init_provider_config(project_root: &Path) -> Result<ProviderConfig> {
     let root = fsutil::normalize_project_root(project_root)?;
     config::ensure_kernel_dir(&root)?;
-    let cfg = ProviderConfig::default();
+    let cfg = ProviderConfig::auto_detect();
     fs::write(
         config::kernel_dir(&root).join("providers.yml"),
         serde_yaml::to_string(&cfg)?,
@@ -104,7 +145,7 @@ pub fn init_provider_config(project_root: &Path) -> Result<ProviderConfig> {
 pub fn load_or_default_provider_config(project_root: &Path) -> Result<ProviderConfig> {
     let path = provider_config_path(project_root)?;
     if !path.exists() {
-        return Ok(ProviderConfig::default());
+        return Ok(ProviderConfig::auto_detect());
     }
     let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
     serde_yaml::from_str(&text).with_context(|| format!("parse {}", path.display()))
@@ -132,10 +173,12 @@ pub fn redact_secrets(input: &str) -> String {
     redacted
 }
 
-/// 调用 OpenAI 兼容 API 进行文本提取。
-/// 支持本地 Ollama (HTTP) 和 OpenAI 兼容 API (HTTPS)。
-/// 超时: 30s。
-pub fn call_provider(cfg: &ProviderConfig, prompt: &str, max_tokens: usize) -> Result<String> {
+/// 调用远程 LLM 提供商进行文本提取。
+pub fn call_provider(
+    cfg: &ProviderConfig,
+    request: &ProviderRequest,
+    max_tokens: usize,
+) -> Result<String> {
     let provider_name = &cfg.extraction_provider;
 
     if provider_name == "local" {
@@ -164,11 +207,11 @@ pub fn call_provider(cfg: &ProviderConfig, prompt: &str, max_tokens: usize) -> R
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are a knowledge extraction assistant. Always respond with valid JSON arrays."
+                        "content": request.system_prompt
                     },
                     {
                         "role": "user",
-                        "content": prompt
+                        "content": request.user_prompt
                     }
                 ],
                 "temperature": 0.3,
@@ -177,135 +220,111 @@ pub fn call_provider(cfg: &ProviderConfig, prompt: &str, max_tokens: usize) -> R
                 "stream": false
             });
 
-            call_openai_compatible_api(base_url, model, &api_key, &body.to_string(), max_tokens)
+            call_openai_compatible_api(base_url, &api_key, &body)
+        }
+        Provider::Anthropic {
+            model,
+            api_key_env,
+            cache_system_prompt,
+        } => {
+            let api_key = std::env::var(api_key_env)
+                .with_context(|| format!("missing Anthropic API key in {api_key_env}"))?;
+            let body = anthropic_request_body(model, request, max_tokens, *cache_system_prompt);
+            call_anthropic_api(&api_key, &body)
         }
     }
 }
 
-/// 通过 TcpStream 调用 OpenAI 兼容 API（HTTP 方式）。
-/// 适用场景：本地 Ollama 等 HTTP（非 HTTPS）后端。
 fn call_openai_compatible_api(
     base_url: &str,
-    model: &str,
     api_key: &str,
-    body_json: &str,
-    _max_tokens: usize,
+    body: &serde_json::Value,
 ) -> Result<String> {
-    let url = format!("{base_url}/chat/completions");
-
-    // 解析 URL 获取 host 和 path
-    let (host, port, path) = parse_http_url(&url)?;
-
-    let addr = format!("{host}:{port}");
-    let request = format!(
-        "POST {path} HTTP/1.1\r\n\
-         Host: {host}\r\n\
-         Content-Type: application/json\r\n\
-         Content-Length: {}\r\n\
-         Connection: close\r\n\
-         {}\r\n\
-         \r\n\
-         {body_json}",
-        body_json.len(),
-        if api_key.is_empty() {
-            String::new()
-        } else {
-            format!("Authorization: Bearer {api_key}\r\n")
-        },
-    );
-
-    let mut stream = TcpStream::connect_timeout(
-        &addr
-            .parse()
-            .map_err(|e| anyhow!("invalid address {addr}: {e}"))?,
-        Duration::from_secs(30),
-    )
-    .map_err(|e| anyhow!("connect to {addr} failed: {e}"))?;
-
-    stream
-        .set_read_timeout(Some(Duration::from_secs(30)))
-        .context("set read timeout")?;
-    stream
-        .set_write_timeout(Some(Duration::from_secs(30)))
-        .context("set write timeout")?;
-
-    stream
-        .write_all(request.as_bytes())
-        .context("write request")?;
-
-    let mut response = String::new();
-    stream
-        .read_to_string(&mut response)
-        .context("read response")?;
-
-    // 解析 HTTP 响应：跳过头部，找到 JSON body
-    if let Some(body_start) = response.find("\r\n\r\n") {
-        let body = &response[body_start + 4..];
-        let body = body.trim();
-
-        // 尝试解析 chat completions 响应格式
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(body) {
-            // 检查错误
-            if let Some(error) = value.get("error") {
-                let message = error
-                    .get("message")
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("unknown error");
-                return Err(anyhow!("API error: {message}"));
-            }
-
-            // 提取 choices[0].message.content
-            if let Some(content) = value
-                .get("choices")
-                .and_then(|c| c.get(0))
-                .and_then(|c| c.get("message"))
-                .and_then(|m| m.get("content"))
-                .and_then(|c| c.as_str())
-            {
-                return Ok(content.to_string());
-            }
-        }
-
-        return Err(anyhow!(
-            "unexpected API response: {}",
-            body.chars().take(300).collect::<String>()
-        ));
+    let endpoint = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let client = http_client()?;
+    let mut builder = client.post(endpoint).json(body);
+    if !api_key.is_empty() {
+        builder = builder.bearer_auth(api_key);
     }
+    let json = send_json(builder)?;
 
-    Err(anyhow!(
-        "invalid HTTP response from {model}: {}",
-        response.chars().take(200).collect::<String>()
-    ))
+    json.get("choices")
+        .and_then(|v| v.as_array())
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(|content| content.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("provider returned no message content"))
 }
 
-/// 解析 HTTP URL 为 (host, port, path)
-fn parse_http_url(url: &str) -> Result<(String, u16, String)> {
-    let url = url.trim();
+fn call_anthropic_api(api_key: &str, body: &serde_json::Value) -> Result<String> {
+    let client = http_client()?;
+    let json = send_json(
+        client
+            .post("https://api.anthropic.com/v1/messages")
+            .header("x-api-key", api_key)
+            .header("anthropic-version", "2023-06-01")
+            .json(body),
+    )?;
 
-    // 去掉 http:// 前缀
-    let without_scheme = url
-        .strip_prefix("http://")
-        .or_else(|| url.strip_prefix("https://"))
-        .ok_or_else(|| anyhow!("unsupported URL scheme in {url}"))?;
+    json.get("content")
+        .and_then(|v| v.as_array())
+        .and_then(|items| {
+            items.iter().find_map(|item| {
+                if item.get("type").and_then(|value| value.as_str()) == Some("text") {
+                    item.get("text").and_then(|value| value.as_str())
+                } else {
+                    None
+                }
+            })
+        })
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("Anthropic response returned no text content"))
+}
 
-    let (host_port, path) = if let Some(slash_pos) = without_scheme.find('/') {
-        let (hp, p) = without_scheme.split_at(slash_pos);
-        (hp, p.to_string())
+fn anthropic_request_body(
+    model: &str,
+    request: &ProviderRequest,
+    max_tokens: usize,
+    cache_system_prompt: bool,
+) -> serde_json::Value {
+    let system = if cache_system_prompt {
+        serde_json::json!([{
+            "type": "text",
+            "text": request.system_prompt,
+            "cache_control": { "type": "ephemeral" }
+        }])
     } else {
-        (without_scheme, "/".to_string())
+        serde_json::json!(request.system_prompt)
     };
 
-    let (host, port) = if let Some(colon_pos) = host_port.rfind(':') {
-        let (h, p) = host_port.split_at(colon_pos);
-        let port = p[1..]
-            .parse::<u16>()
-            .map_err(|_| anyhow!("invalid port in {url}"))?;
-        (h.to_string(), port)
-    } else {
-        (host_port.to_string(), 80u16)
-    };
+    serde_json::json!({
+        "model": model,
+        "max_tokens": max_tokens,
+        "system": system,
+        "messages": [{
+            "role": "user",
+            "content": request.user_prompt
+        }]
+    })
+}
 
-    Ok((host, port, path))
+fn http_client() -> Result<Client> {
+    Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .context("build HTTP client")
+}
+
+fn send_json(builder: reqwest::blocking::RequestBuilder) -> Result<serde_json::Value> {
+    let response = builder.send().context("send provider request")?;
+    let status = response.status();
+    let text = response.text().context("read provider response")?;
+    if !status.is_success() {
+        return Err(anyhow!("provider HTTP {}: {}", status, text));
+    }
+    serde_json::from_str(&text).context("parse provider response JSON")
 }
 
 /// 查看提取提供商的名称
@@ -322,12 +341,35 @@ pub fn is_llm_extraction_enabled(project_root: &Path) -> Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn with_env_var<T>(key: &str, value: Option<&str>, f: impl FnOnce() -> T) -> T {
+        let _guard = env_lock().lock().expect("env lock");
+        let previous = std::env::var(key).ok();
+        match value {
+            Some(value) => unsafe { std::env::set_var(key, value) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+        let result = f();
+        match previous.as_deref() {
+            Some(value) => unsafe { std::env::set_var(key, value) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+        result
+    }
 
     #[test]
     fn default_provider_is_local() {
-        let cfg = ProviderConfig::default();
-        assert_eq!(cfg.default, "local");
-        assert!(cfg.providers.contains_key("local"));
+        with_env_var("ANTHROPIC_API_KEY", None, || {
+            let cfg = ProviderConfig::default();
+            assert_eq!(cfg.default, "local");
+            assert!(cfg.providers.contains_key("local"));
+        });
     }
 
     #[test]
@@ -350,40 +392,67 @@ mod tests {
 
     #[test]
     fn default_extraction_config_fields() {
-        let cfg = ProviderConfig::default();
-        assert_eq!(cfg.extraction_provider, "local");
-        assert_eq!(cfg.max_candidates_per_batch, 20);
-        assert_eq!(cfg.min_confidence, 0.7);
-    }
-
-    #[test]
-    fn parse_url_with_port_and_path() {
-        let (host, port, path) = parse_http_url("http://localhost:11434/v1").expect("parse URL");
-        assert_eq!(host, "localhost");
-        assert_eq!(port, 11434);
-        assert_eq!(path, "/v1");
-    }
-
-    #[test]
-    fn parse_url_default_port_80() {
-        let (host, port, path) = parse_http_url("http://localhost/api").expect("parse URL");
-        assert_eq!(host, "localhost");
-        assert_eq!(port, 80);
-        assert_eq!(path, "/api");
+        with_env_var("ANTHROPIC_API_KEY", None, || {
+            let cfg = ProviderConfig::default();
+            assert_eq!(cfg.extraction_provider, "local");
+            assert_eq!(cfg.max_candidates_per_batch, 20);
+            assert_eq!(cfg.min_confidence, 0.7);
+        });
     }
 
     #[test]
     fn local_provider_refuses_remote_call() {
-        let cfg = ProviderConfig::default();
-        let result = call_provider(&cfg, "test prompt", 512);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("local"));
+        with_env_var("ANTHROPIC_API_KEY", None, || {
+            let cfg = ProviderConfig::default();
+            let result = call_provider(
+                &cfg,
+                &ProviderRequest {
+                    system_prompt: "system".to_string(),
+                    user_prompt: "user".to_string(),
+                },
+                512,
+            );
+            assert!(result.is_err());
+            assert!(result.expect_err("must fail").to_string().contains("local"));
+        });
     }
 
     #[test]
     fn is_llm_extraction_disabled_by_default() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let enabled = is_llm_extraction_enabled(temp.path()).expect("check");
-        assert!(!enabled);
+        with_env_var("ANTHROPIC_API_KEY", None, || {
+            let temp = tempfile::tempdir().expect("tempdir");
+            let enabled = is_llm_extraction_enabled(temp.path()).expect("check");
+            assert!(!enabled);
+        });
+    }
+
+    #[test]
+    fn auto_detect_prefers_anthropic_when_key_present() {
+        with_env_var("ANTHROPIC_API_KEY", Some("test-key"), || {
+            let cfg = ProviderConfig::auto_detect();
+            assert_eq!(cfg.default, "anthropic");
+            assert_eq!(cfg.extraction_provider, "anthropic");
+            assert!(matches!(
+                cfg.providers.get("anthropic"),
+                Some(Provider::Anthropic { .. })
+            ));
+        });
+    }
+
+    #[test]
+    fn anthropic_request_body_marks_system_prompt_cacheable() {
+        let body = anthropic_request_body(
+            "claude-sonnet-4-5",
+            &ProviderRequest {
+                system_prompt: "system prompt".to_string(),
+                user_prompt: "user prompt".to_string(),
+            },
+            512,
+            true,
+        );
+
+        assert_eq!(body["model"], "claude-sonnet-4-5");
+        assert_eq!(body["messages"][0]["content"], "user prompt");
+        assert_eq!(body["system"][0]["cache_control"]["type"], "ephemeral");
     }
 }
