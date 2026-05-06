@@ -16,6 +16,7 @@ use crate::provider;
 use crate::skilllet;
 use crate::textutil;
 
+mod chunked;
 mod conversation;
 mod incremental;
 mod report_render;
@@ -302,7 +303,7 @@ pub fn synthesize_observations_to_drafts_with_engine(
     }
 
     let source = observation_source_summary(&observations);
-    let material = synthesis_material(&observations, 80_000);
+    let material = chunked::synthesis_material(&observations, 80_000);
     let extracted = match engine {
         "local" => extract::extract_high_value_text_to_drafts(
             project_root,
@@ -313,13 +314,11 @@ pub fn synthesize_observations_to_drafts_with_engine(
             true,
             DAILY_CANDIDATE_LIMIT,
         )?,
-        "llm" => extract::extract_high_value_text_to_drafts(
+        "llm" => chunked::extract_llm_chunks_to_report(
             project_root,
-            &material,
+            &observations,
             targets.clone(),
             &source,
-            None,
-            true,
             DAILY_CANDIDATE_LIMIT,
         )?,
         "claude-code" | "codex" => {
@@ -450,7 +449,7 @@ fn prefilter_agent_synthesis_material(
     targets: Vec<String>,
     source: &str,
 ) -> Result<(extract::ExtractReport, String)> {
-    let raw_material = synthesis_material(observations, 80_000);
+    let raw_material = chunked::synthesis_material(observations, 80_000);
     let prefiltered = extract::extract_high_value_text_to_drafts(
         project_root,
         &raw_material,
@@ -909,33 +908,6 @@ pub fn discover_local_conversation_files(home: &Path) -> Result<Vec<Conversation
     );
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
-}
-
-fn synthesis_material(observations: &[ObservationRecord], max_chars: usize) -> String {
-    let mut sorted = observations.to_vec();
-    sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    let mut out = String::new();
-    for observation in sorted {
-        if out.len() >= max_chars {
-            break;
-        }
-        let mut body = observation.body.replace('\0', "");
-        if body.len() > 4_000 {
-            body.truncate(4_000);
-        }
-        out.push_str("\n---\n");
-        out.push_str(&format!(
-            "source: {}\nagent: {}\nevidence: {}\ntext:\n{}\n",
-            observation.source_kind,
-            observation.agent.as_deref().unwrap_or("unknown"),
-            observation.evidence,
-            body
-        ));
-    }
-    if out.len() > max_chars {
-        out.truncate(max_chars);
-    }
-    out
 }
 
 fn observation_source_summary(observations: &[ObservationRecord]) -> String {

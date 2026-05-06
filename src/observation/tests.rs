@@ -1,3 +1,4 @@
+use super::chunked::synthesis_material;
 use super::*;
 use crate::draft;
 use std::fs;
