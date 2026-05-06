@@ -223,8 +223,11 @@ fn build_compiles_hook_skilllets_into_claude_settings_local() {
         "hook:matcher:git commit".to_string(),
         "workflow".to_string(),
     ];
-    fs::write(&path, serde_yaml::to_string(&record).expect("serialize skilllet"))
-        .expect("rewrite skilllet yaml");
+    fs::write(
+        &path,
+        serde_yaml::to_string(&record).expect("serialize skilllet"),
+    )
+    .expect("rewrite skilllet yaml");
 
     sync_project(temp.path()).expect("sync");
 

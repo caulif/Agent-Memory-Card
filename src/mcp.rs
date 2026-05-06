@@ -317,14 +317,18 @@ mod tests {
         .expect("approve")
         .expect("response");
 
-        assert_eq!(response["result"]["structuredContent"]["approved"], "project:test");
-        assert!(temp
-            .path()
-            .join(".agent-kernel")
-            .join("skilllets")
-            .join("project")
-            .join("test.yml")
-            .exists());
+        assert_eq!(
+            response["result"]["structuredContent"]["approved"],
+            "project:test"
+        );
+        assert!(
+            temp.path()
+                .join(".agent-kernel")
+                .join("skilllets")
+                .join("project")
+                .join("test.yml")
+                .exists()
+        );
     }
 
     #[test]

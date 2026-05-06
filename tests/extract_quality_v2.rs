@@ -106,6 +106,14 @@ fn local_extract_persists_classification_metadata_on_draft() {
             .tags
             .contains(&"domain:governance".to_string())
     );
+    let evidence_span = drafts[0]
+        .extraction
+        .evidence_span
+        .as_ref()
+        .expect("structured evidence span");
+    assert_eq!(evidence_span.role, "user");
+    assert!(evidence_span.quote.contains("AGENTS.md"));
+    assert!(!drafts[0].body.contains("observation:"));
 }
 
 #[test]
@@ -245,7 +253,7 @@ fn dry_run_previews_include_classification_and_tags() {
 }
 
 #[test]
-fn dry_run_duplicate_existing_skilllet_returns_merge_suggestion() {
+fn dry_run_duplicate_existing_skilllet_is_suppressed_as_noop() {
     let temp = tempfile::tempdir().expect("tempdir");
     agent_kernel::skilllet::add_skilllet(
         temp.path(),
@@ -270,16 +278,206 @@ fn dry_run_duplicate_existing_skilllet_returns_merge_suggestion() {
     )
     .expect("extract");
 
-    assert_eq!(report.candidates.len(), 1);
-    let action = report.candidates[0]
-        .suggested_action
-        .as_ref()
-        .expect("merge suggestion");
-    assert_eq!(action.action, "merge_into_existing");
-    assert_eq!(action.record_id.as_deref(), Some("project:prefer-bun"));
-    assert_eq!(action.target_record.as_deref(), Some("project:prefer-bun"));
-    assert_eq!(action.route, "always_on_rule");
-    assert_eq!(action.compile_enabled, Some(true));
+    assert!(
+        report.candidates.is_empty(),
+        "existing equivalent Skilllets should not reappear as candidate noise"
+    );
+    assert!(
+        report
+            .skipped
+            .iter()
+            .any(|item| item.contains("duplicate-existing")),
+        "duplicate suppression should be visible in skipped reasons: {:#?}",
+        report.skipped
+    );
+}
+
+#[test]
+fn dry_run_filters_internal_evidence_leaks_from_candidate_text() {
+    let temp = tempfile::tempdir().expect("tempdir");
+
+    let report = extract::extract_to_drafts(
+        temp.path(),
+        Some(
+            "evidence: 81 observations: observation:obs:claude-code:sha256:015e2, observation:obs:claude-code:sha256:053a9 - Do NOT mention teammate proposals."
+                .to_string(),
+        ),
+        None,
+        vec!["codex".to_string()],
+        Some("local".to_string()),
+        true,
+    )
+    .expect("extract");
+
+    assert!(
+        report.candidates.is_empty(),
+        "internal observation ids and evidence metadata must not enter candidate inbox: {:#?}",
+        report.candidates
+    );
+    assert!(
+        report
+            .skipped
+            .iter()
+            .any(|item| item.contains("internal-leak")),
+        "quality gate should explain the internal leak rejection: {:#?}",
+        report.skipped
+    );
+}
+
+#[test]
+fn dry_run_filters_meta_discussion_questions_about_the_pipeline() {
+    let temp = tempfile::tempdir().expect("tempdir");
+
+    let report = extract::extract_to_drafts(
+        temp.path(),
+        Some(
+            "是否已经把 Skilllet 编译为 hook（例如把 git commit 前必须 cargo clippy 编译成 PreToolUse hook）？"
+                .to_string(),
+        ),
+        None,
+        vec!["codex".to_string()],
+        Some("local".to_string()),
+        true,
+    )
+    .expect("extract");
+
+    assert!(
+        report.candidates.is_empty(),
+        "questions about implementation planning should not become Skilllet candidates"
+    );
+    assert!(
+        report
+            .skipped
+            .iter()
+            .any(|item| item.contains("meta-discussion")),
+        "quality gate should explain the meta-discussion rejection: {:#?}",
+        report.skipped
+    );
+}
+
+#[test]
+fn dry_run_hides_exact_duplicate_existing_skilllets_instead_of_showing_new_candidates() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    agent_kernel::skilllet::add_skilllet(
+        temp.path(),
+        "project:prefer-bun",
+        "Prefer Bun",
+        "Use Bun for JavaScript package management and scripts.",
+        "preference",
+        "project",
+        vec!["codex".to_string()],
+    )
+    .expect("seed skilllet");
+
+    let report = extract::extract_to_drafts(
+        temp.path(),
+        Some(
+            "以后这个项目都用 Bun 管理 JavaScript 依赖和脚本，不要再建议 npm install。".to_string(),
+        ),
+        None,
+        vec!["codex".to_string()],
+        Some("local".to_string()),
+        true,
+    )
+    .expect("extract");
+
+    assert!(
+        report.candidates.is_empty(),
+        "near-exact duplicates should be treated as NOOP/evidence merge, not shown as new drafts"
+    );
+    assert!(
+        report
+            .skipped
+            .iter()
+            .any(|item| item.contains("duplicate-existing")),
+        "duplicate suppression should be visible in skipped reasons: {:#?}",
+        report.skipped
+    );
+}
+
+#[test]
+fn dry_run_splits_preference_and_exception_into_atomic_candidates() {
+    let temp = tempfile::tempdir().expect("tempdir");
+
+    let report = extract::extract_to_drafts(
+        temp.path(),
+        Some(
+            "以后 HTTP 请求默认用 Axios，但上传大文件保留 fetch，因为需要 ReadableStream streaming。"
+                .to_string(),
+        ),
+        None,
+        vec!["codex".to_string()],
+        Some("local".to_string()),
+        true,
+    )
+    .expect("extract");
+
+    assert!(
+        report.candidates.len() >= 2,
+        "preference plus exception should become separate atomic candidates: {:#?}",
+        report.candidates
+    );
+    assert!(
+        report
+            .candidates
+            .iter()
+            .any(|candidate| candidate.body.contains("Axios"))
+    );
+    assert!(
+        report
+            .candidates
+            .iter()
+            .any(|candidate| candidate.body.contains("fetch")
+                && candidate.body.contains("ReadableStream")),
+        "exception should be preserved as its own candidate: {:#?}",
+        report.candidates
+    );
+}
+
+#[test]
+fn repeated_non_dry_extractions_boost_recurring_candidate_confidence() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let text = "以后所有 Rust 改动必须运行 cargo clippy。";
+
+    for source in ["session-1", "session-2", "session-3"] {
+        extract::extract_to_drafts(
+            temp.path(),
+            Some(text.to_string()),
+            None,
+            vec!["codex".to_string()],
+            Some("local".to_string()),
+            false,
+        )
+        .unwrap_or_else(|error| panic!("extract {source}: {error}"));
+    }
+
+    let report = extract::extract_to_drafts(
+        temp.path(),
+        Some(text.to_string()),
+        None,
+        vec!["codex".to_string()],
+        Some("local".to_string()),
+        true,
+    )
+    .expect("extract dry run");
+
+    let candidate = report
+        .candidates
+        .iter()
+        .find(|candidate| candidate.body.contains("cargo clippy"))
+        .expect("recurring cargo clippy candidate");
+    assert!(
+        candidate.confidence.unwrap_or(0.0) >= 0.9,
+        "recurring candidate should be boosted: {candidate:#?}"
+    );
+    assert!(
+        candidate
+            .reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Recurring across 3 observations"),
+        "reason should explain recurrence: {candidate:#?}"
+    );
 }
 
 #[test]

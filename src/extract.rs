@@ -9,15 +9,19 @@ use crate::provider;
 use crate::skilllet;
 use crate::textutil;
 
+mod atomic;
 mod candidate_factory;
 pub mod chunk;
 pub mod classify;
 mod dedupe;
 pub(crate) mod embedding;
 pub mod gate;
+pub mod lifecycle;
 mod llm;
 mod preference;
 pub mod quality;
+mod quality_gate;
+mod recurrence;
 pub mod scoring;
 mod signals;
 
@@ -28,16 +32,18 @@ pub use preference::{
 };
 pub use quality::{QualityReport, QualityTextCase, quality_report_for_text_cases};
 
+use atomic::split_atomic_sentences;
 use candidate_factory::{
-    classify_kind, draft_id, extraction_metadata_for_chunk, high_value_prompt_candidate,
-    infer_scope, looks_like_rule, looks_like_skilllet_signal, normalize_body,
-    normalize_project_improvement_body, scored_signal_candidate, title_from_body,
+    atomic_exception_candidate, classify_kind, draft_id, extraction_metadata_for_chunk,
+    high_value_prompt_candidate, infer_scope, looks_like_rule, looks_like_skilllet_signal,
+    normalize_body, normalize_project_improvement_body, scored_signal_candidate, title_from_body,
     title_from_project_improvement,
 };
 use dedupe::dedupe_candidates;
 #[cfg(test)]
 use preference::built_in_preferences;
 use preference::{KnownPreference, load_known_preferences, normalize_known_preference};
+use quality_gate::{QualityDisposition, evaluate_candidate_quality, quality_skip_message};
 use signals::{has_explicit_memory_marker, looks_like_project_improvement_signal, split_sentences};
 
 #[derive(Debug)]
@@ -118,6 +124,8 @@ pub struct ExtractCandidatePreview {
     pub classification: Option<classify::KnowledgeClassification>,
     pub tags: Vec<String>,
     pub suggested_action: Option<candidate::ExtractionAction>,
+    pub operation: lifecycle::SkillletOperation,
+    pub quality_flags: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -205,11 +213,13 @@ fn extract_local_text_to_drafts(
     };
     let redacted = redacted_input != input;
     let preferences = load_known_preferences(project_root)?;
-    let candidates = extract_candidates_with_preferences(&redacted_input, &preferences);
+    let mut candidates = extract_candidates_with_preferences(&redacted_input, &preferences);
+    recurrence::apply_recurrence_boost(project_root, &mut candidates)?;
 
     // 对已有 skilllet 做语义比对。重复内容保留为合并建议，而不是静默丢弃。
     let existing_skilllets = skilllet::load_skilllets(project_root)?;
     let deduper = embedding::SemanticDeduper::new(0.75, 0.65);
+    let mut skipped = Vec::new();
     let candidates: Vec<(Candidate, candidate::ExtractionAction)> = candidates
         .into_iter()
         .map(|candidate| {
@@ -223,6 +233,15 @@ fn extract_local_text_to_drafts(
             };
             (candidate, action)
         })
+        .filter_map(|(candidate, action)| {
+            let decision = evaluate_candidate_quality(&candidate, &action);
+            if decision.disposition == QualityDisposition::Skip {
+                skipped.push(quality_skip_message(&draft_id(&candidate), &decision));
+                None
+            } else {
+                Some((candidate, action))
+            }
+        })
         .collect();
 
     // 应用质量评分门控：将每个候选转为 EvidenceChunk（使用原始证据文本），评分，仅保留 Candidate 级别
@@ -230,8 +249,10 @@ fn extract_local_text_to_drafts(
         Candidate,
         scoring::ExtractionScore,
         candidate::ExtractionAction,
+        quality_gate::QualityGateDecision,
     )> = Vec::new();
     for (candidate, action) in candidates {
+        let decision = evaluate_candidate_quality(&candidate, &action);
         let chunk = chunk::EvidenceChunk {
             id: candidate.title.clone(),
             text: candidate.evidence.clone(),
@@ -240,12 +261,14 @@ fn extract_local_text_to_drafts(
             source_observations: Vec::new(),
         };
         let score = scoring::score_chunk(&chunk);
-        if score.disposition == scoring::ExtractionDisposition::Candidate {
-            scored_candidates.push((candidate, score, action));
+        if score.disposition == scoring::ExtractionDisposition::Candidate
+            || candidate.matched_template.as_deref() == Some("atomic-exception")
+        {
+            scored_candidates.push((candidate, score, action, decision));
         }
     }
     // 按 confidence 降序排序，截断到 10 条
-    scored_candidates.sort_by(|(a, _, _), (b, _, _)| {
+    scored_candidates.sort_by(|(a, _, _, _), (b, _, _, _)| {
         b.confidence
             .unwrap_or(0.0)
             .partial_cmp(&a.confidence.unwrap_or(0.0))
@@ -255,7 +278,7 @@ fn extract_local_text_to_drafts(
 
     let previews = scored_candidates
         .iter()
-        .map(|(candidate, _score, action)| {
+        .map(|(candidate, _score, action, decision)| {
             let chunk = chunk::EvidenceChunk {
                 id: candidate.title.clone(),
                 text: candidate.evidence.clone(),
@@ -278,13 +301,15 @@ fn extract_local_text_to_drafts(
                 classification: Some(classification.clone()),
                 tags: classification.tags.clone(),
                 suggested_action: Some(routed_action),
+                operation: decision.operation.clone(),
+                quality_flags: decision.flags.clone(),
             }
         })
         .collect::<Vec<_>>();
     if dry_run {
         return Ok(ExtractReport {
             created: Vec::new(),
-            skipped: Vec::new(),
+            skipped,
             candidates: previews,
             dry_run,
             provider: "local".to_string(),
@@ -292,9 +317,13 @@ fn extract_local_text_to_drafts(
         });
     }
 
+    let recurrence_candidates = scored_candidates
+        .iter()
+        .map(|(candidate, _, _, _)| candidate.clone())
+        .collect::<Vec<_>>();
+    recurrence::record_candidate_recurrence(project_root, &recurrence_candidates, source)?;
     let mut created = Vec::new();
-    let mut skipped = Vec::new();
-    for (candidate, score, action) in scored_candidates {
+    for (candidate, score, action, _decision) in scored_candidates {
         let id = draft_id(&candidate);
         let chunk = chunk::EvidenceChunk {
             id: candidate.title.clone(),
@@ -447,9 +476,31 @@ fn extract_llm_text_to_drafts(
     }
 
     // 应用质量评分门控：将 LLM 输出转为 EvidenceChunk（assistant 来源），评分，仅保留 Candidate 级别
-    let mut scored_items: Vec<(&embedding::LlmKnowledgeItem, scoring::ExtractionScore)> =
-        Vec::new();
+    let mut skipped = Vec::new();
+    let mut scored_items: Vec<(
+        &embedding::LlmKnowledgeItem,
+        scoring::ExtractionScore,
+        quality_gate::QualityGateDecision,
+    )> = Vec::new();
     for item in &final_items {
+        let candidate = Candidate {
+            title: item.title.clone(),
+            body: item.body.clone(),
+            kind: item.kind.clone(),
+            scope: item.scope.clone(),
+            evidence: item.evidence.clone(),
+            confidence: Some(item.confidence),
+            reason: Some(item.reason.clone()),
+            matched_template: Some(item.matched_signal.clone()),
+        };
+        let decision = evaluate_candidate_quality(&candidate, &item.suggested_action);
+        if decision.disposition == QualityDisposition::Skip {
+            skipped.push(quality_skip_message(
+                &format!("project:{}", textutil::slug(&item.title)),
+                &decision,
+            ));
+            continue;
+        }
         let chunk = chunk::EvidenceChunk {
             id: item.title.clone(),
             text: item.body.clone(),
@@ -459,11 +510,11 @@ fn extract_llm_text_to_drafts(
         };
         let score = scoring::score_chunk(&chunk);
         if score.disposition == scoring::ExtractionDisposition::Candidate {
-            scored_items.push((item, score));
+            scored_items.push((item, score, decision));
         }
     }
     // 按 confidence 降序排序，截断到 10 条
-    scored_items.sort_by(|(a, _), (b, _)| {
+    scored_items.sort_by(|(a, _, _), (b, _, _)| {
         b.confidence
             .partial_cmp(&a.confidence)
             .unwrap_or(std::cmp::Ordering::Equal)
@@ -473,7 +524,7 @@ fn extract_llm_text_to_drafts(
     // 生成预览
     let previews = scored_items
         .iter()
-        .map(|(item, score)| {
+        .map(|(item, score, decision)| {
             let chunk = chunk::EvidenceChunk {
                 id: item.title.clone(),
                 text: item.body.clone(),
@@ -499,6 +550,8 @@ fn extract_llm_text_to_drafts(
                 classification: Some(classification.clone()),
                 tags: classification.tags.clone(),
                 suggested_action: Some(routed_action),
+                operation: decision.operation.clone(),
+                quality_flags: decision.flags.clone(),
             }
         })
         .collect::<Vec<_>>();
@@ -506,7 +559,7 @@ fn extract_llm_text_to_drafts(
     if dry_run {
         return Ok(ExtractReport {
             created: Vec::new(),
-            skipped: Vec::new(),
+            skipped,
             candidates: previews,
             dry_run,
             provider: provider_name.to_string(),
@@ -516,8 +569,7 @@ fn extract_llm_text_to_drafts(
 
     // 写入 Candidate（附带提取元数据）
     let mut created = Vec::new();
-    let mut skipped = Vec::new();
-    for (item, score) in scored_items {
+    for (item, score, _decision) in scored_items {
         let id = format!("project:{}", textutil::slug(&item.title));
         let chunk = chunk::EvidenceChunk {
             id: item.title.clone(),
@@ -625,16 +677,22 @@ fn extract_local_high_value_text_to_drafts(
     };
     let redacted = redacted_input != input;
     let preferences = load_known_preferences(project_root)?;
-    let candidates = extract_high_value_candidates_with_preferences(
+    let mut candidates = extract_high_value_candidates_with_preferences(
         &redacted_input,
         &preferences,
         max_candidates,
     );
+    recurrence::apply_recurrence_boost(project_root, &mut candidates)?;
 
     // 对已有 skilllet 做语义比对。重复内容保留为合并建议，而不是静默丢弃。
     let existing_skilllets = skilllet::load_skilllets(project_root)?;
     let deduper = embedding::SemanticDeduper::new(0.75, 0.65);
-    let candidates: Vec<(Candidate, candidate::ExtractionAction)> = candidates
+    let mut skipped = Vec::new();
+    let candidates: Vec<(
+        Candidate,
+        candidate::ExtractionAction,
+        quality_gate::QualityGateDecision,
+    )> = candidates
         .into_iter()
         .map(|candidate| {
             let action = match deduper.dedup_against_existing(&candidate.body, &existing_skilllets)
@@ -647,11 +705,20 @@ fn extract_local_high_value_text_to_drafts(
             };
             (candidate, action)
         })
+        .filter_map(|(candidate, action)| {
+            let decision = evaluate_candidate_quality(&candidate, &action);
+            if decision.disposition == QualityDisposition::Skip {
+                skipped.push(quality_skip_message(&draft_id(&candidate), &decision));
+                None
+            } else {
+                Some((candidate, action, decision))
+            }
+        })
         .collect();
 
     let previews = candidates
         .iter()
-        .map(|(candidate, action)| {
+        .map(|(candidate, action, decision)| {
             let chunk = chunk::EvidenceChunk {
                 id: candidate.title.clone(),
                 text: candidate.evidence.clone(),
@@ -674,13 +741,15 @@ fn extract_local_high_value_text_to_drafts(
                 classification: Some(classification.clone()),
                 tags: classification.tags.clone(),
                 suggested_action: Some(routed_action),
+                operation: decision.operation.clone(),
+                quality_flags: decision.flags.clone(),
             }
         })
         .collect::<Vec<_>>();
     if dry_run {
         return Ok(ExtractReport {
             created: Vec::new(),
-            skipped: Vec::new(),
+            skipped,
             candidates: previews,
             dry_run,
             provider: "local".to_string(),
@@ -688,9 +757,13 @@ fn extract_local_high_value_text_to_drafts(
         });
     }
 
+    let recurrence_candidates = candidates
+        .iter()
+        .map(|(candidate, _, _)| candidate.clone())
+        .collect::<Vec<_>>();
+    recurrence::record_candidate_recurrence(project_root, &recurrence_candidates, source)?;
     let mut created = Vec::new();
-    let mut skipped = Vec::new();
-    for (candidate, action) in candidates {
+    for (candidate, action, _decision) in candidates {
         let id = draft_id(&candidate);
         let chunk = chunk::EvidenceChunk {
             id: candidate.title.clone(),
@@ -750,16 +823,18 @@ fn extract_candidates_with_preferences(
     preferences: &[KnownPreference],
 ) -> Vec<Candidate> {
     let mut candidates = Vec::new();
-    for sentence in split_sentences(input) {
-        if let Some(candidate) = high_value_prompt_candidate(sentence) {
-            candidates.push(candidate);
-            continue;
-        }
+    for raw_sentence in split_sentences(input) {
+        for sentence in split_atomic_sentences(raw_sentence) {
+            let sentence = sentence.as_str();
+            if let Some(candidate) = high_value_prompt_candidate(sentence) {
+                candidates.push(candidate);
+                continue;
+            }
 
-        if looks_like_project_improvement_signal(sentence) {
-            let body = normalize_project_improvement_body(sentence);
-            if body.len() >= 28 && body.len() <= 360 {
-                candidates.push(Candidate {
+            if looks_like_project_improvement_signal(sentence) {
+                let body = normalize_project_improvement_body(sentence);
+                if body.len() >= 28 && body.len() <= 360 {
+                    candidates.push(Candidate {
                     title: title_from_project_improvement(&body),
                     body,
                     kind: "procedure".to_string(),
@@ -772,36 +847,41 @@ fn extract_candidates_with_preferences(
                     ),
                     matched_template: Some("project-improvement".to_string()),
                 });
+                }
+                continue;
             }
-            continue;
-        }
 
-        if let Some(candidate) = normalize_known_preference(sentence, preferences) {
-            candidates.push(candidate);
-            continue;
+            if let Some(candidate) = normalize_known_preference(sentence, preferences) {
+                candidates.push(candidate);
+                continue;
+            }
+            if let Some(candidate) = atomic_exception_candidate(sentence) {
+                candidates.push(candidate);
+                continue;
+            }
+            if let Some(candidate) = scored_signal_candidate(sentence, chunk::ChunkOrigin::User) {
+                candidates.push(candidate);
+                continue;
+            }
+            if !looks_like_rule(sentence) {
+                continue;
+            }
+            let body = normalize_body(sentence);
+            if body.len() < 12 {
+                continue;
+            }
+            let title = title_from_body(&body);
+            candidates.push(Candidate {
+                title,
+                body,
+                kind: classify_kind(sentence).to_string(),
+                scope: "project".to_string(),
+                evidence: sentence.to_string(),
+                confidence: Some(0.62),
+                reason: Some("Matched local rule-like sentence heuristic.".to_string()),
+                matched_template: None,
+            });
         }
-        if let Some(candidate) = scored_signal_candidate(sentence, chunk::ChunkOrigin::User) {
-            candidates.push(candidate);
-            continue;
-        }
-        if !looks_like_rule(sentence) {
-            continue;
-        }
-        let body = normalize_body(sentence);
-        if body.len() < 12 {
-            continue;
-        }
-        let title = title_from_body(&body);
-        candidates.push(Candidate {
-            title,
-            body,
-            kind: classify_kind(sentence).to_string(),
-            scope: "project".to_string(),
-            evidence: sentence.to_string(),
-            confidence: Some(0.62),
-            reason: Some("Matched local rule-like sentence heuristic.".to_string()),
-            matched_template: None,
-        });
     }
     dedupe_candidates(candidates)
 }
@@ -815,16 +895,18 @@ fn extract_high_value_candidates_with_preferences(
     let mut weak_counts = std::collections::BTreeMap::<String, usize>::new();
     let mut weak_candidates = std::collections::BTreeMap::<String, Candidate>::new();
 
-    for sentence in split_sentences(input) {
-        if let Some(candidate) = high_value_prompt_candidate(sentence) {
-            candidates.push(candidate);
-            continue;
-        }
+    for raw_sentence in split_sentences(input) {
+        for sentence in split_atomic_sentences(raw_sentence) {
+            let sentence = sentence.as_str();
+            if let Some(candidate) = high_value_prompt_candidate(sentence) {
+                candidates.push(candidate);
+                continue;
+            }
 
-        if looks_like_project_improvement_signal(sentence) {
-            let body = normalize_project_improvement_body(sentence);
-            if body.len() >= 28 && body.len() <= 360 {
-                candidates.push(Candidate {
+            if looks_like_project_improvement_signal(sentence) {
+                let body = normalize_project_improvement_body(sentence);
+                if body.len() >= 28 && body.len() <= 360 {
+                    candidates.push(Candidate {
                     title: title_from_project_improvement(&body),
                     body,
                     kind: "procedure".to_string(),
@@ -837,31 +919,36 @@ fn extract_high_value_candidates_with_preferences(
                     ),
                     matched_template: Some("project-improvement".to_string()),
                 });
+                }
+                continue;
             }
-            continue;
-        }
 
-        if let Some(candidate) = normalize_known_preference(sentence, preferences) {
-            candidates.push(candidate);
-            continue;
-        }
-        if let Some(candidate) = scored_signal_candidate(sentence, chunk::ChunkOrigin::User) {
-            candidates.push(candidate);
-            continue;
-        }
-        if !looks_like_rule(sentence) {
-            continue;
-        }
-        if !looks_like_skilllet_signal(sentence) {
-            continue;
-        }
-        let body = normalize_body(sentence);
-        if body.len() < 18 || body.len() > 220 {
-            continue;
-        }
-        let key = body.to_lowercase();
-        *weak_counts.entry(key.clone()).or_default() += 1;
-        weak_candidates.entry(key).or_insert_with(|| Candidate {
+            if let Some(candidate) = normalize_known_preference(sentence, preferences) {
+                candidates.push(candidate);
+                continue;
+            }
+            if let Some(candidate) = atomic_exception_candidate(sentence) {
+                candidates.push(candidate);
+                continue;
+            }
+            if let Some(candidate) = scored_signal_candidate(sentence, chunk::ChunkOrigin::User) {
+                candidates.push(candidate);
+                continue;
+            }
+            if !looks_like_rule(sentence) {
+                continue;
+            }
+            if !looks_like_skilllet_signal(sentence) {
+                continue;
+            }
+            let body = normalize_body(sentence);
+            if body.len() < 18 || body.len() > 220 {
+                continue;
+            }
+            let key = body.to_lowercase();
+            *weak_counts.entry(key.clone()).or_default() += 1;
+            weak_candidates.entry(key).or_insert_with(|| {
+                Candidate {
             title: title_from_body(&body),
             body,
             kind: classify_kind(sentence).to_string(),
@@ -873,7 +960,9 @@ fn extract_high_value_candidates_with_preferences(
                     .to_string(),
             ),
             matched_template: None,
-        });
+        }
+            });
+        }
     }
 
     for (key, count) in weak_counts {

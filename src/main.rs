@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use agent_kernel::{
-    build, candidate, catalog, config, draft, extract, hooks, index, migration, observation,
-    mcp, project_registry, provider, review, rule_test, scanner, skilllet,
+    build, candidate, catalog, config, draft, extract, hooks, index, mcp, migration, observation,
+    project_registry, provider, review, rule_test, scanner, skilllet,
 };
 use anyhow::Result;
 use clap::Parser;

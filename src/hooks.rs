@@ -137,7 +137,11 @@ pub fn render_claude_project_hook_settings(
     let root = fsutil::normalize_project_root(project_root)?;
     let path = claude_settings_local_path(&root);
     let (settings, installed_events) = render_command_hook_settings(&path, command_hooks)?;
-    Ok((path, serde_json::to_string_pretty(&settings)?, installed_events))
+    Ok((
+        path,
+        serde_json::to_string_pretty(&settings)?,
+        installed_events,
+    ))
 }
 
 pub fn claude_settings_local_path(project_root: &Path) -> PathBuf {
@@ -242,7 +246,8 @@ fn is_agent_kernel_group(group: &Value) -> bool {
 }
 
 fn group_handler_count(group: &Value) -> usize {
-    group.get("hooks")
+    group
+        .get("hooks")
         .and_then(Value::as_array)
         .map(|handlers| handlers.len())
         .unwrap_or(0)

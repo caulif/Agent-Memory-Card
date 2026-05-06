@@ -1,4 +1,4 @@
-use crate::candidate;
+use crate::candidate::{self, EvidenceSpan};
 use crate::textutil;
 
 use super::{Candidate, chunk, classify, scoring, signals};
@@ -61,6 +61,35 @@ pub(super) fn scored_signal_candidate(
     })
 }
 
+pub(super) fn atomic_exception_candidate(sentence: &str) -> Option<Candidate> {
+    let lower = sentence.to_lowercase();
+    let has_exception_marker = lower.contains("保留")
+        || lower.contains("例外")
+        || lower.contains("except")
+        || lower.contains("unless")
+        || lower.contains("keep ");
+    let has_reason = lower.contains("因为") || lower.contains("because") || lower.contains("需要");
+    if !has_exception_marker || !has_reason {
+        return None;
+    }
+
+    let body = normalize_body(sentence);
+    if body.len() < 18 || body.len() > 260 {
+        return None;
+    }
+
+    Some(Candidate {
+        title: title_from_body(&body),
+        body,
+        kind: "constraint".to_string(),
+        scope: infer_scope(sentence).to_string(),
+        evidence: sentence.to_string(),
+        confidence: Some(0.82),
+        reason: Some("Split atomic exception from a broader preference rule.".to_string()),
+        matched_template: Some("atomic-exception".to_string()),
+    })
+}
+
 fn kind_from_scored_signal(signal: &str) -> &'static str {
     match signal {
         "constraint" => "constraint",
@@ -102,6 +131,13 @@ pub(super) fn extraction_metadata_for_chunk(
         tags: classification.tags.clone(),
         classification: Some(classification),
         suggested_action: Some(candidate::ExtractionAction::new_candidate_for_route(&route)),
+        evidence_span: Some(EvidenceSpan {
+            role: chunk.origin.as_str().to_string(),
+            quote: chunk.text.clone(),
+            observation_id: chunk.source_observations.first().cloned(),
+            turn_id: None,
+            surrounding_context: Vec::new(),
+        }),
     }
 }
 
@@ -118,6 +154,7 @@ pub(super) fn looks_like_rule(sentence: &str) -> bool {
         "禁止",
         "统一",
         "默认",
+        "保留",
         "优先",
         "改用",
         "不再",
@@ -129,6 +166,7 @@ pub(super) fn looks_like_rule(sentence: &str) -> bool {
         "don't",
         "do not",
         "default to",
+        "keep ",
     ];
     markers.iter().any(|marker| lower.contains(marker))
 }

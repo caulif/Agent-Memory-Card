@@ -4,6 +4,7 @@ use agent_kernel::candidate::{
     reject_candidate,
 };
 use agent_kernel::extract::classify::KnowledgeClassification;
+use agent_kernel::extract::lifecycle::SkillletOperation;
 use agent_kernel::{draft, skilllet};
 
 fn new_candidate(id: &str) -> NewCandidate {
@@ -126,4 +127,24 @@ fn approve_candidate_preserves_extraction_provenance_on_skilllet() {
             .artifact_kind,
         "always_on_rule"
     );
+}
+
+#[test]
+fn candidate_record_persists_lifecycle_operation_from_suggested_action() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut candidate = new_candidate("project:prefer-bun-update");
+    candidate.extraction.suggested_action = Some(ExtractionAction::merge_into_existing(
+        "project:prefer-bun".to_string(),
+        0.88,
+    ));
+
+    add_candidate(temp.path(), candidate).expect("add candidate");
+
+    let candidates = load_candidates(temp.path()).expect("load candidates");
+    assert_eq!(candidates[0].operation, SkillletOperation::Update);
+    assert_eq!(
+        candidates[0].duplicate_of.as_deref(),
+        Some("project:prefer-bun")
+    );
+    assert!(candidates[0].quality_flags.is_empty());
 }

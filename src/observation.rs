@@ -392,6 +392,13 @@ pub fn synthesize_observations_to_drafts_with_engine(
                     .and_then(|action| action.record_id.clone()),
                 tags: candidate.tags.clone(),
                 suggested_action: candidate.suggested_action.clone(),
+                evidence_span: Some(candidate::EvidenceSpan {
+                    role: "user".to_string(),
+                    quote: candidate.evidence.clone(),
+                    observation_id: source_observations.first().cloned(),
+                    turn_id: None,
+                    surrounding_context: Vec::new(),
+                }),
             };
             let result = candidate::add_candidate(
                 project_root,
@@ -540,6 +547,13 @@ fn synthesize_with_agent_engine(
             similar_record: routed_action.record_id.clone(),
             tags: classification.tags,
             suggested_action: Some(routed_action),
+            evidence_span: Some(candidate::EvidenceSpan {
+                role: chunk.origin.as_str().to_string(),
+                quote: candidate.body.clone(),
+                observation_id: None,
+                turn_id: None,
+                surrounding_context: Vec::new(),
+            }),
         };
         candidate::add_candidate(
             project_root,

@@ -115,7 +115,9 @@ pub(super) fn expected_hook_artifact(
     Ok(Some((path, content)))
 }
 
-fn parse_skilllet_hook(record: &SkillletRecord) -> std::result::Result<Vec<ClaudeCommandHook>, String> {
+fn parse_skilllet_hook(
+    record: &SkillletRecord,
+) -> std::result::Result<Vec<ClaudeCommandHook>, String> {
     let command = record.body.trim();
     if command.is_empty() {
         return Err("body must contain the hook command".to_string());
@@ -159,4 +161,3 @@ fn parse_event_tag(tag: &str) -> Option<ClaudeHookEvent> {
         _ => None,
     }
 }
-

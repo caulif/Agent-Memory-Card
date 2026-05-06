@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::config;
 use crate::draft::{self, DraftUpdate, NewDraft};
 use crate::extract::classify::KnowledgeClassification;
+use crate::extract::lifecycle::SkillletOperation;
 use crate::fsutil;
 use crate::skilllet::{self, SkillletRecord, SkillletUpdate};
 use crate::textutil;
@@ -34,6 +35,20 @@ pub struct ExtractionMetadata {
     pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suggested_action: Option<ExtractionAction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_span: Option<EvidenceSpan>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EvidenceSpan {
+    pub role: String,
+    pub quote: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
+    #[serde(default)]
+    pub surrounding_context: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -184,6 +199,14 @@ pub struct CandidateRecord {
     pub source_observations: Vec<String>,
     #[serde(default)]
     pub extraction: ExtractionMetadata,
+    #[serde(default)]
+    pub operation: SkillletOperation,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duplicate_of: Option<String>,
+    #[serde(default)]
+    pub conflict_with: Vec<String>,
+    #[serde(default)]
+    pub quality_flags: Vec<String>,
     #[serde(default = "default_candidate_status")]
     pub status: CandidateStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -256,6 +279,14 @@ pub fn add_candidate(project_root: &Path, candidate: NewCandidate) -> Result<()>
         reason: candidate.reason,
         matched_template: candidate.matched_template,
         source_observations: textutil::normalize_string_list(candidate.source_observations),
+        operation: operation_from_extraction(&candidate.extraction),
+        duplicate_of: candidate
+            .extraction
+            .suggested_action
+            .as_ref()
+            .and_then(|action| action.target_record.clone()),
+        conflict_with: Vec::new(),
+        quality_flags: Vec::new(),
         extraction: candidate.extraction,
         status: CandidateStatus::Candidate,
         rejected_reason: None,
@@ -464,6 +495,16 @@ fn candidate_path(project_root: &Path, id: &str) -> Result<PathBuf> {
 }
 
 fn enrich_record_defaults(candidate: &mut CandidateRecord) {
+    if candidate.operation == SkillletOperation::Add {
+        candidate.operation = operation_from_extraction(&candidate.extraction);
+    }
+    if candidate.duplicate_of.is_none() {
+        candidate.duplicate_of = candidate
+            .extraction
+            .suggested_action
+            .as_ref()
+            .and_then(|action| action.target_record.clone());
+    }
     if !candidate.brief.trim().is_empty() && !candidate.tags.is_empty() {
         return;
     }
@@ -482,6 +523,19 @@ fn enrich_record_defaults(candidate: &mut CandidateRecord) {
     }
     if candidate.language.trim().is_empty() {
         candidate.language = metadata.language;
+    }
+}
+
+fn operation_from_extraction(extraction: &ExtractionMetadata) -> SkillletOperation {
+    let Some(action) = extraction.suggested_action.as_ref() else {
+        return SkillletOperation::Add;
+    };
+    match action.action.as_str() {
+        "merge_into_existing" => SkillletOperation::Update,
+        "supersede" => SkillletOperation::Supersede,
+        "conflict" => SkillletOperation::Conflict,
+        "noop" => SkillletOperation::Noop,
+        _ => SkillletOperation::Add,
     }
 }
 

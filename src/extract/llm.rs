@@ -25,6 +25,29 @@ pub(super) struct LlmExtractedKnowledge {
     pub is_noise: bool,
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(super) enum MemoryOperation {
+    Add,
+    Update,
+    Supersede,
+    Conflict,
+    Noop,
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub(super) struct LlmUpdateDecision {
+    pub operation: MemoryOperation,
+    #[serde(default)]
+    pub target_id: Option<String>,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub reason: String,
+}
+
 /// 知识类型枚举
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -60,9 +83,9 @@ pub(super) fn build_extraction_prompt(
     provider::ProviderRequest {
         system_prompt: r#"你是一个从 Agent 编程对话中提取可复用知识的助手。
 
-请分析以下被标记为"可能有价值"的对话段落。对每个段落：
+请分析以下被标记为"可能有价值"的对话段落。先提取 atomic facts，再判断是否值得进入记忆系统。对每个段落：
 1. 判断它是否真的包含可复用的 agent 知识（一次性的任务指令、抱怨、未解决的请求不算）
-2. 如果是，提取为结构化知识项
+2. 如果是，提取为结构化知识项；一句话包含默认规则和例外时，拆成多条 atomic facts
 3. 如果只是单次任务指令、抱怨、或噪音，标记为 is_noise: true，仍需返回该项
 
 可复用知识类型（对应 kind 字段）：
@@ -78,8 +101,18 @@ pub(super) fn build_extraction_prompt(
 - 最多 15 项
 - confidence 取值 0.0-1.0，低于 0.75 的知识项通常不值得保留
 - body 必须简洁、通用、命令式、可复用
+- rationale 必须说明 evidence_quote：引用原文中支持该结论的短句，不要输出 observation id、sha256 或内部评分字段
 - title 跟随原文语言（中文原文用中文标题，英文原文用英文标题）
-- 只提取对以后任务有用的内容，忽略所有一次性指令"#
+- 只提取对以后任务有用的内容，忽略所有一次性指令
+
+Few-shot:
+输入："以后 HTTP 默认用 Axios，但上传大文件保留 fetch，因为需要 ReadableStream。"
+输出两条 atomic facts：
+1. Use Axios for default HTTP requests. evidence_quote="HTTP 默认用 Axios"
+2. Keep fetch for large uploads that require ReadableStream. evidence_quote="上传大文件保留 fetch"
+
+Update phase schema:
+后续会把每条 atomic fact 与相似 Skilllet 比较，并要求你只返回 ADD / UPDATE / SUPERSEDE / CONFLICT / NOOP 之一。"#
             .to_string(),
         user_prompt: format!("待分析的对话段落：\n{material}"),
     }
@@ -150,6 +183,62 @@ pub(super) fn parse_extraction_output(
         }
     }
 
+    Err(ParseError::InvalidJson(trimmed.chars().take(200).collect()))
+}
+
+#[allow(dead_code)]
+pub(super) fn build_update_decision_prompt(
+    atomic_fact: &str,
+    similar_skilllets: &[(String, String)],
+) -> provider::ProviderRequest {
+    let mut similar = String::new();
+    for (id, body) in similar_skilllets {
+        similar.push_str(&format!("- id: {id}\n  body: {body}\n"));
+    }
+    provider::ProviderRequest {
+        system_prompt:
+            r#"You decide how a newly extracted atomic memory should affect existing Skilllets.
+
+Return only JSON with:
+- operation: add | update | supersede | conflict | noop
+- target_id: existing Skilllet id when applicable
+- body: revised reusable rule when applicable
+- reason: concise explanation
+
+Use add for genuinely new durable knowledge.
+Use update for clearer wording of the same rule.
+Use supersede when the user reverses or replaces an old rule.
+Use conflict when both rules may be valid but need human review.
+Use noop when the fact is duplicate, low value, or already implied."#
+                .to_string(),
+        user_prompt: format!(
+            "Atomic fact:\n{atomic_fact}\n\nSimilar Skilllets:\n{}",
+            if similar.is_empty() {
+                "(none)".to_string()
+            } else {
+                similar
+            }
+        ),
+    }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub(super) fn parse_update_decision_output(output: &str) -> Result<LlmUpdateDecision, ParseError> {
+    let trimmed = output.trim();
+    if trimmed.is_empty() {
+        return Err(ParseError::EmptyOutput);
+    }
+    if let Ok(decision) = serde_json::from_str::<LlmUpdateDecision>(trimmed) {
+        return Ok(decision);
+    }
+    if let Some(start) = trimmed.find('{')
+        && let Some(end) = trimmed.rfind('}')
+    {
+        let json_slice = &trimmed[start..=end];
+        if let Ok(decision) = serde_json::from_str::<LlmUpdateDecision>(json_slice) {
+            return Ok(decision);
+        }
+    }
     Err(ParseError::InvalidJson(trimmed.chars().take(200).collect()))
 }
 
@@ -347,6 +436,24 @@ That concludes the extraction."#;
         assert!(prompt.user_prompt.contains("Always use Bun"));
         assert!(prompt.user_prompt.contains("偏好声明"));
         assert!(prompt.system_prompt.contains("可复用知识类型"));
+        assert!(prompt.system_prompt.contains("atomic facts"));
+        assert!(prompt.system_prompt.contains("evidence_quote"));
+    }
+
+    #[test]
+    fn parse_update_decision_output_supports_five_operations() {
+        let output = r#"{
+            "operation": "supersede",
+            "target_id": "project:prefer-bun",
+            "body": "Prefer pnpm for workspace package management.",
+            "reason": "User reversed the previous package manager preference."
+        }"#;
+
+        let decision = parse_update_decision_output(output).expect("parse decision");
+
+        assert_eq!(decision.operation, MemoryOperation::Supersede);
+        assert_eq!(decision.target_id.as_deref(), Some("project:prefer-bun"));
+        assert!(decision.reason.contains("reversed"));
     }
 
     #[test]
