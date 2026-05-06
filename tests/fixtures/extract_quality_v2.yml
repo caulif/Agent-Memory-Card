@@ -170,3 +170,39 @@ cases:
     expected_hardness: low
     expected_terms: []
     expected_tags: []
+  - id: durable-preference-ky
+    origin: user
+    input: "以后前端 HTTP 请求默认用 ky，不要再建议裸 fetch。"
+    expected: candidate
+    expected_signal: preference
+    expected_artifact_kind: always_on_rule
+    expected_hardness: low
+    expected_terms: ["ky", "HTTP"]
+    expected_tags: ["shape:preference", "domain:frontend", "target:agents-md", "hardness:low"]
+  - id: durable-preference-pnpm
+    origin: user
+    input: "以后 Node workspace 包管理统一走 pnpm，不要再建议 npm install。"
+    expected: candidate
+    expected_signal: preference
+    expected_artifact_kind: always_on_rule
+    expected_hardness: low
+    expected_terms: ["pnpm", "Node"]
+    expected_tags: ["shape:preference", "domain:build", "target:agents-md", "hardness:low"]
+  - id: unresolved-l4-request-noise
+    origin: user
+    input: "能不能把提炼系统改成 L4？先给我一个很大的方案。"
+    expected: noise
+    expected_signal: ""
+    expected_artifact_kind: reject
+    expected_hardness: low
+    expected_terms: []
+    expected_tags: []
+  - id: raw-internal-id-noise
+    origin: assistant
+    input: "observation:obs:claude-code:sha256:abc123 score: 0.94 matched_signal: preference"
+    expected: noise
+    expected_signal: ""
+    expected_artifact_kind: reject
+    expected_hardness: low
+    expected_terms: []
+    expected_tags: []

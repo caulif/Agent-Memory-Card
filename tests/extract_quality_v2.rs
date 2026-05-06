@@ -52,7 +52,7 @@ fn high_quality_extraction_v2_meets_precision_gate() {
         "noise entered candidate set: {report:#?}"
     );
     assert!(
-        report.visible_candidates <= 12,
+        report.visible_candidates <= 16,
         "expanded corpus should still produce a compact positive set: {report:#?}"
     );
 }
