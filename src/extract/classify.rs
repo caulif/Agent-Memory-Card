@@ -236,6 +236,8 @@ fn structured_tags(
     }
     if lower.contains("bun")
         || lower.contains("npm")
+        || lower.contains("pnpm")
+        || lower.contains("yarn")
         || lower.contains("package")
         || lower.contains("脚本")
     {
@@ -392,15 +394,23 @@ fn looks_like_preference(lower: &str) -> bool {
     let durable = lower.contains("以后")
         || lower.contains("always")
         || lower.contains("prefer")
+        || lower.starts_with("use ")
+        || lower.contains(" use ")
         || lower.contains("默认")
         || lower.contains("统一")
         || lower.contains("优先");
     let tool = lower.contains("bun")
         || lower.contains("axios")
+        || lower.contains("ky")
+        || lower.contains("ofetch")
         || lower.contains("vitest")
         || lower.contains("playwright")
         || lower.contains("cargo")
         || lower.contains("npm")
+        || lower.contains("pnpm")
+        || lower.contains("yarn")
+        || lower.contains("http")
+        || lower.contains("请求")
         || lower.contains("fetch");
     durable && tool
 }

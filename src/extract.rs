@@ -21,6 +21,7 @@ mod llm;
 mod preference;
 pub mod quality;
 mod quality_gate;
+mod ranking;
 mod recurrence;
 pub mod scoring;
 mod signals;
@@ -185,7 +186,6 @@ pub fn extract_text_to_drafts(
         return extract_local_text_to_drafts(project_root, input, targets, source, dry_run);
     }
 
-    // LLM 引擎路径
     extract_llm_text_to_drafts(
         project_root,
         input,
@@ -267,14 +267,20 @@ fn extract_local_text_to_drafts(
             scored_candidates.push((candidate, score, action, decision));
         }
     }
-    // 按 confidence 降序排序，截断到 10 条
-    scored_candidates.sort_by(|(a, _, _, _), (b, _, _, _)| {
-        b.confidence
-            .unwrap_or(0.0)
-            .partial_cmp(&a.confidence.unwrap_or(0.0))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    scored_candidates.truncate(10);
+    let selected = ranking::select_diverse_candidates(
+        &scored_candidates,
+        10,
+        |(candidate, _, _, _)| candidate.confidence.unwrap_or(0.0),
+        |(candidate, _, _, _)| ranking::candidate_cluster_key(candidate),
+    );
+    let mut slots = scored_candidates
+        .into_iter()
+        .map(Some)
+        .collect::<Vec<Option<_>>>();
+    let scored_candidates = selected
+        .into_iter()
+        .filter_map(|index| slots.get_mut(index).and_then(Option::take))
+        .collect::<Vec<_>>();
 
     let previews = scored_candidates
         .iter()
@@ -389,7 +395,6 @@ fn extract_llm_text_to_drafts(
     };
     let redacted = redacted_input != input;
 
-    // 第一层+第二层：过滤噪音，检测候选段落
     let paragraphs = signals::split_into_paragraphs(&redacted_input);
     let candidate_paragraphs = signals::detect_candidate_paragraphs(&paragraphs);
 
@@ -404,7 +409,6 @@ fn extract_llm_text_to_drafts(
         });
     }
 
-    // 第三层：LLM 提取（分批）
     let max_per_batch = provider_cfg.max_candidates_per_batch;
     let min_confidence = provider_cfg.min_confidence;
     let mut all_knowledge = Vec::new();
@@ -426,10 +430,8 @@ fn extract_llm_text_to_drafts(
         }
     }
 
-    // 筛选可用知识
     let usable = llm::filter_usable_knowledge(all_knowledge, min_confidence);
 
-    // 第四层：语义去重
     let skilllets = skilllet::load_skilllets(project_root)?;
     let deduper = embedding::SemanticDeduper::new(0.75, 0.65);
     let mut deduped_items: Vec<embedding::LlmKnowledgeItem> = Vec::new();
@@ -437,13 +439,20 @@ fn extract_llm_text_to_drafts(
         if item.is_noise {
             continue;
         }
-        let suggested_action = match deduper.dedup_against_existing(&item.body, &skilllets) {
+        let mut suggested_action = match deduper.dedup_against_existing(&item.body, &skilllets) {
             embedding::DedupResult::Duplicate {
                 similar_id,
                 similarity,
             } => candidate::ExtractionAction::merge_into_existing(similar_id, similarity),
             embedding::DedupResult::Unique => candidate::ExtractionAction::new_candidate(),
         };
+        let similar_skilllets = deduper.top_similar_skilllets(&item.body, &skilllets, 5, 0.35);
+        if !similar_skilllets.is_empty()
+            && let Ok(decision) =
+                llm::run_update_decision(project_root, &item.body, &similar_skilllets)
+        {
+            suggested_action = llm::action_from_update_decision(&decision, suggested_action);
+        }
         deduped_items.push(embedding::LlmKnowledgeItem {
             title: item.title.clone(),
             body: item.body.clone(),
@@ -461,19 +470,11 @@ fn extract_llm_text_to_drafts(
     // 同批次去重
     let retained = deduper.dedup_within_batch(&mut deduped_items);
 
-    // 按 confidence 排序
-    let mut final_items: Vec<&embedding::LlmKnowledgeItem> =
+    let final_items: Vec<&embedding::LlmKnowledgeItem> =
         retained.iter().map(|&i| &deduped_items[i]).collect();
-    final_items.sort_by(|a, b| {
-        b.confidence
-            .partial_cmp(&a.confidence)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
 
     // 应用 max_candidates 限制
-    if let Some(limit) = max_candidates {
-        final_items.truncate(limit);
-    }
+    let final_limit = max_candidates.unwrap_or(usize::MAX);
 
     // 应用质量评分门控：将 LLM 输出转为 EvidenceChunk（assistant 来源），评分，仅保留 Candidate 级别
     let mut skipped = Vec::new();
@@ -482,7 +483,7 @@ fn extract_llm_text_to_drafts(
         scoring::ExtractionScore,
         quality_gate::QualityGateDecision,
     )> = Vec::new();
-    for item in &final_items {
+    for item in final_items {
         let candidate = Candidate {
             title: item.title.clone(),
             body: item.body.clone(),
@@ -513,13 +514,20 @@ fn extract_llm_text_to_drafts(
             scored_items.push((item, score, decision));
         }
     }
-    // 按 confidence 降序排序，截断到 10 条
-    scored_items.sort_by(|(a, _, _), (b, _, _)| {
-        b.confidence
-            .partial_cmp(&a.confidence)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    scored_items.truncate(10);
+    let selected = ranking::select_diverse_candidates(
+        &scored_items,
+        10.min(final_limit),
+        |(item, _, _)| item.confidence,
+        |(item, _, _)| format!("{}:{}", item.kind, ranking::body_domain(&item.body)),
+    );
+    let mut slots = scored_items
+        .into_iter()
+        .map(Some)
+        .collect::<Vec<Option<_>>>();
+    let scored_items = selected
+        .into_iter()
+        .filter_map(|index| slots.get_mut(index).and_then(Option::take))
+        .collect::<Vec<_>>();
 
     // 生成预览
     let previews = scored_items
@@ -974,16 +982,17 @@ fn extract_high_value_candidates_with_preferences(
         }
     }
 
-    let mut deduped = dedupe_candidates(candidates);
-    deduped.sort_by(|a, b| {
-        let left = a.confidence.unwrap_or(0.0);
-        let right = b.confidence.unwrap_or(0.0);
-        right
-            .total_cmp(&left)
-            .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
-    });
-    deduped.truncate(max_candidates);
-    deduped
+    let deduped = dedupe_candidates(candidates);
+    let selected = ranking::select_diverse_candidates(
+        &deduped,
+        max_candidates,
+        |candidate| candidate.confidence.unwrap_or(0.0),
+        ranking::candidate_cluster_key,
+    );
+    selected
+        .into_iter()
+        .filter_map(|index| deduped.get(index).cloned())
+        .collect()
 }
 
 #[cfg(test)]

@@ -21,6 +21,8 @@ pub struct RecurrenceIndex {
 pub struct RecurringSignal {
     pub signature: String,
     #[serde(default)]
+    pub normalized: String,
+    #[serde(default)]
     pub occurrences: Vec<RecurringOccurrence>,
     pub last_seen: String,
 }
@@ -37,12 +39,7 @@ pub(super) fn apply_recurrence_boost(
 ) -> Result<()> {
     let index = load_recurrence_index(project_root)?;
     for candidate in candidates {
-        let signature = candidate_signature(candidate);
-        let Some(signal) = index
-            .signals
-            .iter()
-            .find(|signal| signal.signature == signature)
-        else {
+        let Some(signal) = find_recurring_signal(&index, candidate) else {
             continue;
         };
         let count = signal.occurrences.len();
@@ -73,12 +70,14 @@ pub(super) fn record_candidate_recurrence(
     let now = Utc::now().to_rfc3339();
     for candidate in candidates {
         let signature = candidate_signature(candidate);
-        if let Some(signal) = index
-            .signals
-            .iter_mut()
-            .find(|signal| signal.signature == signature)
+        let normalized = normalized_candidate_text(candidate);
+        if let Some(signal) = find_recurring_signal_index(&index, candidate)
+            .and_then(|signal_index| index.signals.get_mut(signal_index))
         {
             signal.last_seen = now.clone();
+            if signal.normalized.trim().is_empty() {
+                signal.normalized = normalized;
+            }
             signal.occurrences.push(RecurringOccurrence {
                 source: source.to_string(),
                 seen_at: now.clone(),
@@ -86,6 +85,7 @@ pub(super) fn record_candidate_recurrence(
         } else {
             index.signals.push(RecurringSignal {
                 signature,
+                normalized,
                 occurrences: vec![RecurringOccurrence {
                     source: source.to_string(),
                     seen_at: now.clone(),
@@ -118,9 +118,64 @@ fn recurrence_index_path(project_root: &Path) -> std::path::PathBuf {
 }
 
 fn candidate_signature(candidate: &Candidate) -> String {
-    let normalized = format!("{} {}", candidate.kind, candidate.body.to_lowercase());
+    let normalized = normalized_candidate_text(candidate);
     format!(
         "sig:{}",
         textutil::slug(&fsutil::sha256_text(&normalized)[..16])
     )
+}
+
+fn find_recurring_signal<'a>(
+    index: &'a RecurrenceIndex,
+    candidate: &Candidate,
+) -> Option<&'a RecurringSignal> {
+    find_recurring_signal_index(index, candidate).and_then(|i| index.signals.get(i))
+}
+
+fn find_recurring_signal_index(index: &RecurrenceIndex, candidate: &Candidate) -> Option<usize> {
+    let signature = candidate_signature(candidate);
+    let normalized = normalized_candidate_text(candidate);
+    index.signals.iter().position(|signal| {
+        signal.signature == signature
+            || (!signal.normalized.trim().is_empty()
+                && textutil::jaccard_similarity(&normalized, &signal.normalized) >= 0.50)
+    })
+}
+
+fn normalized_candidate_text(candidate: &Candidate) -> String {
+    let lower = format!("{} {}", candidate.kind, candidate.body.to_lowercase());
+    let replacements = [
+        ("javascript", " js "),
+        ("typescript", " ts "),
+        ("package management", " package-manager "),
+        ("package manager", " package-manager "),
+        ("包管理", " package-manager "),
+        ("依赖和脚本", " dependencies scripts "),
+        ("依赖", " dependencies "),
+        ("脚本", " scripts "),
+        ("统一走", " use "),
+        ("统一用", " use "),
+        ("默认用", " use "),
+        ("使用", " use "),
+        ("采用", " use "),
+        ("不要再建议", " avoid "),
+        ("不要", " avoid "),
+        ("禁止", " avoid "),
+        ("必须", " must "),
+        ("以后", " "),
+        ("这个项目", " "),
+        ("the project", " "),
+        ("this project", " "),
+        ("for", " "),
+        ("and", " "),
+        ("the", " "),
+    ];
+    let mut normalized = lower;
+    for (from, to) in replacements {
+        normalized = normalized.replace(from, to);
+    }
+    textutil::tokenize(&normalized)
+        .into_iter()
+        .collect::<Vec<_>>()
+        .join(" ")
 }

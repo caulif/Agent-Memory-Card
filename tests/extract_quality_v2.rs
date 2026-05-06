@@ -435,6 +435,49 @@ fn dry_run_splits_preference_and_exception_into_atomic_candidates() {
 }
 
 #[test]
+fn dry_run_splits_additive_multilingual_atomic_rules() {
+    let temp = tempfile::tempdir().expect("tempdir");
+
+    let report = extract::extract_to_drafts(
+        temp.path(),
+        Some(
+            "以后前端请求默认用 ky，同时 Node 包管理统一走 pnpm，另外只有上传大文件时保留 fetch。"
+                .to_string(),
+        ),
+        None,
+        vec!["codex".to_string()],
+        Some("local".to_string()),
+        true,
+    )
+    .expect("extract");
+
+    assert!(
+        report
+            .candidates
+            .iter()
+            .any(|candidate| candidate.body.contains("ky")),
+        "ky rule should survive multilingual quality gates: {:#?}",
+        report.candidates
+    );
+    assert!(
+        report
+            .candidates
+            .iter()
+            .any(|candidate| candidate.body.contains("pnpm")),
+        "pnpm additive rule should become its own atomic candidate: {:#?}",
+        report.candidates
+    );
+    assert!(
+        report
+            .candidates
+            .iter()
+            .any(|candidate| candidate.body.contains("fetch")),
+        "fetch exception should remain visible: {:#?}",
+        report.candidates
+    );
+}
+
+#[test]
 fn repeated_non_dry_extractions_boost_recurring_candidate_confidence() {
     let temp = tempfile::tempdir().expect("tempdir");
     let text = "以后所有 Rust 改动必须运行 cargo clippy。";
@@ -477,6 +520,51 @@ fn repeated_non_dry_extractions_boost_recurring_candidate_confidence() {
             .unwrap_or_default()
             .contains("Recurring across 3 observations"),
         "reason should explain recurrence: {candidate:#?}"
+    );
+}
+
+#[test]
+fn recurrence_boost_merges_wording_variants() {
+    let temp = tempfile::tempdir().expect("tempdir");
+
+    for text in [
+        "以后这个项目都用 Bun 管理 JavaScript 依赖和脚本，不要再建议 npm install。",
+        "Use Bun for JS package management and scripts.",
+        "以后统一走 Bun 做 JS 包管理和脚本运行。",
+    ] {
+        extract::extract_to_drafts(
+            temp.path(),
+            Some(text.to_string()),
+            None,
+            vec!["codex".to_string()],
+            Some("local".to_string()),
+            false,
+        )
+        .expect("record recurrence");
+    }
+
+    let report = extract::extract_to_drafts(
+        temp.path(),
+        Some("Use Bun for JavaScript package management and scripts.".to_string()),
+        None,
+        vec!["codex".to_string()],
+        Some("local".to_string()),
+        true,
+    )
+    .expect("extract dry run");
+
+    let candidate = report
+        .candidates
+        .iter()
+        .find(|candidate| candidate.body.contains("Bun"))
+        .expect("recurring Bun candidate");
+    assert!(
+        candidate
+            .reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Recurring across 3 observations"),
+        "wording variants should share recurrence signature: {candidate:#?}"
     );
 }
 

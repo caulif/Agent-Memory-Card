@@ -69,12 +69,14 @@ pub(super) fn atomic_exception_candidate(sentence: &str) -> Option<Candidate> {
         || lower.contains("unless")
         || lower.contains("keep ");
     let has_reason = lower.contains("因为") || lower.contains("because") || lower.contains("需要");
-    if !has_exception_marker || !has_reason {
+    let has_specific_exception_subject =
+        lower.contains("fetch") || lower.contains("readablestream") || lower.contains("stream");
+    if !has_exception_marker || (!has_reason && !has_specific_exception_subject) {
         return None;
     }
 
     let body = normalize_body(sentence);
-    if body.len() < 18 || body.len() > 260 {
+    if body.len() < 12 || body.len() > 260 {
         return None;
     }
 
@@ -212,6 +214,11 @@ pub(super) fn looks_like_skilllet_signal(sentence: &str) -> bool {
         "codex",
         "cursor",
         "bun",
+        "pnpm",
+        "ky",
+        "ofetch",
+        "axios",
+        "fetch",
         "cargo",
         "rust",
         "typescript",

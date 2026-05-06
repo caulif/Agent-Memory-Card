@@ -54,6 +54,16 @@ pub(crate) fn evaluate_candidate_quality(
         );
     }
 
+    if action.action == "noop" {
+        return skip(
+            SkillletOperation::Noop,
+            "llm-noop",
+            action.reason.as_deref().unwrap_or(
+                "LLM update phase marked this candidate as already covered or low value.",
+            ),
+        );
+    }
+
     if !is_known_high_value_template(candidate) && !looks_self_contained_rule(&candidate.body) {
         return skip(
             SkillletOperation::Noop,
@@ -138,10 +148,46 @@ fn looks_self_contained_rule(body: &str) -> bool {
     }
     let lower = trimmed.to_lowercase();
     let rule_markers = [
-        "use ", "prefer ", "always ", "never ", "must ", "do not ", "don't ", "默认", "统一",
-        "优先", "必须", "不要", "禁止", "保留", "先",
+        "use ",
+        "prefer ",
+        "always ",
+        "never ",
+        "must ",
+        "do not ",
+        "don't ",
+        "keep ",
+        "avoid ",
+        "default to ",
+        "默认",
+        "统一",
+        "优先",
+        "必须",
+        "不要",
+        "禁止",
+        "保留",
+        "先",
+        "走",
+        "用",
+        "使用",
+        "采用",
+        "选用",
+        "改用",
+        "替代",
+        "而不是",
+        "仅当",
+        "只有",
+        "如果",
     ];
-    rule_markers.iter().any(|marker| lower.contains(marker))
+    if rule_markers.iter().any(|marker| lower.contains(marker)) {
+        return true;
+    }
+
+    let tool_markers = [
+        "ky", "pnpm", "bun", "axios", "ofetch", "biome", "oxlint", "vitest", "tanstack", "turbo",
+    ];
+    let durable_markers = ["以后", "默认", "统一", "prefer", "use", "must", "always"];
+    tool_markers.iter().any(|tool| lower.contains(tool))
+        && durable_markers.iter().any(|marker| lower.contains(marker))
 }
 
 fn operation_from_action(action: &ExtractionAction) -> SkillletOperation {

@@ -56,6 +56,8 @@ pub enum Provider {
         api_key_env: String,
         #[serde(default = "default_cache_system_prompt")]
         cache_system_prompt: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cache_ttl: Option<String>,
     },
 }
 
@@ -116,6 +118,7 @@ impl ProviderConfig {
                     model: "claude-sonnet-4-5".to_string(),
                     api_key_env: "ANTHROPIC_API_KEY".to_string(),
                     cache_system_prompt: true,
+                    cache_ttl: Some("1h".to_string()),
                 },
             );
             cfg.default = "anthropic".to_string();
@@ -226,11 +229,18 @@ pub fn call_provider(
             model,
             api_key_env,
             cache_system_prompt,
+            cache_ttl,
         } => {
             let api_key = std::env::var(api_key_env)
                 .with_context(|| format!("missing Anthropic API key in {api_key_env}"))?;
-            let body = anthropic_request_body(model, request, max_tokens, *cache_system_prompt);
-            call_anthropic_api(&api_key, &body)
+            let body = anthropic_request_body(
+                model,
+                request,
+                max_tokens,
+                *cache_system_prompt,
+                cache_ttl.as_deref(),
+            );
+            call_anthropic_api(&api_key, &body, cache_ttl.as_deref())
         }
     }
 }
@@ -258,15 +268,20 @@ fn call_openai_compatible_api(
         .ok_or_else(|| anyhow!("provider returned no message content"))
 }
 
-fn call_anthropic_api(api_key: &str, body: &serde_json::Value) -> Result<String> {
+fn call_anthropic_api(
+    api_key: &str,
+    body: &serde_json::Value,
+    cache_ttl: Option<&str>,
+) -> Result<String> {
     let client = http_client()?;
-    let json = send_json(
-        client
-            .post("https://api.anthropic.com/v1/messages")
-            .header("x-api-key", api_key)
-            .header("anthropic-version", "2023-06-01")
-            .json(body),
-    )?;
+    let mut builder = client
+        .post("https://api.anthropic.com/v1/messages")
+        .header("x-api-key", api_key)
+        .header("anthropic-version", "2023-06-01");
+    if cache_ttl == Some("1h") {
+        builder = builder.header("anthropic-beta", "extended-cache-ttl-2025-04-11");
+    }
+    let json = send_json(builder.json(body))?;
 
     json.get("content")
         .and_then(|v| v.as_array())
@@ -288,12 +303,17 @@ fn anthropic_request_body(
     request: &ProviderRequest,
     max_tokens: usize,
     cache_system_prompt: bool,
+    cache_ttl: Option<&str>,
 ) -> serde_json::Value {
     let system = if cache_system_prompt {
+        let cache_control = match cache_ttl {
+            Some(ttl) => serde_json::json!({ "type": "ephemeral", "ttl": ttl }),
+            None => serde_json::json!({ "type": "ephemeral" }),
+        };
         serde_json::json!([{
             "type": "text",
             "text": request.system_prompt,
-            "cache_control": { "type": "ephemeral" }
+            "cache_control": cache_control
         }])
     } else {
         serde_json::json!(request.system_prompt)
@@ -449,10 +469,12 @@ mod tests {
             },
             512,
             true,
+            Some("1h"),
         );
 
         assert_eq!(body["model"], "claude-sonnet-4-5");
         assert_eq!(body["messages"][0]["content"], "user prompt");
         assert_eq!(body["system"][0]["cache_control"]["type"], "ephemeral");
+        assert_eq!(body["system"][0]["cache_control"]["ttl"], "1h");
     }
 }

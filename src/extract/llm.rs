@@ -2,6 +2,7 @@
 //!
 //! 负责 Prompt 构建和 JSON 解析，实际的 HTTP 调用通过 provider 模块。
 
+use crate::candidate;
 use crate::provider;
 
 use super::signals::{CandidateParagraph, SignalType};
@@ -25,7 +26,6 @@ pub(super) struct LlmExtractedKnowledge {
     pub is_noise: bool,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(super) enum MemoryOperation {
@@ -36,7 +36,6 @@ pub(super) enum MemoryOperation {
     Noop,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub(super) struct LlmUpdateDecision {
     pub operation: MemoryOperation,
@@ -186,7 +185,6 @@ pub(super) fn parse_extraction_output(
     Err(ParseError::InvalidJson(trimmed.chars().take(200).collect()))
 }
 
-#[allow(dead_code)]
 pub(super) fn build_update_decision_prompt(
     atomic_fact: &str,
     similar_skilllets: &[(String, String)],
@@ -222,7 +220,6 @@ Use noop when the fact is duplicate, low value, or already implied."#
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 pub(super) fn parse_update_decision_output(output: &str) -> Result<LlmUpdateDecision, ParseError> {
     let trimmed = output.trim();
     if trimmed.is_empty() {
@@ -240,6 +237,59 @@ pub(super) fn parse_update_decision_output(output: &str) -> Result<LlmUpdateDeci
         }
     }
     Err(ParseError::InvalidJson(trimmed.chars().take(200).collect()))
+}
+
+pub(super) fn run_update_decision(
+    project_root: &std::path::Path,
+    atomic_fact: &str,
+    similar_skilllets: &[(String, String)],
+) -> Result<LlmUpdateDecision, LlmExtractionError> {
+    let prompt = build_update_decision_prompt(atomic_fact, similar_skilllets);
+    let cfg = provider::load_or_default_provider_config(project_root)
+        .map_err(|e| LlmExtractionError::ProviderError(e.to_string()))?;
+    let output = provider::call_provider(&cfg, &prompt, 768)
+        .map_err(|e| LlmExtractionError::ProviderError(e.to_string()))?;
+    parse_update_decision_output(&output).map_err(|e| {
+        LlmExtractionError::ParseError(format!(
+            "{e}: {}",
+            &output.chars().take(200).collect::<String>()
+        ))
+    })
+}
+
+pub(super) fn action_from_update_decision(
+    decision: &LlmUpdateDecision,
+    fallback: candidate::ExtractionAction,
+) -> candidate::ExtractionAction {
+    match decision.operation {
+        MemoryOperation::Add => candidate::ExtractionAction::new_candidate(),
+        MemoryOperation::Update => {
+            let Some(target_id) = decision.target_id.clone() else {
+                return fallback;
+            };
+            let mut action = candidate::ExtractionAction::merge_into_existing(target_id, 0.85);
+            action.reason = Some(decision.reason.clone());
+            action
+        }
+        MemoryOperation::Supersede | MemoryOperation::Conflict | MemoryOperation::Noop => {
+            let action_name = match decision.operation {
+                MemoryOperation::Supersede => "supersede",
+                MemoryOperation::Conflict => "conflict",
+                MemoryOperation::Noop => "noop",
+                MemoryOperation::Add | MemoryOperation::Update => unreachable!(),
+            };
+            candidate::ExtractionAction {
+                action: action_name.to_string(),
+                route: fallback.route,
+                target_record: decision.target_id.clone(),
+                compile_enabled: fallback.compile_enabled,
+                record_id: decision.target_id.clone(),
+                similarity: fallback.similarity,
+                reason: Some(decision.reason.clone()),
+                rationale: fallback.rationale,
+            }
+        }
+    }
 }
 
 /// 发送提取请求到 LLM 并在必要时回退
@@ -454,6 +504,31 @@ That concludes the extraction."#;
         assert_eq!(decision.operation, MemoryOperation::Supersede);
         assert_eq!(decision.target_id.as_deref(), Some("project:prefer-bun"));
         assert!(decision.reason.contains("reversed"));
+    }
+
+    #[test]
+    fn update_decision_maps_to_supersede_action() {
+        let decision = LlmUpdateDecision {
+            operation: MemoryOperation::Supersede,
+            target_id: Some("project:prefer-bun".to_string()),
+            body: Some("Prefer pnpm for workspace package management.".to_string()),
+            reason: "User replaced the previous package manager preference.".to_string(),
+        };
+
+        let action = action_from_update_decision(
+            &decision,
+            crate::candidate::ExtractionAction::new_candidate(),
+        );
+
+        assert_eq!(action.action, "supersede");
+        assert_eq!(action.target_record.as_deref(), Some("project:prefer-bun"));
+        assert!(
+            action
+                .reason
+                .as_deref()
+                .unwrap_or_default()
+                .contains("replaced")
+        );
     }
 
     #[test]

@@ -217,8 +217,11 @@ fn specificity_score(text: &str) -> f32 {
         "Axios",
         "HTTP",
         "fetch",
+        "ky",
+        "ofetch",
         "JavaScript",
         "npm",
+        "pnpm",
     ];
     let lower = text.to_ascii_lowercase();
     if named_terms

@@ -119,6 +119,29 @@ impl SemanticDeduper {
         DedupResult::Unique
     }
 
+    pub(crate) fn top_similar_skilllets(
+        &self,
+        body: &str,
+        existing_skilllets: &[SkillletRecord],
+        limit: usize,
+        min_similarity: f32,
+    ) -> Vec<(String, String)> {
+        let mut scored = existing_skilllets
+            .iter()
+            .filter_map(|skilllet| {
+                let similarity = self.matcher.compute_similarity(body, &skilllet.body);
+                (similarity >= min_similarity)
+                    .then(|| (skilllet.id.clone(), skilllet.body.clone(), similarity))
+            })
+            .collect::<Vec<_>>();
+        scored.sort_by(|left, right| right.2.total_cmp(&left.2));
+        scored
+            .into_iter()
+            .take(limit)
+            .map(|(id, body, _)| (id, body))
+            .collect()
+    }
+
     pub(crate) fn dedup_within_batch(&self, items: &mut [LlmKnowledgeItem]) -> Vec<usize> {
         let mut retained = Vec::new();
         let mut kept_items: Vec<&LlmKnowledgeItem> = Vec::new();
