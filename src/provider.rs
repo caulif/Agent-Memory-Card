@@ -16,6 +16,8 @@ pub struct ProviderConfig {
     pub default: String,
     #[serde(default = "default_extraction_provider")]
     pub extraction_provider: String,
+    #[serde(default)]
+    pub role_providers: ProviderRoleConfig,
     #[serde(default = "default_max_candidates_per_batch")]
     pub max_candidates_per_batch: usize,
     #[serde(default = "default_min_confidence")]
@@ -28,6 +30,23 @@ pub struct ProviderConfig {
 pub struct ProviderRequest {
     pub system_prompt: String,
     pub user_prompt: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProviderRoleConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extract: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judge: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderRole {
+    Extract,
+    Judge,
+    Update,
 }
 
 fn default_extraction_provider() -> String {
@@ -94,6 +113,7 @@ impl ProviderConfig {
         Self {
             default: "local".to_string(),
             extraction_provider: "local".to_string(),
+            role_providers: ProviderRoleConfig::default(),
             max_candidates_per_batch: 20,
             min_confidence: 0.7,
             providers,
@@ -123,6 +143,11 @@ impl ProviderConfig {
             );
             cfg.default = "anthropic".to_string();
             cfg.extraction_provider = "anthropic".to_string();
+            cfg.role_providers = ProviderRoleConfig {
+                extract: Some("anthropic".to_string()),
+                judge: Some("anthropic".to_string()),
+                update: Some("anthropic".to_string()),
+            };
         }
         cfg
     }
@@ -182,7 +207,16 @@ pub fn call_provider(
     request: &ProviderRequest,
     max_tokens: usize,
 ) -> Result<String> {
-    let provider_name = &cfg.extraction_provider;
+    call_provider_for_role(cfg, ProviderRole::Extract, request, max_tokens)
+}
+
+pub fn call_provider_for_role(
+    cfg: &ProviderConfig,
+    role: ProviderRole,
+    request: &ProviderRequest,
+    max_tokens: usize,
+) -> Result<String> {
+    let provider_name = provider_name_for_role(cfg, role);
 
     if provider_name == "local" {
         return Err(anyhow!(
@@ -349,13 +383,22 @@ fn send_json(builder: reqwest::blocking::RequestBuilder) -> Result<serde_json::V
 
 /// 查看提取提供商的名称
 pub fn extraction_provider_name(cfg: &ProviderConfig) -> &str {
-    &cfg.extraction_provider
+    provider_name_for_role(cfg, ProviderRole::Extract)
 }
 
 /// 检查是否使用了 LLM 提取引擎
 pub fn is_llm_extraction_enabled(project_root: &Path) -> Result<bool> {
     let cfg = load_or_default_provider_config(project_root)?;
-    Ok(cfg.extraction_provider != "local")
+    Ok(extraction_provider_name(&cfg) != "local")
+}
+
+fn provider_name_for_role(cfg: &ProviderConfig, role: ProviderRole) -> &str {
+    let role_name = match role {
+        ProviderRole::Extract => cfg.role_providers.extract.as_deref(),
+        ProviderRole::Judge => cfg.role_providers.judge.as_deref(),
+        ProviderRole::Update => cfg.role_providers.update.as_deref(),
+    };
+    role_name.unwrap_or(&cfg.extraction_provider)
 }
 
 #[cfg(test)]
@@ -415,6 +458,11 @@ mod tests {
         with_env_var("ANTHROPIC_API_KEY", None, || {
             let cfg = ProviderConfig::default();
             assert_eq!(cfg.extraction_provider, "local");
+            assert_eq!(
+                extraction_provider_name(&cfg),
+                "local",
+                "extract role should fall back to legacy extraction_provider"
+            );
             assert_eq!(cfg.max_candidates_per_batch, 20);
             assert_eq!(cfg.min_confidence, 0.7);
         });
@@ -452,11 +500,28 @@ mod tests {
             let cfg = ProviderConfig::auto_detect();
             assert_eq!(cfg.default, "anthropic");
             assert_eq!(cfg.extraction_provider, "anthropic");
+            assert_eq!(cfg.role_providers.update.as_deref(), Some("anthropic"));
             assert!(matches!(
                 cfg.providers.get("anthropic"),
                 Some(Provider::Anthropic { .. })
             ));
         });
+    }
+
+    #[test]
+    fn role_provider_overrides_legacy_extraction_provider() {
+        let mut cfg = ProviderConfig::default();
+        cfg.extraction_provider = "anthropic".to_string();
+        cfg.role_providers.extract = Some("openai-compatible".to_string());
+
+        assert_eq!(
+            provider_name_for_role(&cfg, ProviderRole::Extract),
+            "openai-compatible"
+        );
+        assert_eq!(
+            provider_name_for_role(&cfg, ProviderRole::Update),
+            "anthropic"
+        );
     }
 
     #[test]

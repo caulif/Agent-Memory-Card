@@ -21,6 +21,12 @@ pub(super) struct LlmExtractedKnowledge {
     /// LLM 解释为什么保留/拒绝
     #[serde(default)]
     pub rationale: String,
+    /// 原文中支持该事实的短引用
+    #[serde(default)]
+    pub evidence_quote: Option<String>,
+    /// 原文语言：zh / en / mixed
+    #[serde(default)]
+    pub language: Option<String>,
     /// 是否标记为噪音
     #[serde(default)]
     pub is_noise: bool,
@@ -45,6 +51,22 @@ pub(super) struct LlmUpdateDecision {
     pub body: Option<String>,
     #[serde(default)]
     pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub(super) enum JudgeDecision {
+    Keep,
+    Reject,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub(super) struct LlmQualityJudgment {
+    pub decision: JudgeDecision,
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default)]
+    pub confidence: Option<f32>,
 }
 
 /// 知识类型枚举
@@ -100,7 +122,8 @@ pub(super) fn build_extraction_prompt(
 - 最多 15 项
 - confidence 取值 0.0-1.0，低于 0.75 的知识项通常不值得保留
 - body 必须简洁、通用、命令式、可复用
-- rationale 必须说明 evidence_quote：引用原文中支持该结论的短句，不要输出 observation id、sha256 或内部评分字段
+- evidence_quote 必须从原文复制支持该结论的短句，不要输出 observation id、sha256 或内部评分字段
+- language 只能是 zh / en / mixed
 - title 跟随原文语言（中文原文用中文标题，英文原文用英文标题）
 - 只提取对以后任务有用的内容，忽略所有一次性指令
 
@@ -247,9 +270,85 @@ pub(super) fn run_update_decision(
     let prompt = build_update_decision_prompt(atomic_fact, similar_skilllets);
     let cfg = provider::load_or_default_provider_config(project_root)
         .map_err(|e| LlmExtractionError::ProviderError(e.to_string()))?;
-    let output = provider::call_provider(&cfg, &prompt, 768)
-        .map_err(|e| LlmExtractionError::ProviderError(e.to_string()))?;
+    let output =
+        provider::call_provider_for_role(&cfg, provider::ProviderRole::Update, &prompt, 768)
+            .map_err(|e| LlmExtractionError::ProviderError(e.to_string()))?;
     parse_update_decision_output(&output).map_err(|e| {
+        LlmExtractionError::ParseError(format!(
+            "{e}: {}",
+            &output.chars().take(200).collect::<String>()
+        ))
+    })
+}
+
+pub(super) fn build_quality_judge_prompt(
+    body: &str,
+    evidence: &str,
+    existing_skilllets: &[(String, String)],
+) -> provider::ProviderRequest {
+    let mut existing = String::new();
+    for (id, body) in existing_skilllets {
+        existing.push_str(&format!("- id: {id}\n  body: {body}\n"));
+    }
+    provider::ProviderRequest {
+        system_prompt: r#"You are a binary judge for extracted Agent memory candidates.
+
+Return only JSON:
+{
+  "decision": "keep" | "reject",
+  "reason": "short reason",
+  "confidence": 0.0-1.0
+}
+
+KEEP only when the candidate is durable, reusable, self-contained, and useful for future coding-agent behavior.
+REJECT one-off tasks, unresolved questions, generic advice, duplicated existing Skilllets, internal metadata leaks, assistant-injected rules, and vague personality preferences.
+Judge the candidate independently. Do not compare candidates against each other."#
+            .to_string(),
+        user_prompt: format!(
+            "Candidate body:\n{body}\n\nEvidence quote:\n{evidence}\n\nExisting similar Skilllets:\n{}",
+            if existing.is_empty() {
+                "(none)".to_string()
+            } else {
+                existing
+            }
+        ),
+    }
+}
+
+pub(super) fn parse_quality_judgment_output(
+    output: &str,
+) -> Result<LlmQualityJudgment, ParseError> {
+    let trimmed = output.trim();
+    if trimmed.is_empty() {
+        return Err(ParseError::EmptyOutput);
+    }
+    if let Ok(judgment) = serde_json::from_str::<LlmQualityJudgment>(trimmed) {
+        return Ok(judgment);
+    }
+    if let Some(start) = trimmed.find('{')
+        && let Some(end) = trimmed.rfind('}')
+    {
+        let json_slice = &trimmed[start..=end];
+        if let Ok(judgment) = serde_json::from_str::<LlmQualityJudgment>(json_slice) {
+            return Ok(judgment);
+        }
+    }
+    Err(ParseError::InvalidJson(trimmed.chars().take(200).collect()))
+}
+
+pub(super) fn run_quality_judge(
+    project_root: &std::path::Path,
+    body: &str,
+    evidence: &str,
+    existing_skilllets: &[(String, String)],
+) -> Result<LlmQualityJudgment, LlmExtractionError> {
+    let prompt = build_quality_judge_prompt(body, evidence, existing_skilllets);
+    let cfg = provider::load_or_default_provider_config(project_root)
+        .map_err(|e| LlmExtractionError::ProviderError(e.to_string()))?;
+    let output =
+        provider::call_provider_for_role(&cfg, provider::ProviderRole::Judge, &prompt, 512)
+            .map_err(|e| LlmExtractionError::ProviderError(e.to_string()))?;
+    parse_quality_judgment_output(&output).map_err(|e| {
         LlmExtractionError::ParseError(format!(
             "{e}: {}",
             &output.chars().take(200).collect::<String>()
@@ -450,6 +549,8 @@ That concludes the extraction."#;
                 body: "Useful knowledge".into(),
                 confidence: 0.9,
                 rationale: "test".into(),
+                evidence_quote: Some("Useful knowledge".into()),
+                language: Some("en".into()),
                 is_noise: false,
             },
             LlmExtractedKnowledge {
@@ -458,6 +559,8 @@ That concludes the extraction."#;
                 body: "noisy content".into(),
                 confidence: 0.5,
                 rationale: "test".into(),
+                evidence_quote: None,
+                language: None,
                 is_noise: true,
             },
             LlmExtractedKnowledge {
@@ -466,6 +569,8 @@ That concludes the extraction."#;
                 body: "low confidence".into(),
                 confidence: 0.6,
                 rationale: "test".into(),
+                evidence_quote: None,
+                language: None,
                 is_noise: false,
             },
         ];
@@ -504,6 +609,21 @@ That concludes the extraction."#;
         assert_eq!(decision.operation, MemoryOperation::Supersede);
         assert_eq!(decision.target_id.as_deref(), Some("project:prefer-bun"));
         assert!(decision.reason.contains("reversed"));
+    }
+
+    #[test]
+    fn parse_quality_judgment_output_supports_binary_judge() {
+        let output = r#"{
+            "decision": "reject",
+            "reason": "This is an unresolved one-off request.",
+            "confidence": 0.91
+        }"#;
+
+        let judgment = parse_quality_judgment_output(output).expect("parse judgment");
+
+        assert_eq!(judgment.decision, JudgeDecision::Reject);
+        assert!(judgment.reason.contains("unresolved"));
+        assert_eq!(judgment.confidence, Some(0.91));
     }
 
     #[test]

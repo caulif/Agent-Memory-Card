@@ -4,6 +4,7 @@ pub mod catalog;
 pub mod config;
 pub mod draft;
 pub mod extract;
+pub mod feedback;
 pub mod fsutil;
 pub mod hooks;
 pub mod index;

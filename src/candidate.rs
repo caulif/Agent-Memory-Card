@@ -10,6 +10,7 @@ use crate::config;
 use crate::draft::{self, DraftUpdate, NewDraft};
 use crate::extract::classify::KnowledgeClassification;
 use crate::extract::lifecycle::SkillletOperation;
+use crate::feedback;
 use crate::fsutil;
 use crate::skilllet::{self, SkillletRecord, SkillletUpdate};
 use crate::textutil;
@@ -351,7 +352,17 @@ pub fn reject_candidate(
     id: &str,
     rejected_reason: Option<String>,
 ) -> Result<CandidateRecord> {
-    update_candidate_status(project_root, id, CandidateStatus::Rejected, rejected_reason)
+    let candidate =
+        update_candidate_status(project_root, id, CandidateStatus::Rejected, rejected_reason)?;
+    feedback::record_feedback(
+        project_root,
+        "candidate",
+        &candidate.id,
+        "rejected",
+        &candidate.body,
+        candidate.rejected_reason.clone(),
+    )?;
+    Ok(candidate)
 }
 
 pub fn promote_candidate_to_draft(project_root: &Path, id: &str) -> Result<draft::DraftRecord> {
@@ -392,6 +403,14 @@ pub fn promote_candidate_to_draft(project_root: &Path, id: &str) -> Result<draft
     candidate.status = CandidateStatus::Promoted;
     candidate.updated_at = Utc::now().to_rfc3339();
     save_candidate(&root, &candidate)?;
+    feedback::record_feedback(
+        &root,
+        "candidate",
+        &candidate.id,
+        "promoted-to-draft",
+        &candidate.body,
+        None,
+    )?;
     Ok(draft)
 }
 
@@ -413,6 +432,14 @@ pub fn approve_candidate_to_skilllet(project_root: &Path, id: &str) -> Result<Sk
             candidate.status = CandidateStatus::Promoted;
             candidate.updated_at = Utc::now().to_rfc3339();
             save_candidate(&root, &candidate)?;
+            feedback::record_feedback(
+                &root,
+                "candidate",
+                &candidate.id,
+                "approved-existing-skilllet",
+                &candidate.body,
+                None,
+            )?;
             return Ok(existing_skilllet);
         }
         return Err(anyhow!(
@@ -446,6 +473,14 @@ pub fn approve_candidate_to_skilllet(project_root: &Path, id: &str) -> Result<Sk
     candidate.status = CandidateStatus::Promoted;
     candidate.updated_at = Utc::now().to_rfc3339();
     save_candidate(&root, &candidate)?;
+    feedback::record_feedback(
+        &root,
+        "candidate",
+        &candidate.id,
+        "approved",
+        &candidate.body,
+        None,
+    )?;
     Ok(skilllet)
 }
 
@@ -772,6 +807,28 @@ mod tests {
                 .map(|candidate| candidate.id.as_str())
                 .collect::<Vec<_>>(),
             vec!["keep"]
+        );
+    }
+
+    #[test]
+    fn candidate_review_actions_record_feedback() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        add_candidate(temp.path(), new_candidate("reject", 0.88, None)).expect("reject");
+        add_candidate(temp.path(), new_candidate("approve", 0.9, None)).expect("approve");
+
+        reject_candidate(temp.path(), "reject", Some("too generic".to_string()))
+            .expect("reject candidate");
+        approve_candidate_to_skilllet(temp.path(), "approve").expect("approve candidate");
+
+        let events = feedback::load_feedback(temp.path()).expect("feedback");
+
+        assert_eq!(events.len(), 2);
+        assert!(events.iter().any(|event| event.decision == "rejected"));
+        assert!(events.iter().any(|event| event.decision == "approved"));
+        assert!(
+            events
+                .iter()
+                .any(|event| event.reason.as_deref() == Some("too generic"))
         );
     }
 

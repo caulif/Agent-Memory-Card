@@ -197,7 +197,6 @@ pub fn extract_text_to_drafts(
     )
 }
 
-/// 本地正则提取引擎（保持向后兼容）
 fn extract_local_text_to_drafts(
     project_root: &Path,
     input: &str,
@@ -216,7 +215,6 @@ fn extract_local_text_to_drafts(
     let mut candidates = extract_candidates_with_preferences(&redacted_input, &preferences);
     recurrence::apply_recurrence_boost(project_root, &mut candidates)?;
 
-    // 对已有 skilllet 做语义比对。重复内容保留为合并建议，而不是静默丢弃。
     let existing_skilllets = skilllet::load_skilllets(project_root)?;
     let deduper = embedding::SemanticDeduper::new(0.75, 0.65);
     let mut skipped = Vec::new();
@@ -244,7 +242,6 @@ fn extract_local_text_to_drafts(
         })
         .collect();
 
-    // 应用质量评分门控：将每个候选转为 EvidenceChunk（使用原始证据文本），评分，仅保留 Candidate 级别
     let mut scored_candidates: Vec<(
         Candidate,
         scoring::ExtractionScore,
@@ -377,7 +374,6 @@ fn extract_local_text_to_drafts(
     })
 }
 
-/// LLM 驱动提取引擎
 fn extract_llm_text_to_drafts(
     project_root: &Path,
     input: &str,
@@ -417,7 +413,6 @@ fn extract_llm_text_to_drafts(
         match llm::run_llm_extraction(project_root, batch, 2048) {
             Ok(items) => all_knowledge.extend(items),
             Err(e) => {
-                // LLM 提取失败时跳过该批次
                 return Ok(ExtractReport {
                     created: Vec::new(),
                     skipped: vec![format!("LLM extraction failed: {e}")],
@@ -459,7 +454,11 @@ fn extract_llm_text_to_drafts(
             kind: llm::knowledge_kind_to_str(&item.kind).to_string(),
             scope: "project".to_string(),
             confidence: item.confidence,
-            evidence: format!("{source}: LLM extraction"),
+            evidence: item
+                .evidence_quote
+                .as_deref()
+                .map(|quote| format!("{source}: {quote}"))
+                .unwrap_or_else(|| format!("{source}: LLM extraction")),
             reason: item.rationale.clone(),
             matched_signal: format!("{:?}", item.kind),
             is_noise: item.is_noise,
@@ -467,16 +466,11 @@ fn extract_llm_text_to_drafts(
         });
     }
 
-    // 同批次去重
     let retained = deduper.dedup_within_batch(&mut deduped_items);
 
     let final_items: Vec<&embedding::LlmKnowledgeItem> =
         retained.iter().map(|&i| &deduped_items[i]).collect();
-
-    // 应用 max_candidates 限制
     let final_limit = max_candidates.unwrap_or(usize::MAX);
-
-    // 应用质量评分门控：将 LLM 输出转为 EvidenceChunk（assistant 来源），评分，仅保留 Candidate 级别
     let mut skipped = Vec::new();
     let mut scored_items: Vec<(
         &embedding::LlmKnowledgeItem,
@@ -499,6 +493,18 @@ fn extract_llm_text_to_drafts(
             skipped.push(quality_skip_message(
                 &format!("project:{}", textutil::slug(&item.title)),
                 &decision,
+            ));
+            continue;
+        }
+        let similar_skilllets = deduper.top_similar_skilllets(&item.body, &skilllets, 5, 0.35);
+        if let Ok(judgment) =
+            llm::run_quality_judge(project_root, &item.body, &item.evidence, &similar_skilllets)
+            && judgment.decision == llm::JudgeDecision::Reject
+        {
+            skipped.push(format!(
+                "project:{}: llm-judge ({})",
+                textutil::slug(&item.title),
+                judgment.reason
             ));
             continue;
         }
@@ -529,7 +535,6 @@ fn extract_llm_text_to_drafts(
         .filter_map(|index| slots.get_mut(index).and_then(Option::take))
         .collect::<Vec<_>>();
 
-    // 生成预览
     let previews = scored_items
         .iter()
         .map(|(item, score, decision)| {
@@ -575,7 +580,6 @@ fn extract_llm_text_to_drafts(
         });
     }
 
-    // 写入 Candidate（附带提取元数据）
     let mut created = Vec::new();
     for (item, score, _decision) in scored_items {
         let id = format!("project:{}", textutil::slug(&item.title));
@@ -656,7 +660,6 @@ pub fn extract_high_value_text_to_drafts(
         );
     }
 
-    // LLM 路径：复用 extract_llm_text_to_drafts，加上 max_candidates 限制
     extract_llm_text_to_drafts(
         project_root,
         input,
@@ -668,7 +671,6 @@ pub fn extract_high_value_text_to_drafts(
     )
 }
 
-/// 本地正则高价值提取引擎（保持向后兼容）
 fn extract_local_high_value_text_to_drafts(
     project_root: &Path,
     input: &str,
@@ -692,7 +694,6 @@ fn extract_local_high_value_text_to_drafts(
     );
     recurrence::apply_recurrence_boost(project_root, &mut candidates)?;
 
-    // 对已有 skilllet 做语义比对。重复内容保留为合并建议，而不是静默丢弃。
     let existing_skilllets = skilllet::load_skilllets(project_root)?;
     let deduper = embedding::SemanticDeduper::new(0.75, 0.65);
     let mut skipped = Vec::new();
