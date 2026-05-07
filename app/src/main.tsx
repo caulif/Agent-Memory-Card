@@ -11,7 +11,7 @@ import { useProjectActions } from "./hooks/useProjectActions";
 import { useProjectReadModels } from "./hooks/useProjectReadModels";
 import { useProjectSelection } from "./hooks/useProjectSelection";
 import { JobCenter } from "./components/JobCenter";
-import { Agents, Catalog, Drafts, ProjectOverviewStrip, Settings, Skilllets } from "./components/project-pages";
+import { Agents, Drafts, ProjectOverviewStrip, Settings, Skilllets } from "./components/project-pages";
 import { ActionButton, EmptyState, Panel, StatusList, TaskProgressBar } from "./components/common";
 import {
   AppWindow,
@@ -24,14 +24,12 @@ import {
   GitBranch,
   Layers3,
   Loader2,
-  PackagePlus,
   Pencil,
   Plus,
   RefreshCw,
   ScanLine,
   ShieldAlert,
   ShieldCheck,
-  Store,
   X,
 } from "lucide-react";
 import "./styles.css";
@@ -61,7 +59,6 @@ import {
   manualReviewPolicy,
   normalizePlanReviewResult,
   nextSkillletTargets,
-  PACKAGE_MANAGER_EXPLANATION,
   PAGES,
   projectOverviewMetrics,
   parseCommaTags,
@@ -200,6 +197,7 @@ function App() {
     skillletLibrary?.catalog_status.items.filter((item) => item.installed).length ??
     snapshot?.catalog_status.items.filter((item) => item.installed).length ??
     0;
+  const actionableJobCount = jobHistory.filter((job) => job.running || job.lifecycle === "failed").length;
 
   async function scanProjects() {
     if (previewMode) {
@@ -283,7 +281,7 @@ function App() {
             <TaskProgressBar pendingAction={pendingAction} message={message} backendStatus={backendTaskStatus} />
             <button className="job-center-trigger" onClick={() => setJobCenterOpen(true)}>
               任务中心
-              <span>{jobHistory.length}</span>
+              {actionableJobCount > 0 ? <span>{actionableJobCount}</span> : null}
             </button>
           </div>
         </header>
@@ -339,6 +337,7 @@ function App() {
                       onRefresh={() => {
                         void loadReadModelsForPage(selectedProject, "skilllets");
                       }}
+                      onFusionStarted={() => setPage("drafts")}
                     />
                   )}
                   {page === "agents" && (
@@ -348,15 +347,6 @@ function App() {
                       library={skillletLibrary}
                       pendingAction={pendingAction}
                       disabled={!assignmentView && !snapshot}
-                      onAction={projectAction}
-                    />
-                  )}
-                  {page === "catalog" && (
-                    <Catalog
-                      snapshot={snapshot}
-                      library={skillletLibrary}
-                      pendingAction={pendingAction}
-                      disabled={!skillletLibrary && !snapshot}
                       onAction={projectAction}
                     />
                   )}
@@ -380,12 +370,6 @@ function App() {
                   tone="warning"
                 />
               </Panel>
-
-              <button className="quick-store" onClick={() => setPage("catalog")}>
-                <PackagePlus size={16} />
-                打开包管理器
-                <ChevronRight size={15} />
-              </button>
             </aside>
           </div>
         </section>

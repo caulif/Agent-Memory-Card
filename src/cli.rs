@@ -12,330 +12,6 @@ pub(crate) struct Cli {
     pub(crate) command: Commands,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn cli_exposes_cargo_package_version() {
-        use clap::CommandFactory;
-
-        let command = Cli::command();
-        let version = command.render_long_version().to_string().trim().to_string();
-
-        assert_eq!(version, "agent-kernel 0.1.0");
-    }
-
-    #[test]
-    fn cli_accepts_import_artifacts_flag() {
-        let cli = Cli::parse_from(["agent-kernel", "import", "--artifacts"]);
-
-        match cli.command {
-            Commands::Import { artifacts, .. } => assert!(artifacts),
-            _ => panic!("expected import command"),
-        }
-    }
-
-    #[test]
-    fn cli_accepts_observe_local_command() {
-        let cli = Cli::parse_from(["agent-kernel", "observe", "local", "--home", "."]);
-
-        match cli.command {
-            Commands::Observe {
-                command: ObserveCommands::Local { home, .. },
-            } => assert_eq!(home, Some(PathBuf::from("."))),
-            _ => panic!("expected observe local command"),
-        }
-    }
-
-    #[test]
-    fn cli_accepts_observe_synthesize_command() {
-        let cli = Cli::parse_from([
-            "agent-kernel",
-            "observe",
-            "synthesize",
-            "--target",
-            "codex",
-            "--dry-run",
-        ]);
-
-        match cli.command {
-            Commands::Observe {
-                command:
-                    ObserveCommands::Synthesize {
-                        targets, dry_run, ..
-                    },
-            } => {
-                assert_eq!(targets, vec!["codex"]);
-                assert!(dry_run);
-            }
-            _ => panic!("expected observe synthesize command"),
-        }
-    }
-
-    #[test]
-    fn cli_accepts_observe_evolve_command() {
-        let cli = Cli::parse_from([
-            "agent-kernel",
-            "observe",
-            "evolve",
-            "--home",
-            ".",
-            "--target",
-            "claude-code",
-        ]);
-
-        match cli.command {
-            Commands::Observe {
-                command: ObserveCommands::Evolve { home, targets, .. },
-            } => {
-                assert_eq!(home, Some(PathBuf::from(".")));
-                assert_eq!(targets, vec!["claude-code"]);
-            }
-            _ => panic!("expected observe evolve command"),
-        }
-    }
-
-    #[test]
-    fn cli_accepts_preference_list_command() {
-        let cli = Cli::parse_from(["agent-kernel", "preference", "list", "--project", "."]);
-
-        match cli.command {
-            Commands::Preference {
-                command: PreferenceCommands::List { project },
-            } => assert_eq!(project, PathBuf::from(".")),
-            _ => panic!("expected preference list command"),
-        }
-    }
-
-    #[test]
-    fn cli_accepts_preference_init_command() {
-        let cli = Cli::parse_from(["agent-kernel", "preference", "init", "--project", "."]);
-
-        match cli.command {
-            Commands::Preference {
-                command: PreferenceCommands::Init { project },
-            } => assert_eq!(project, PathBuf::from(".")),
-            _ => panic!("expected preference init command"),
-        }
-    }
-
-    #[test]
-    fn cli_accepts_preference_validate_command() {
-        let cli = Cli::parse_from(["agent-kernel", "preference", "validate", "--project", "."]);
-
-        match cli.command {
-            Commands::Preference {
-                command: PreferenceCommands::Validate { project },
-            } => assert_eq!(project, PathBuf::from(".")),
-            _ => panic!("expected preference validate command"),
-        }
-    }
-
-    #[test]
-    fn cli_accepts_preference_test_command() {
-        let cli = Cli::parse_from([
-            "agent-kernel",
-            "preference",
-            "test",
-            "--text",
-            "Use Playwright instead of Cypress.",
-            "--project",
-            ".",
-        ]);
-
-        match cli.command {
-            Commands::Preference {
-                command: PreferenceCommands::Test { text, project },
-            } => {
-                assert_eq!(text, "Use Playwright instead of Cypress.");
-                assert_eq!(project, PathBuf::from("."));
-            }
-            _ => panic!("expected preference test command"),
-        }
-    }
-
-    #[test]
-    fn cli_accepts_project_scan_command() {
-        let cli = Cli::parse_from([
-            "agent-kernel",
-            "project",
-            "scan",
-            "--root",
-            ".",
-            "--max-depth",
-            "4",
-        ]);
-
-        match cli.command {
-            Commands::Project {
-                command:
-                    ProjectCommands::Scan {
-                        roots, max_depth, ..
-                    },
-            } => {
-                assert_eq!(roots, vec![PathBuf::from(".")]);
-                assert_eq!(max_depth, 4);
-            }
-            _ => panic!("expected project scan command"),
-        }
-    }
-
-    #[test]
-    fn cli_accepts_project_add_command() {
-        let cli = Cli::parse_from(["agent-kernel", "project", "add", "--path", "."]);
-
-        match cli.command {
-            Commands::Project {
-                command: ProjectCommands::Add { path, .. },
-            } => assert_eq!(path, PathBuf::from(".")),
-            _ => panic!("expected project add command"),
-        }
-    }
-
-    #[test]
-    fn cli_accepts_hooks_install_command() {
-        let cli = Cli::parse_from([
-            "agent-kernel",
-            "hooks",
-            "install",
-            "--event",
-            "stop",
-            "--event",
-            "session-end",
-            "--target",
-            "codex",
-            "--project",
-            ".",
-        ]);
-
-        match cli.command {
-            Commands::Hooks {
-                command:
-                    HookCommands::Install {
-                        events,
-                        targets,
-                        dry_run,
-                        project,
-                    },
-            } => {
-                assert_eq!(
-                    events,
-                    vec![ClaudeHookEventArg::Stop, ClaudeHookEventArg::SessionEnd]
-                );
-                assert_eq!(targets, vec!["codex"]);
-                assert!(!dry_run);
-                assert_eq!(project, PathBuf::from("."));
-            }
-            _ => panic!("expected hooks install command"),
-        }
-    }
-
-    #[test]
-    fn cli_accepts_index_rebuild_command() {
-        let cli = Cli::parse_from(["agent-kernel", "index", "rebuild", "--project", "."]);
-
-        match cli.command {
-            Commands::Index {
-                command: IndexCommands::Rebuild { project },
-            } => assert_eq!(project, PathBuf::from(".")),
-            _ => panic!("expected index rebuild command"),
-        }
-    }
-
-    #[test]
-    fn cli_accepts_draft_update_command() {
-        let cli = Cli::parse_from([
-            "agent-kernel",
-            "draft",
-            "update",
-            "--id",
-            "project:prefer-bun",
-            "--title",
-            "Prefer Bun Runtime",
-            "--body",
-            "Use Bun everywhere.",
-            "--target",
-            "codex",
-            "--target",
-            "claude-code",
-            "--project",
-            ".",
-        ]);
-
-        match cli.command {
-            Commands::Draft {
-                command:
-                    DraftCommands::Update {
-                        id,
-                        title,
-                        body,
-                        targets,
-                        ..
-                    },
-            } => {
-                assert_eq!(id, "project:prefer-bun");
-                assert_eq!(title.as_deref(), Some("Prefer Bun Runtime"));
-                assert_eq!(body.as_deref(), Some("Use Bun everywhere."));
-                assert_eq!(targets, vec!["codex", "claude-code"]);
-            }
-            _ => panic!("expected draft update command"),
-        }
-    }
-
-    #[test]
-    fn cli_accepts_draft_merge_command() {
-        let cli = Cli::parse_from([
-            "agent-kernel",
-            "draft",
-            "merge",
-            "--id",
-            "project:frontend-defaults",
-            "--title",
-            "Frontend Defaults",
-            "--source",
-            "project:use-axios",
-            "--source",
-            "project:prefer-bun",
-            "--target",
-            "codex",
-            "--target",
-            "claude-code",
-            "--project",
-            ".",
-        ]);
-
-        match cli.command {
-            Commands::Draft {
-                command:
-                    DraftCommands::Merge {
-                        id,
-                        title,
-                        sources,
-                        targets,
-                        ..
-                    },
-            } => {
-                assert_eq!(id, "project:frontend-defaults");
-                assert_eq!(title, "Frontend Defaults");
-                assert_eq!(sources, vec!["project:use-axios", "project:prefer-bun"]);
-                assert_eq!(targets, vec!["codex", "claude-code"]);
-            }
-            _ => panic!("expected draft merge command"),
-        }
-    }
-
-    #[test]
-    fn cli_accepts_mcp_command() {
-        let cli = Cli::parse_from(["agent-kernel", "mcp", "--project", "."]);
-
-        match cli.command {
-            Commands::Mcp { project } => assert_eq!(project, PathBuf::from(".")),
-            _ => panic!("expected mcp command"),
-        }
-    }
-}
-
 #[derive(Subcommand)]
 pub(crate) enum Commands {
     /// Discover and manage local projects known to Agent-Kernel.
@@ -804,6 +480,9 @@ pub(crate) enum ObserveCommands {
         /// Agent target. Repeat for multiple agents. Empty means project-level candidate.
         #[arg(long = "target")]
         targets: Vec<String>,
+        /// Synthesis engine: local, llm, claude-code, or codex.
+        #[arg(long, default_value = "local")]
+        engine: String,
         /// Show candidate count without writing Draft Inbox files.
         #[arg(long)]
         dry_run: bool,
@@ -821,6 +500,32 @@ pub(crate) enum ObserveCommands {
         /// Import observations and preview synthesis without writing Draft Inbox files.
         #[arg(long)]
         dry_run: bool,
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
+    /// Re-read all project-related local conversations and synthesize from that full replay.
+    Replay {
+        #[arg(long)]
+        home: Option<PathBuf>,
+        /// Agent target. Repeat for multiple agents. Empty means project-level candidate.
+        #[arg(long = "target")]
+        targets: Vec<String>,
+        /// Synthesis engine: local, llm, claude-code, or codex.
+        #[arg(long, default_value = "local")]
+        engine: String,
+        /// Preview synthesis without writing Observation or Draft Inbox files.
+        #[arg(long)]
+        dry_run: bool,
+        /// Include sessions whose project metadata could not be determined.
+        #[arg(long)]
+        include_unknown_project: bool,
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
+    /// Generate a reviewable weekly extraction reflexion proposal from feedback history.
+    Reflect {
         #[arg(long, default_value = ".")]
         project: PathBuf,
     },

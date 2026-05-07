@@ -1,7 +1,7 @@
 import type React from "react";
 
 // ===== 页面标识 =====
-export type PageId = "drafts" | "skilllets" | "agents" | "catalog" | "settings";
+export type PageId = "drafts" | "skilllets" | "agents" | "settings";
 
 // ===== 项目注册 =====
 export type RegisteredProject = {
@@ -98,7 +98,7 @@ export type ProjectSnapshot = {
   global_skilllets?: SkillletRecord[];
   observations: Array<{ id: string; agent?: string; source_path: string }>;
   catalog_status: { items: CatalogItem[] };
-  target_matrix: { agents: string[]; rows: Array<{ skilllet_id: string; title: string; targets: Record<string, boolean> }> };
+  target_matrix: { agents: string[]; rows: Array<{ skilllet_id: string; title: string; scope?: string; targets: Record<string, boolean> }> };
   rule_ci: { passed: number; failed: number };
   build_preview: { actions: string[]; warnings: string[] };
   status: { warnings: string[] };
@@ -136,7 +136,7 @@ export type ProjectSkillletLibrary = {
 export type ProjectAssignmentView = {
   project_path: string;
   enabled_agents: string[];
-  target_matrix: { agents: string[]; rows: Array<{ skilllet_id: string; title: string; targets: Record<string, boolean> }> };
+  target_matrix: { agents: string[]; rows: Array<{ skilllet_id: string; title: string; scope?: string; targets: Record<string, boolean> }> };
 };
 
 export type ProjectQualityView = {

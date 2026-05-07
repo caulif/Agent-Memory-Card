@@ -17,6 +17,7 @@ fn skilllet_target_matrix_marks_assigned_agents() {
     let matrix = skilllet_target_matrix(temp.path()).expect("matrix");
 
     assert_eq!(matrix.rows[0].skilllet_id, "project:use-axios");
+    assert_eq!(matrix.rows[0].scope, "project");
     assert_eq!(matrix.rows[0].targets.get("codex"), Some(&true));
     assert_eq!(matrix.rows[0].targets.get("claude-code"), Some(&true));
 }
@@ -314,8 +315,21 @@ fn promote_skilllet_to_global_copies_record_with_source_project() {
     );
     let global = load_global_skilllets(home.path()).expect("global skilllets");
     assert_eq!(global.len(), 1);
-    assert_eq!(global[0].id, "project:ui-background-tasks");
+    assert_eq!(global[0].id, "global:ui-background-tasks");
     assert!(global[0].tags.contains(&"ui-design".to_string()));
+    let project_records = load_skilllets(project.path()).expect("project skilllets");
+    assert_eq!(project_records.len(), 1);
+    assert_eq!(project_records[0].id, "global:ui-background-tasks");
+    let project_config =
+        config::load_or_default_project_config(project.path()).expect("project config");
+    assert_eq!(
+        project_config.skilllets.include[0].id,
+        "global:ui-background-tasks"
+    );
+    assert_eq!(
+        project_config.skilllets.include[0].scope.as_deref(),
+        Some("global")
+    );
 }
 
 #[test]
@@ -339,18 +353,22 @@ fn install_global_skilllet_to_project_copies_record_and_targets() {
     let installed = install_global_skilllet_to_project(
         target.path(),
         home.path(),
-        "project:review-before-sync",
+        "global:review-before-sync",
         vec!["claude-code".to_string()],
     )
     .expect("install global");
 
-    assert_eq!(installed.scope, "project");
+    assert_eq!(installed.scope, "global");
     assert!(installed.source_project.is_some());
     let project_records = load_skilllets(target.path()).expect("target skilllets");
     assert_eq!(project_records.len(), 1);
-    assert_eq!(project_records[0].id, "project:review-before-sync");
+    assert_eq!(project_records[0].id, "global:review-before-sync");
     let project = config::load_or_default_project_config(target.path()).expect("target project");
     assert_eq!(project.skilllets.include[0].targets, vec!["claude-code"]);
+    assert_eq!(
+        project.skilllets.include[0].scope.as_deref(),
+        Some("global")
+    );
 }
 
 #[test]

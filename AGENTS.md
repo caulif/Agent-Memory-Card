@@ -10,15 +10,7 @@ This file is a build artifact for the current project.
 
 ## Enabled Skilllets
 
-### Use Axios
+### 保留人类评审边界
 
-Use Axios for frontend HTTP requests.
-
-### Prefer Bun
-
-Use Bun for JavaScript package management and scripts.
-
-### Delegate UI Polish To Claude Code
-
-For UI and visual polish work, invoke Claude Code first as the UI optimization agent. Let Claude Code propose or edit the UI implementation, then Codex reviews, integrates, tests, and handles non-UI engineering work.
+在协作中区分自动化可完成的修改与需要用户确认的决策；不要越权提交、合并或替用户做不可逆选择。
 

@@ -1,4 +1,4 @@
-import { Bell, Boxes, CloudCog, GitBranch, Store } from "lucide-react";
+import { Bell, Boxes, CloudCog, GitBranch } from "lucide-react";
 import type { DraftRecord, SkillletRecord, EditFormData, PageDef } from "../types/domain";
 
 export const KIND_OPTIONS = ["rule", "skilllet", "observation", "preference", "constraint", "procedure", "convention"];
@@ -9,7 +9,6 @@ export const PAGES: PageDef[] = [
   { id: "drafts", label: "审阅", icon: Bell },
   { id: "skilllets", label: "技能片段", icon: Boxes },
   { id: "agents", label: "分配", icon: GitBranch },
-  { id: "catalog", label: "包管理", icon: Store },
   { id: "settings", label: "设置", icon: CloudCog },
 ];
 

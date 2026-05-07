@@ -8,6 +8,9 @@ use crate::{build, draft, fsutil};
 
 const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
 
+/// 消息体上限（16 MB），防止恶意或损坏的 Content-Length 导致 OOM。
+const MAX_CONTENT_LENGTH: usize = 16 * 1024 * 1024;
+
 pub fn serve_stdio(project_root: &Path) -> Result<()> {
     let root = fsutil::normalize_project_root(project_root)?;
     let stdin = io::stdin();
@@ -50,6 +53,11 @@ fn read_message<R: BufRead>(reader: &mut R) -> Result<Option<Value>> {
     }
 
     let length = content_length.ok_or_else(|| anyhow!("missing Content-Length header"))?;
+    if length > MAX_CONTENT_LENGTH {
+        return Err(anyhow!(
+            "Content-Length {length} exceeds maximum {MAX_CONTENT_LENGTH}"
+        ));
+    }
     let mut body = vec![0u8; length];
     reader.read_exact(&mut body)?;
     Ok(Some(serde_json::from_slice(&body)?))
@@ -343,5 +351,53 @@ mod tests {
         let mut reader = io::Cursor::new(buffer);
         let decoded = read_message(&mut reader).expect("read").expect("message");
         assert_eq!(decoded, message);
+    }
+
+    #[test]
+    fn read_message_rejects_too_large_content_length() {
+        let header = format!("Content-Length: {}\r\n\r\n", MAX_CONTENT_LENGTH + 1);
+        let mut reader = io::Cursor::new(header.as_bytes());
+        let result = read_message(&mut reader);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("exceeds maximum"));
+    }
+
+    #[test]
+    fn read_message_rejects_malformed_content_length() {
+        let header = "Content-Length: not-a-number\r\n\r\n";
+        let mut reader = io::Cursor::new(header.as_bytes());
+        let result = read_message(&mut reader);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("parse Content-Length")
+        );
+    }
+
+    #[test]
+    fn read_message_accepts_content_length_within_limit() {
+        let body = serde_json::to_vec(&json!({"method": "ping"})).expect("body");
+        let header = format!("Content-Length: {}\r\n\r\n", body.len());
+        let mut raw = header.into_bytes();
+        raw.extend_from_slice(&body);
+        let mut reader = io::Cursor::new(raw);
+        let result = read_message(&mut reader).expect("read").expect("message");
+        assert_eq!(result["method"], "ping");
+    }
+
+    #[test]
+    fn read_message_rejects_missing_content_length() {
+        let header = "Accept: application/json\r\n\r\n{}";
+        let mut reader = io::Cursor::new(header.as_bytes());
+        let result = read_message(&mut reader);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("missing Content-Length")
+        );
     }
 }

@@ -1,8 +1,8 @@
 use std::fs;
+#[cfg(test)]
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -16,12 +16,18 @@ use crate::provider;
 use crate::skilllet;
 use crate::textutil;
 
+mod agent_engine_impl;
 mod chunked;
 mod conversation;
 mod incremental;
+mod replay;
 mod report_render;
 mod sessions_index;
 
+use agent_engine_impl::{
+    default_candidate_kind, default_candidate_scope, is_usable_agent_candidate,
+    normalize_candidate_kind, normalize_candidate_scope, parse_agent_candidates, run_agent_engine,
+};
 use conversation::{
     collect_jsonl, collect_single_jsonl, conversation_belongs_to_project,
     normalize_observation_body,
@@ -31,8 +37,9 @@ use incremental::{ObservationIndex, ObservationSourceState, metadata_modified_un
 use incremental::{
     load_observation_index, read_incremental_conversation_text, save_observation_index,
 };
+pub use replay::{ObservationReplayReport, replay_local_conversations};
 
-const DAILY_CANDIDATE_LIMIT: usize = 5;
+const DAILY_CANDIDATE_LIMIT: usize = 8;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObservationRecord {
@@ -302,16 +309,13 @@ pub fn synthesize_observations_to_drafts_with_engine(
         return Ok(report);
     }
 
-    let source = observation_source_summary(&observations);
-    let material = chunked::synthesis_material(&observations, 80_000);
+    let source = "observation synthesis".to_string();
     let extracted = match engine {
-        "local" => extract::extract_high_value_text_to_drafts(
+        "local" => chunked::extract_local_chunks_to_report(
             project_root,
-            &material,
+            &observations,
             targets.clone(),
             &source,
-            Some("local".to_string()),
-            true,
             DAILY_CANDIDATE_LIMIT,
         )?,
         "llm" => chunked::extract_llm_chunks_to_report(
@@ -340,40 +344,58 @@ pub fn synthesize_observations_to_drafts_with_engine(
                 dry_run,
                 engine,
             ) {
-                Ok(agent_report) => return Ok(agent_report),
-                Err(_) => {
-                    report.engine = format!("{engine} -> local fallback");
-                    extract::extract_high_value_text_to_drafts(
+                Ok(agent_report) if agent_report_has_enough_recall(&agent_report, 3) => {
+                    return Ok(agent_report);
+                }
+                Ok(agent_report) => {
+                    report.engine = format!(
+                        "{engine} -> local fallback (agent returned {} candidates)",
+                        agent_report.candidates
+                    );
+                    chunked::extract_local_chunks_to_report(
                         project_root,
-                        &filtered_material,
+                        &observations,
                         targets.clone(),
                         &source,
-                        Some("local".to_string()),
-                        true,
+                        DAILY_CANDIDATE_LIMIT,
+                    )?
+                }
+                Err(error) => {
+                    report.engine = format!("{engine} -> local fallback ({})", short_error(&error));
+                    chunked::extract_local_chunks_to_report(
+                        project_root,
+                        &observations,
+                        targets.clone(),
+                        &source,
                         DAILY_CANDIDATE_LIMIT,
                     )?
                 }
             }
         }
-        _ => extract::extract_high_value_text_to_drafts(
+        _ => chunked::extract_local_chunks_to_report(
             project_root,
-            &material,
+            &observations,
             targets.clone(),
             &source,
-            Some("local".to_string()),
-            true,
             DAILY_CANDIDATE_LIMIT,
         )?,
     };
-    let synthesized_candidates = extracted.candidates;
+    let synthesized_candidates = extracted
+        .candidates
+        .into_iter()
+        .filter(|candidate| {
+            candidate
+                .classification
+                .as_ref()
+                .is_none_or(|classification| classification.artifact_kind != "reject")
+        })
+        .collect::<Vec<_>>();
     let mut created_ids = Vec::new();
     let mut skipped_count = extracted.skipped.len();
     if !dry_run {
         for candidate in &synthesized_candidates {
-            let source_observations = observations
-                .iter()
-                .map(|observation| observation.id.clone())
-                .collect::<Vec<_>>();
+            let source_observations =
+                relevant_source_observations(&observations, &candidate.evidence, &candidate.body);
             let extraction = candidate::ExtractionMetadata {
                 origin: "user".to_string(),
                 matched_signal: candidate
@@ -398,6 +420,10 @@ pub fn synthesize_observations_to_drafts_with_engine(
                     turn_id: None,
                     surrounding_context: Vec::new(),
                 }),
+                memory_tier: candidate.memory_tier.clone(),
+                value_scores: Default::default(),
+                abstraction_of: candidate.abstraction_of.clone(),
+                abstracted_from: candidate.abstracted_from.clone(),
             };
             let result = candidate::add_candidate(
                 project_root,
@@ -443,13 +469,45 @@ pub fn synthesize_observations_to_drafts_with_engine(
     Ok(report)
 }
 
+fn relevant_source_observations(
+    observations: &[ObservationRecord],
+    evidence: &str,
+    body: &str,
+) -> Vec<String> {
+    let evidence_snippet = evidence
+        .split_once(": ")
+        .map(|(_, snippet)| snippet)
+        .unwrap_or(evidence)
+        .trim();
+    let body = body.trim();
+    let matched = observations
+        .iter()
+        .filter(|observation| {
+            let text = observation.body.trim();
+            (!evidence_snippet.is_empty()
+                && (text.contains(evidence_snippet) || evidence_snippet.contains(text)))
+                || (!body.is_empty() && (text.contains(body) || body.contains(text)))
+        })
+        .map(|observation| observation.id.clone())
+        .collect::<Vec<_>>();
+    if matched.is_empty() {
+        observations
+            .iter()
+            .take(1)
+            .map(|observation| observation.id.clone())
+            .collect()
+    } else {
+        matched
+    }
+}
+
 fn prefilter_agent_synthesis_material(
     project_root: &Path,
     observations: &[ObservationRecord],
     targets: Vec<String>,
     source: &str,
 ) -> Result<(extract::ExtractReport, String)> {
-    let raw_material = chunked::synthesis_material(observations, 80_000);
+    let raw_material = chunked::prefiltered_synthesis_material(observations, 24_000);
     let prefiltered = extract::extract_high_value_text_to_drafts(
         project_root,
         &raw_material,
@@ -485,9 +543,32 @@ fn candidate_synthesis_material(
         ));
     }
     if out.len() > max_chars {
-        out.truncate(max_chars);
+        truncate_utf8_boundary(&mut out, max_chars);
     }
     out
+}
+
+fn truncate_utf8_boundary(text: &mut String, max_len: usize) {
+    if text.len() <= max_len {
+        return;
+    }
+    let mut new_len = max_len;
+    while new_len > 0 && !text.is_char_boundary(new_len) {
+        new_len -= 1;
+    }
+    text.truncate(new_len);
+}
+
+fn short_error(error: &anyhow::Error) -> String {
+    let mut text = error.to_string().replace('\n', " ");
+    if text.len() > 160 {
+        truncate_utf8_boundary(&mut text, 160);
+    }
+    text
+}
+
+fn agent_report_has_enough_recall(report: &ObservationSynthesisReport, minimum: usize) -> bool {
+    report.candidates >= minimum
 }
 
 fn synthesize_with_agent_engine(
@@ -528,7 +609,8 @@ fn synthesize_with_agent_engine(
             report.skipped += 1;
             continue;
         }
-        let id = format!("project:{}", textutil::slug(&candidate.title));
+        let scope = normalize_candidate_scope(&candidate.scope);
+        let id = format!("{}:{}", scope, textutil::slug(&candidate.title));
         report.candidate_drafts.push(id.clone());
         if dry_run {
             continue;
@@ -553,6 +635,14 @@ fn synthesize_with_agent_engine(
                 turn_id: None,
                 surrounding_context: Vec::new(),
             }),
+            memory_tier: if scope == "global" {
+                candidate::MemoryTier::CrossProjectPrinciple
+            } else {
+                candidate::MemoryTier::ProjectRule
+            },
+            value_scores: Default::default(),
+            abstraction_of: None,
+            abstracted_from: None,
         };
         candidate::add_candidate(
             project_root,
@@ -560,7 +650,7 @@ fn synthesize_with_agent_engine(
                 id: id.clone(),
                 title: candidate.title,
                 kind: normalize_candidate_kind(&candidate.kind),
-                scope: normalize_candidate_scope(&candidate.scope),
+                scope,
                 body: candidate.body,
                 brief: candidate.brief,
                 tags: candidate.tags,
@@ -604,12 +694,24 @@ fn filter_agent_candidates_through_local_gate(
         if !is_usable_agent_candidate(&candidate) {
             continue;
         }
+        if looks_like_generated_enabled_skilllet_candidate(&candidate) {
+            continue;
+        }
         let chunk = agent_candidate_chunk(&candidate, source);
         let score = extract::scoring::score_chunk(&chunk);
         if score.disposition != extract::scoring::ExtractionDisposition::Candidate {
             continue;
         }
-        let action = match deduper.dedup_against_existing(&candidate.body, &existing_skilllets) {
+        let scope_skilllets = existing_skilllets
+            .iter()
+            .filter(|record| match candidate.scope.as_str() {
+                "global" => record.scope == "global",
+                "agent" => record.scope == "agent",
+                _ => record.scope != "global",
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let action = match deduper.dedup_against_existing(&candidate.body, &scope_skilllets) {
             extract::embedding::DedupResult::Duplicate {
                 similar_id,
                 similarity,
@@ -625,6 +727,27 @@ fn filter_agent_candidates_through_local_gate(
     }
 
     Ok(retained)
+}
+
+fn looks_like_generated_enabled_skilllet_candidate(candidate: &AgentSkillletCandidate) -> bool {
+    let lower = format!(
+        "{}\n{}\n{}\n{}",
+        candidate.title,
+        candidate.body,
+        candidate.brief.as_deref().unwrap_or_default(),
+        candidate.reason.as_deref().unwrap_or_default()
+    )
+    .to_lowercase();
+    [
+        "enabled skilllets",
+        "generated by agent-kernel",
+        "use bun for javascript package management",
+        "use axios for frontend http requests",
+        "delegate ui polish",
+        "invoke claude code first as the ui optimization agent",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
 }
 
 fn agent_candidate_chunk(
@@ -650,12 +773,15 @@ Definition:
 - A Skill is an agent capability package: triggerable, reusable, procedural, and useful across future tasks.
 - A Skilllet is lighter: one stable preference, constraint, convention, workflow, correction, project improvement, root-cause learning, architecture decision, or supplement that can be compiled into Claude Code / Codex instructions or attached to a Skill.
 - Keep only items that would still improve future work after the current bug or feature request is finished.
+- Prefer a balanced set: project rules, cross-project principles, and collaboration preferences.
+- Use scope="global" for cross-project principles and durable collaboration preferences; use scope="project" only when the rule depends on this project.
+- Keep durable product quality constraints when they state a reusable acceptance bar, for example "outside model reasoning, interactions should not feel stuck or janky".
 
 Reject:
 - one-off requests like "continue", "fix this", "optimize UI", "how do I start"
 - stack traces, terminal output, base instructions, system/developer prompts
-- vague project brainstorming without a durable future behavior
-- unresolved product requests or bug reports such as "add a progress window", "UI is ugly", "tell me why it is stuck"
+- vague project brainstorming, PRD sections, fixture/gold-set requirements, or priority outlines without a durable future behavior
+- unresolved product requests or bug reports such as "add a progress window", "UI is ugly", "tell me why it is stuck"; do not reject a product quality constraint when it includes a durable standard
 - secrets, credentials, personal sensitive content
 - raw error logs unless they include the reusable cause and fix
 
@@ -667,115 +793,14 @@ Brief must be a concise Simplified Chinese explanation of what the candidate is 
 Tags must be compact and content-specific, for example axios, bun, frontend, http, js, structured-data, parser, 通用范式, agent-behavior, tool-use, meta-instruction.
 Use confidence >= 0.78 only. Body must be concise, general, imperative, and reusable.
 
+Recall targets:
+- cross-project: core functionality first, user perspective/experience, planning before edits, real-history validation.
+- collaboration: small-change fast tests / large-change broad tests, preserve human review boundaries, prefer candidate quality over quantity.
+- product quality constraint: keep stable acceptance bars such as non-reasoning UI operations should remain smooth.
+
 Material:
 {material}"#
     )
-}
-
-fn run_agent_engine(engine: &str, prompt: &str, timeout: Duration) -> Result<String> {
-    let mut command = match engine {
-        "claude-code" => {
-            let mut command = Command::new("claude");
-            command.args([
-                "-p",
-                "--output-format",
-                "text",
-                "--permission-mode",
-                "dontAsk",
-                "--max-budget-usd",
-                "0.25",
-            ]);
-            command
-        }
-        "codex" => {
-            let mut command = Command::new("codex");
-            command.args([
-                "exec",
-                "--skip-git-repo-check",
-                "--sandbox",
-                "read-only",
-                "-",
-            ]);
-            command
-        }
-        _ => anyhow::bail!("unsupported synthesis engine `{engine}`"),
-    };
-    command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = command.spawn().with_context(|| format!("spawn {engine}"))?;
-    if let Some(stdin) = child.stdin.as_mut() {
-        stdin.write_all(prompt.as_bytes())?;
-    }
-    drop(child.stdin.take());
-
-    let started = Instant::now();
-    loop {
-        if child.try_wait()?.is_some() {
-            let output = child.wait_with_output()?;
-            if !output.status.success() {
-                anyhow::bail!(
-                    "{} exited with {}: {}",
-                    engine,
-                    output.status,
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
-            return Ok(String::from_utf8_lossy(&output.stdout).to_string());
-        }
-        if started.elapsed() > timeout {
-            let _ = child.kill();
-            let _ = child.wait();
-            anyhow::bail!("{engine} synthesis timed out after {}s", timeout.as_secs());
-        }
-        std::thread::sleep(Duration::from_millis(200));
-    }
-}
-
-fn parse_agent_candidates(output: &str) -> Result<Vec<AgentSkillletCandidate>> {
-    let trimmed = output.trim();
-    if let Ok(candidates) = serde_json::from_str::<Vec<AgentSkillletCandidate>>(trimmed) {
-        return Ok(candidates);
-    }
-    let Some(start) = trimmed.find('[') else {
-        anyhow::bail!("agent output did not contain a JSON array");
-    };
-    let Some(end) = trimmed.rfind(']') else {
-        anyhow::bail!("agent output did not contain a complete JSON array");
-    };
-    serde_json::from_str(&trimmed[start..=end]).context("parse agent JSON candidates")
-}
-
-fn is_usable_agent_candidate(candidate: &AgentSkillletCandidate) -> bool {
-    let confidence = candidate.confidence.unwrap_or(0.0);
-    !candidate.title.trim().is_empty()
-        && !candidate.body.trim().is_empty()
-        && candidate.body.len() <= 320
-        && confidence >= 0.78
-}
-
-fn normalize_candidate_kind(kind: &str) -> String {
-    match kind {
-        "preference" | "constraint" | "procedure" | "convention" | "correction"
-        | "anti-pattern" => kind.to_string(),
-        _ => "procedure".to_string(),
-    }
-}
-
-fn normalize_candidate_scope(scope: &str) -> String {
-    match scope {
-        "global" | "project" | "agent" => scope.to_string(),
-        _ => "project".to_string(),
-    }
-}
-
-fn default_candidate_kind() -> String {
-    "procedure".to_string()
-}
-
-fn default_candidate_scope() -> String {
-    "project".to_string()
 }
 
 pub fn evolve_local_conversations(
@@ -908,20 +933,6 @@ pub fn discover_local_conversation_files(home: &Path) -> Result<Vec<Conversation
     );
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
-}
-
-fn observation_source_summary(observations: &[ObservationRecord]) -> String {
-    let ids = observations
-        .iter()
-        .take(5)
-        .map(|observation| format!("observation:{}", observation.id))
-        .collect::<Vec<_>>()
-        .join(", ");
-    if ids.is_empty() {
-        "0 observations".to_string()
-    } else {
-        format!("{} observations: {}", observations.len(), ids)
-    }
 }
 
 fn write_observation(project_root: &Path, record: &ObservationRecord) -> Result<bool> {

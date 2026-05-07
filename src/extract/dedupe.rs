@@ -9,9 +9,17 @@ pub(super) fn dedupe_candidates(candidates: Vec<Candidate>) -> Vec<Candidate> {
             candidate.matched_template.as_deref(),
             Some("project-improvement" | "high-value-prompt")
         ) {
-            candidate.title.to_lowercase()
+            format!(
+                "{}:{}",
+                candidate.memory_tier.as_str(),
+                candidate.title.to_lowercase()
+            )
         } else {
-            candidate.body.to_lowercase()
+            format!(
+                "{}:{}",
+                candidate.memory_tier.as_str(),
+                candidate.body.to_lowercase()
+            )
         };
         if !seen.insert(key) {
             continue;

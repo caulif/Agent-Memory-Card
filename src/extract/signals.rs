@@ -25,6 +25,12 @@ pub(crate) enum SignalType {
     ArchitectureDecision,
     /// 显式记忆标记："以后"、"记住"、"always"、"never"
     ExplicitMemoryMarker,
+    /// 跨项目方法论原则
+    PrincipleStatement,
+    /// 规划与验证启发式
+    PlanningHeuristic,
+    /// 与 agent 协作的稳定偏好
+    CollaborationPreference,
 }
 
 // ============================================================
@@ -295,6 +301,18 @@ fn detect_sentence_signals(sentence: &str) -> Vec<SignalType> {
         signals.push(SignalType::ArchitectureDecision);
     }
 
+    if has_principle_signal(&lower) {
+        signals.push(SignalType::PrincipleStatement);
+    }
+
+    if has_planning_heuristic_signal(&lower) {
+        signals.push(SignalType::PlanningHeuristic);
+    }
+
+    if has_collaboration_preference_signal(&lower) {
+        signals.push(SignalType::CollaborationPreference);
+    }
+
     // 显式记忆标记
     if has_explicit_memory_marker(sentence) {
         signals.push(SignalType::ExplicitMemoryMarker);
@@ -426,6 +444,151 @@ fn has_architecture_decision_signal(lower: &str) -> bool {
         && reason_markers.iter().any(|m| lower.contains(m))
 }
 
+pub(super) fn has_principle_signal(lower: &str) -> bool {
+    let principle_topics = [
+        "核心功能",
+        "用户视角",
+        "用户体验",
+        "体验优化",
+        "体验",
+        "可用性",
+        "稳定性",
+        "性能",
+        "跨项目",
+        "真正有价值",
+        "真实历史",
+        "候选质量",
+        "候选数量",
+        "持续修正",
+        "自我修正",
+        "自检",
+        "真实结果",
+        "推理引擎",
+        "固定规则词",
+        "规则词",
+        "高价值 prompt",
+        "高价值prompt",
+        "高价值表达",
+        "core functionality",
+        "user perspective",
+        "user experience",
+        "feedback loop",
+        "real history",
+    ];
+    let stance_markers = [
+        "优先",
+        "重要",
+        "更重要",
+        "更在意",
+        "重视",
+        "关心",
+        "更关心",
+        "评估",
+        "判断",
+        "标准",
+        "应该",
+        "希望",
+        "倾向",
+        "看重",
+        "不要固定",
+        "不要只",
+        "matters",
+        "priority",
+        "evaluate",
+        "judge by",
+        "focus on",
+        "prioritize",
+    ];
+
+    principle_topics.iter().any(|topic| lower.contains(topic))
+        && stance_markers.iter().any(|marker| lower.contains(marker))
+}
+
+pub(super) fn has_planning_heuristic_signal(lower: &str) -> bool {
+    let planning_topics = [
+        "规划",
+        "提问",
+        "澄清目标",
+        "拆问题",
+        "拆任务",
+        "分析",
+        "小改快测",
+        "小修改快测",
+        "小修改做快测",
+        "大改",
+        "重测",
+        "完整回归",
+        "回归",
+        "持续修正",
+        "自检",
+        "真实结果",
+        "推理引擎",
+        "planning",
+        "clarifying",
+        "decompose",
+        "small change",
+        "targeted test",
+        "dry-run",
+        "dry run",
+        "regression",
+    ];
+    let order_markers = ["先", "再", "before", "first", "then"];
+
+    planning_topics.iter().any(|topic| lower.contains(topic))
+        && (order_markers.iter().any(|marker| lower.contains(marker))
+            || planning_topics
+                .iter()
+                .filter(|topic| lower.contains(**topic))
+                .count()
+                >= 2)
+}
+
+pub(super) fn has_collaboration_preference_signal(lower: &str) -> bool {
+    let collaboration_topics = [
+        "审阅边界",
+        "review boundary",
+        "真实历史",
+        "real history",
+        "候选质量",
+        "持续修正",
+        "自我修正",
+        "用户确认",
+        "不要让 ai 直接",
+        "先 review",
+        "先审阅",
+        "小改快测",
+        "自检",
+        "真实结果",
+        "推理引擎",
+        "检查有没有问题",
+        "targeted test",
+        "dry-run",
+        "dry run",
+    ];
+    let preference_markers = [
+        "希望",
+        "优先",
+        "保留",
+        "先",
+        "不要",
+        "重视",
+        "关心",
+        "更关心",
+        "should",
+        "prefer",
+        "keep",
+        "检查",
+        "验证",
+    ];
+
+    collaboration_topics
+        .iter()
+        .any(|topic| lower.contains(topic))
+        && preference_markers
+            .iter()
+            .any(|marker| lower.contains(marker))
+}
+
 // ============================================================
 // 信号检测辅助函数（保留并改进自原有代码）
 // ============================================================
@@ -521,7 +684,7 @@ pub(super) fn looks_like_project_improvement_signal(sentence: &str) -> bool {
 
 /// 检测未解决的用户请求/抱怨
 pub(super) fn looks_like_unresolved_user_request(text: &str) -> bool {
-    let request_markers = [
+    let weak_request = [
         "我希望",
         "希望",
         "我想",
@@ -530,6 +693,8 @@ pub(super) fn looks_like_unresolved_user_request(text: &str) -> bool {
         "要求",
         "应该",
         "最好",
+    ];
+    let unresolved_only = [
         "能不能",
         "是否",
         "为什么",
@@ -541,7 +706,35 @@ pub(super) fn looks_like_unresolved_user_request(text: &str) -> bool {
         "不好用",
         "能不能优化",
     ];
-    request_markers.iter().any(|marker| text.contains(marker))
+    if unresolved_only.iter().any(|marker| text.contains(marker)) {
+        return true;
+    }
+
+    if weak_request.iter().any(|marker| text.contains(marker)) {
+        let principle_topics = [
+            "核心功能",
+            "用户视角",
+            "用户体验",
+            "体验",
+            "规划",
+            "提问",
+            "跨项目",
+            "真正有价值",
+            "真实历史",
+            "快测",
+            "回归",
+            "审阅边界",
+            "core functionality",
+            "user perspective",
+            "planning",
+            "real history",
+        ];
+        if principle_topics.iter().any(|topic| text.contains(topic)) {
+            return false;
+        }
+        return true;
+    }
+    false
 }
 
 /// 检查是否为显式记忆标记（"以后要多做某事"的概念）

@@ -33,7 +33,7 @@ export function readModelCommandsForPage(page: PageId): ProjectReadModelCommand[
   if (page === "drafts") {
     return ["get_project_candidate_inbox", "get_project_review_inbox"];
   }
-  if (page === "skilllets" || page === "catalog") {
+  if (page === "skilllets") {
     return ["get_project_skilllet_library"];
   }
   if (page === "agents") {
@@ -52,8 +52,14 @@ export function readModelCommandsForPage(page: PageId): ProjectReadModelCommand[
 }
 
 export function readModelRefreshPagesForMutation(command: string): PageId[] {
-  if (["hide_candidate", "reject_candidate", "approve_draft", "reject_draft", "update_draft", "merge_drafts", "fuse_skilllets_to_draft"].includes(command)) {
+  if (["hide_candidate", "reject_candidate", "gc_candidates", "reject_draft", "update_draft", "merge_drafts"].includes(command)) {
     return ["drafts"];
+  }
+  if (["approve_draft"].includes(command)) {
+    return ["drafts", "skilllets", "agents"];
+  }
+  if (["fuse_skilllets_to_draft"].includes(command)) {
+    return ["drafts", "skilllets", "agents"];
   }
   if (["promote_candidate"].includes(command)) {
     return ["drafts", "skilllets", "agents"];
@@ -65,7 +71,7 @@ export function readModelRefreshPagesForMutation(command: string): PageId[] {
     return ["agents"];
   }
   if (["install_catalog_package"].includes(command)) {
-    return ["catalog", "skilllets", "agents"];
+    return ["skilllets", "agents"];
   }
   if (["import_project", "import_artifact_drifts", "sync_project"].includes(command)) {
     return ["drafts", "skilllets", "agents"];

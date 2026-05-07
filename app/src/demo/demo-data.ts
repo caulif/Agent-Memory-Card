@@ -51,7 +51,7 @@ export function createDemoProjectSnapshot(projectPath: string): ProjectSnapshot 
         brief: "前端需在无原生运行时自动降级为演示模式",
         kind: "rule",
         scope: "project",
-        body: "当桌面运行时不可用时，前端进入演示模式，继续展示项目、草稿、包管理和分配矩阵。",
+        body: "当桌面运行时不可用时，前端进入演示模式，继续展示项目、草稿、技能片段和分配矩阵。",
         targets: ["codex", "claude-code"],
         evidence: "来自当前预览会话的静态示例。",
         confidence: 0.91,
@@ -149,7 +149,7 @@ export function createDemoProjectSnapshot(projectPath: string): ProjectSnapshot 
           installed: true,
           package: {
             id: "local-preview-core",
-            title: "本地预览核心包",
+            title: "本地预览核心条目",
             description: "提供演示项目、草稿和同步矩阵，让浏览器预览保持完整。",
             version: "1.0.0",
             tags: ["预览", "本地", "安全"],
@@ -159,8 +159,8 @@ export function createDemoProjectSnapshot(projectPath: string): ProjectSnapshot 
           installed: false,
           package: {
             id: "review-polish",
-            title: "审阅体验增强包",
-            description: "示例包，用于展示安装卡片、标签和按钮在演示模式下的状态。",
+            title: "审阅体验增强条目",
+            description: "示例条目，用于展示安装卡片、标签和按钮在演示模式下的状态。",
             version: "0.4.2",
             tags: ["审阅", "界面", "演示"],
           },
@@ -187,7 +187,7 @@ export function createDemoProjectSnapshot(projectPath: string): ProjectSnapshot 
       actions: [
         "将演示草稿同步到 Codex 预览目标",
         "更新 Claude Code 目标的技能片段索引",
-        "生成本地包管理状态预览",
+        "生成本地技能片段状态预览",
       ],
       warnings: ["当前为演示数据；真实文件读取和写入需要通过 bun run app:dev 启动 Tauri。"],
     },

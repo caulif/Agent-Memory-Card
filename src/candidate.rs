@@ -10,10 +10,13 @@ use crate::config;
 use crate::draft::{self, DraftUpdate, NewDraft};
 use crate::extract::classify::KnowledgeClassification;
 use crate::extract::lifecycle::SkillletOperation;
+use crate::extract::memory_gate::{self, MemoryGateDisposition};
 use crate::feedback;
 use crate::fsutil;
 use crate::skilllet::{self, SkillletRecord, SkillletUpdate};
 use crate::textutil;
+
+mod action;
 
 /// 提取元数据：记录提取过程中的溯源信息，用于解释为什么生成这条记录。
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -38,6 +41,14 @@ pub struct ExtractionMetadata {
     pub suggested_action: Option<ExtractionAction>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence_span: Option<EvidenceSpan>,
+    #[serde(default)]
+    pub memory_tier: MemoryTier,
+    #[serde(default)]
+    pub value_scores: BTreeMap<String, f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abstraction_of: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abstracted_from: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -71,88 +82,27 @@ pub struct ExtractionAction {
     pub rationale: Option<String>,
 }
 
-impl ExtractionAction {
-    pub fn new_candidate() -> Self {
-        Self::new_candidate_for_route("always_on_rule")
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryTier {
+    #[default]
+    ProjectRule,
+    CrossProjectPrinciple,
+    CollaborationPreference,
+}
 
-    pub fn new_candidate_for_route(route: &str) -> Self {
-        Self {
-            action: "new_candidate".to_string(),
-            route: normalize_route(route),
-            target_record: None,
-            compile_enabled: Some(compile_enabled_for_route(route)),
-            record_id: None,
-            similarity: None,
-            reason: None,
-            rationale: Some(rationale_for_route(route)),
+impl MemoryTier {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MemoryTier::ProjectRule => "project_rule",
+            MemoryTier::CrossProjectPrinciple => "cross_project_principle",
+            MemoryTier::CollaborationPreference => "collaboration_preference",
         }
-    }
-
-    pub fn merge_into_existing(record_id: String, similarity: f32) -> Self {
-        Self::merge_into_existing_for_route(record_id, similarity, "always_on_rule")
-    }
-
-    pub fn merge_into_existing_for_route(record_id: String, similarity: f32, route: &str) -> Self {
-        Self {
-            action: "merge_into_existing".to_string(),
-            route: normalize_route(route),
-            target_record: Some(record_id.clone()),
-            compile_enabled: Some(compile_enabled_for_route(route)),
-            record_id: Some(record_id),
-            similarity: Some(similarity),
-            reason: Some(
-                "Similar durable knowledge already exists; review as a merge instead of creating another Skilllet."
-                    .to_string(),
-            ),
-            rationale: Some(rationale_for_route(route)),
-        }
-    }
-
-    pub fn with_route(mut self, route: &str) -> Self {
-        self.route = normalize_route(route);
-        self.compile_enabled = Some(compile_enabled_for_route(route));
-        self.rationale = Some(rationale_for_route(route));
-        if self.target_record.is_none() {
-            self.target_record = self.record_id.clone();
-        }
-        self
     }
 }
 
 fn default_extraction_route() -> String {
     "always_on_rule".to_string()
-}
-
-fn normalize_route(route: &str) -> String {
-    match route {
-        "always_on_rule" | "workflow_skill" | "skill_supplement" | "review_only" => {
-            route.to_string()
-        }
-        _ => "review_only".to_string(),
-    }
-}
-
-fn compile_enabled_for_route(route: &str) -> bool {
-    route == "always_on_rule"
-}
-
-fn rationale_for_route(route: &str) -> String {
-    match route {
-        "always_on_rule" => {
-            "Compile this Skilllet into AGENTS.md / CLAUDE.md after review.".to_string()
-        }
-        "workflow_skill" => {
-            "Keep this Skilllet as a workflow Skill draft for a SKILL.md target.".to_string()
-        }
-        "skill_supplement" => {
-            "Attach this Skilllet as supplemental guidance to an existing Skill.".to_string()
-        }
-        "review_only" => {
-            "Keep this Skilllet in review/library only; do not compile by default.".to_string()
-        }
-        _ => "Keep this Skilllet in review/library only; do not compile by default.".to_string(),
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -235,6 +185,12 @@ pub struct NewCandidate {
     pub extraction: ExtractionMetadata,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CandidateGcReport {
+    pub evaluated: usize,
+    pub hidden: Vec<String>,
+}
+
 pub fn add_candidate(project_root: &Path, candidate: NewCandidate) -> Result<()> {
     let root = fsutil::normalize_project_root(project_root)?;
     config::ensure_kernel_dir(&root)?;
@@ -294,7 +250,7 @@ pub fn add_candidate(project_root: &Path, candidate: NewCandidate) -> Result<()>
         created_at: now.clone(),
         updated_at: now,
     };
-    let path = candidate_path(&root, &candidate.id)?;
+    let path = candidate_path_for_scope(&root, &record.scope, &candidate.id)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -341,6 +297,38 @@ pub fn list_visible_candidates(project_root: &Path) -> Result<Vec<CandidateRecor
         .into_iter()
         .filter(|candidate| candidate.status == CandidateStatus::Candidate)
         .collect())
+}
+
+pub fn gc_candidates(project_root: &Path) -> Result<CandidateGcReport> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    let mut report = CandidateGcReport::default();
+    for mut candidate in list_visible_candidates(&root)? {
+        report.evaluated += 1;
+        let decision = memory_gate::evaluate_memory_candidate(
+            &candidate.title,
+            &candidate.body,
+            &candidate.evidence,
+            &candidate.kind,
+            &candidate.scope,
+        );
+        if decision.disposition != MemoryGateDisposition::Reject {
+            continue;
+        }
+        candidate.status = CandidateStatus::Hidden;
+        candidate.rejected_reason = Some("memory-gc".to_string());
+        candidate.updated_at = Utc::now().to_rfc3339();
+        save_candidate(&root, &candidate)?;
+        feedback::record_feedback(
+            &root,
+            "candidate",
+            &candidate.id,
+            "rejected",
+            &candidate.body,
+            Some("memory-gc".to_string()),
+        )?;
+        report.hidden.push(candidate.id);
+    }
+    Ok(report)
 }
 
 pub fn hide_candidate(project_root: &Path, id: &str) -> Result<CandidateRecord> {
@@ -423,7 +411,7 @@ pub fn approve_candidate_to_skilllet(project_root: &Path, id: &str) -> Result<Sk
             candidate.status
         ));
     }
-    // 检查同名 skilllet 是否已存在；若 body 语义相似则直接标记候选为已提升
+    // 检查同名 skilllet 是否已存在；若是同一概念的更新，则吸收到现有 Skilllet。
     if let Some(existing_skilllet) = skilllet::load_skilllets(&root)?
         .into_iter()
         .find(|skilllet| skilllet.id == candidate.id)
@@ -441,6 +429,35 @@ pub fn approve_candidate_to_skilllet(project_root: &Path, id: &str) -> Result<Sk
                 None,
             )?;
             return Ok(existing_skilllet);
+        }
+        if skilllet::review_update_matches_existing(
+            &existing_skilllet,
+            &candidate.title,
+            &candidate.body,
+        ) {
+            let updated = skilllet::update_skilllet_from_review(
+                &root,
+                &candidate.id,
+                candidate.title.clone(),
+                candidate.body.clone(),
+                candidate.brief.clone(),
+                candidate.tags.clone(),
+                candidate.language.clone(),
+                candidate.kind.clone(),
+                candidate.scope.clone(),
+            )?;
+            candidate.status = CandidateStatus::Promoted;
+            candidate.updated_at = Utc::now().to_rfc3339();
+            save_candidate(&root, &candidate)?;
+            feedback::record_feedback(
+                &root,
+                "candidate",
+                &candidate.id,
+                "approved-existing-skilllet-update",
+                &candidate.body,
+                None,
+            )?;
+            return Ok(updated);
         }
         return Err(anyhow!(
             "skilllet id conflict for `{}` (different body); review or merge the existing Skilllet before approving this system suggestion",
@@ -519,14 +536,31 @@ fn save_candidate(project_root: &Path, candidate: &CandidateRecord) -> Result<()
 }
 
 fn candidates_dir(project_root: &Path) -> PathBuf {
-    config::kernel_dir(project_root)
-        .join("candidates")
-        .join("project")
+    config::kernel_dir(project_root).join("candidates")
+}
+
+fn candidate_scope_dir(project_root: &Path, scope: &str) -> PathBuf {
+    let normalized = match scope {
+        "global" => "global",
+        "agent" => "agent",
+        _ => "project",
+    };
+    candidates_dir(project_root).join(normalized)
 }
 
 fn candidate_path(project_root: &Path, id: &str) -> Result<PathBuf> {
+    for scope in ["project", "global", "agent"] {
+        let path = candidate_path_for_scope(project_root, scope, id)?;
+        if path.exists() {
+            return Ok(path);
+        }
+    }
+    candidate_path_for_scope(project_root, "project", id)
+}
+
+fn candidate_path_for_scope(project_root: &Path, scope: &str, id: &str) -> Result<PathBuf> {
     let safe = id.replace(['/', '\\', ':'], "-");
-    Ok(candidates_dir(project_root).join(format!("{safe}.yml")))
+    Ok(candidate_scope_dir(project_root, scope).join(format!("{safe}.yml")))
 }
 
 fn enrich_record_defaults(candidate: &mut CandidateRecord) {
@@ -616,17 +650,9 @@ fn infer_candidate_tags(lower: &str, kind: &str) -> Vec<String> {
         ("axios", ["axios"].as_slice()),
         (
             "js",
-            ["javascript", "typescript", "node", "bun", "npm", "vite"].as_slice(),
+            ["javascript", "typescript", "node", "vite"].as_slice(),
         ),
-        ("bun", ["bun"].as_slice()),
-        (
-            "package-manager",
-            ["package manager", "包管理", "scripts", "package management"].as_slice(),
-        ),
-        (
-            "tooling",
-            ["tooling", "scripts", "cli", "bun", "cargo"].as_slice(),
-        ),
+        ("tooling", ["tooling", "cli", "cargo"].as_slice()),
         (
             "structured-data",
             [
@@ -695,7 +721,7 @@ fn infer_candidate_tags(lower: &str, kind: &str) -> Vec<String> {
             tags.push(tag.to_string());
         }
     }
-    if tags.iter().any(|tag| tag == "axios" || tag == "bun") {
+    if tags.iter().any(|tag| tag == "axios") {
         tags.push("生态偏好".to_string());
     }
     if tags.is_empty() {
@@ -710,9 +736,6 @@ fn infer_candidate_tags(lower: &str, kind: &str) -> Vec<String> {
 fn infer_chinese_brief(title: &str, body: &str, lower: &str) -> String {
     if lower.contains("axios") {
         return "前端 HTTP 请求优先使用 Axios，统一请求库和调用风格。".to_string();
-    }
-    if lower.contains("bun") {
-        return "JavaScript 包管理和脚本执行优先使用 Bun。".to_string();
     }
     if lower.contains("structured api")
         || lower.contains("structured data")
@@ -759,6 +782,8 @@ fn default_language() -> String {
     "zh".to_string()
 }
 
+#[cfg(test)]
+mod gc_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -886,18 +911,18 @@ mod tests {
     #[test]
     fn approving_candidate_creates_skilllet_and_preserves_metadata() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let mut candidate = new_candidate("project:prefer-bun", 0.92, Some("prefer-tool"));
-        candidate.title = "Prefer Bun".to_string();
-        candidate.body = "Use Bun for JavaScript package management and scripts.".to_string();
+        let mut candidate = new_candidate("project:use-axios", 0.92, Some("prefer-tool"));
+        candidate.title = "Use Axios".to_string();
+        candidate.body = "Use Axios for frontend HTTP requests.".to_string();
         add_candidate(temp.path(), candidate).expect("candidate");
 
         let skilllet =
-            approve_candidate_to_skilllet(temp.path(), "project:prefer-bun").expect("skilllet");
+            approve_candidate_to_skilllet(temp.path(), "project:use-axios").expect("skilllet");
         let visible = list_visible_candidates(temp.path()).expect("visible candidates");
 
-        assert_eq!(skilllet.id, "project:prefer-bun");
-        assert!(skilllet.brief.contains("JavaScript 包管理"));
-        assert!(skilllet.tags.contains(&"bun".to_string()));
+        assert_eq!(skilllet.id, "project:use-axios");
+        assert!(skilllet.brief.contains("前端 HTTP 请求优先使用 Axios"));
+        assert!(skilllet.tags.contains(&"axios".to_string()));
         assert!(visible.is_empty());
         assert!(draft::load_drafts(temp.path()).expect("drafts").is_empty());
     }

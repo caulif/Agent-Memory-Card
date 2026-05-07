@@ -29,7 +29,7 @@ fn approves_draft_into_skilllet() {
 }
 
 #[test]
-fn approve_draft_rejects_existing_skilllet_id_conflict() {
+fn approve_draft_updates_existing_skilllet_for_same_concept() {
     let temp = tempfile::tempdir().expect("tempdir");
     skilllet::add_skilllet(
         temp.path(),
@@ -59,16 +59,93 @@ fn approve_draft_rejects_existing_skilllet_id_conflict() {
     )
     .expect("draft");
 
-    let err = approve_draft(temp.path(), "project:prefer-bun")
-        .expect_err("approval should require conflict review");
+    approve_draft(temp.path(), "project:prefer-bun").expect("approve existing update");
 
-    assert!(err.to_string().contains("conflict"));
-    assert_eq!(load_drafts(temp.path()).expect("drafts").len(), 1);
+    assert!(load_drafts(temp.path()).expect("drafts").is_empty());
     let skilllets = skilllet::load_skilllets(temp.path()).expect("skilllets");
-    assert_eq!(
-        skilllets[0].body,
-        "Use Bun for JavaScript package management."
+    assert_eq!(skilllets[0].body, "Use Bun for all JavaScript scripts.");
+}
+
+#[test]
+fn reviewable_drafts_hide_fusion_already_represented_by_existing_skilllet() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    skilllet::add_skilllet(
+        temp.path(),
+        "global:保留人类评审边界",
+        "保留人类评审边界",
+        "协作中区分自动化可完成的修改与需要用户确认的决策；不要越权提交、合并、发布或替用户做不可逆选择。",
+        "constraint",
+        "global",
+        vec!["codex".to_string()],
+    )
+    .expect("skilllet");
+    add_draft(
+        temp.path(),
+        NewDraft {
+            id: "project:保留人类评审边界-fusion".to_string(),
+            title: "保留人类评审边界 Fusion".to_string(),
+            body: "如果涉及提交、合并、不可逆选择或用户决策边界，只提出可审阅方案并等待确认。"
+                .to_string(),
+            kind: "procedure".to_string(),
+            scope: "project".to_string(),
+            targets: vec!["codex".to_string()],
+            evidence: "Fused Skilllets: global:保留人类评审边界, global:真实输入自检".to_string(),
+            confidence: Some(0.8),
+            reason: Some("Synthesized a reviewable fusion candidate from 2 skilllets.".to_string()),
+            matched_template: Some("manual:skilllet-fusion".to_string()),
+            extraction: ExtractionMetadata::default(),
+        },
+    )
+    .expect("draft");
+
+    assert_eq!(load_drafts(temp.path()).expect("raw drafts").len(), 1);
+    assert!(
+        load_reviewable_drafts(temp.path())
+            .expect("reviewable")
+            .is_empty()
     );
+}
+
+#[test]
+fn approve_draft_removes_duplicate_with_existing_global_slug() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    skilllet::add_skilllet(
+        temp.path(),
+        "global:真实输入自检后再提交",
+        "真实输入自检后再提交",
+        "交付前用真实输入或 dry-run 自检质量，发现问题后先修正再提交。",
+        "procedure",
+        "global",
+        vec!["codex".to_string()],
+    )
+    .expect("skilllet");
+    add_draft(
+        temp.path(),
+        NewDraft {
+            id: "project:真实输入自检后再提交-fusion".to_string(),
+            title: "真实输入自检后再提交 Fusion".to_string(),
+            body: "交付最终结果前用真实输入或 dry-run 自检质量，发现问题后先修正再提交。"
+                .to_string(),
+            kind: "procedure".to_string(),
+            scope: "project".to_string(),
+            targets: vec!["codex".to_string()],
+            evidence: "Fused Skilllets: global:编辑前先规划, global:真实输入自检后再提交"
+                .to_string(),
+            confidence: Some(0.8),
+            reason: Some("Synthesized a reviewable fusion candidate from 2 skilllets.".to_string()),
+            matched_template: Some("manual:skilllet-fusion".to_string()),
+            extraction: ExtractionMetadata::default(),
+        },
+    )
+    .expect("draft");
+
+    approve_draft(temp.path(), "project:真实输入自检后再提交-fusion")
+        .expect("duplicate approval should be a clean no-op");
+
+    assert!(load_drafts(temp.path()).expect("drafts").is_empty());
+    let skilllets = skilllet::load_skilllets(temp.path()).expect("skilllets");
+    assert_eq!(skilllets.len(), 1);
+    assert_eq!(skilllets[0].id, "global:真实输入自检后再提交");
 }
 
 #[test]
@@ -470,8 +547,22 @@ fn fuses_skilllets_into_reviewable_draft() {
         Some("manual:skilllet-fusion")
     );
     assert!(draft.evidence.contains("Fused Skilllets"));
-    assert!(draft.body.contains("UI Background Tasks"));
-    assert!(draft.body.contains("Tauri Responsive Shell"));
+    assert!(!draft.body.contains("## UI Background Tasks"));
+    assert!(!draft.body.contains("## Tauri Responsive Shell"));
+    assert!(draft.body.contains("long UI scans"));
+    assert!(draft.body.contains("Tauri commands"));
     assert!(draft.brief.contains("Responsive Desktop Workflow"));
     assert!(draft.tags.contains(&"tauri".to_string()));
+
+    let skilllets = skilllet::load_skilllets(temp.path()).expect("skilllets");
+    assert!(
+        skilllets
+            .iter()
+            .any(|skilllet| skilllet.id == "project:ui-background-tasks")
+    );
+    assert!(
+        skilllets
+            .iter()
+            .any(|skilllet| skilllet.id == "project:tauri-responsive")
+    );
 }

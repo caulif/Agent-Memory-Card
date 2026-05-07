@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
@@ -164,7 +164,7 @@ fn render_command_hook_settings(
     let hooks = settings
         .get_mut("hooks")
         .and_then(Value::as_object_mut)
-        .expect("hooks object");
+        .ok_or_else(|| anyhow!("hooks entry was not an object after normalization"))?;
     let installed_events = install_command_hooks(hooks, command_hooks);
     Ok((settings, installed_events))
 }

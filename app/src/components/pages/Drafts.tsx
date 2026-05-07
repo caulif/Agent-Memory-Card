@@ -127,6 +127,15 @@ export function Drafts({
             disabled={disabled}
             onClick={() => onAction("同步", "已同步生成产物", "sync_project")}
           />
+          <ActionButton
+            className="secondary-action"
+            icon={ShieldAlert}
+            label="清理低价值候选"
+            busyLabel="清理中"
+            busy={pendingAction === "清理候选"}
+            disabled={disabled || allCandidates.length === 0}
+            onClick={() => onAction("清理候选", "已清理低价值候选", "gc_candidates")}
+          />
         </div>
       </Panel>
 

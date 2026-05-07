@@ -203,7 +203,7 @@ fn trigger_clarity(classification: &KnowledgeClassification) -> f32 {
 
 /// 特异性：文本中包含具体项目名词/技术术语的得分。
 fn specificity_score(text: &str) -> f32 {
-    let named_terms = [
+    let technical_named_terms = [
         "AGENTS",
         "CLAUDE",
         "Claude Code",
@@ -223,12 +223,35 @@ fn specificity_score(text: &str) -> f32 {
         "npm",
         "pnpm",
     ];
+    let principle_named_terms = [
+        "核心功能",
+        "用户视角",
+        "用户体验",
+        "体验",
+        "真实历史",
+        "回归",
+        "小改快测",
+        "规划",
+        "提问",
+        "澄清目标",
+        "审阅边界",
+        "cross-project",
+        "core functionality",
+        "user perspective",
+        "user experience",
+        "real history",
+        "targeted test",
+        "review boundary",
+    ];
     let lower = text.to_ascii_lowercase();
-    if named_terms
+    if principle_named_terms
         .iter()
         .any(|t| lower.contains(&t.to_ascii_lowercase()))
+        || technical_named_terms
+            .iter()
+            .any(|t| lower.contains(&t.to_ascii_lowercase()))
     {
-        0.8
+        0.7
     } else {
         0.2
     }

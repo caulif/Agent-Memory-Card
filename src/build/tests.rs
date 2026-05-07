@@ -96,6 +96,40 @@ fn render_instructions_includes_targeted_skilllets() {
 }
 
 #[test]
+fn sync_project_applies_skilllet_agent_targets_to_generated_artifacts() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    skilllet::add_skilllet(
+        temp.path(),
+        "project:use-axios",
+        "Use Axios",
+        "Use Axios for frontend HTTP requests.",
+        "preference",
+        "project",
+        vec!["codex".to_string()],
+    )
+    .expect("add skilllet");
+
+    sync_project(temp.path()).expect("sync codex target");
+    let codex = fs::read_to_string(temp.path().join("AGENTS.md")).expect("codex instructions");
+    let claude = fs::read_to_string(temp.path().join("CLAUDE.md")).expect("claude instructions");
+    assert!(codex.contains("Use Axios for frontend HTTP requests."));
+    assert!(!claude.contains("Use Axios for frontend HTTP requests."));
+
+    skilllet::set_skilllet_targets(
+        temp.path(),
+        "project:use-axios",
+        vec!["claude-code".to_string()],
+    )
+    .expect("retarget skilllet");
+    sync_project(temp.path()).expect("sync claude target");
+
+    let codex = fs::read_to_string(temp.path().join("AGENTS.md")).expect("codex instructions");
+    let claude = fs::read_to_string(temp.path().join("CLAUDE.md")).expect("claude instructions");
+    assert!(!codex.contains("Use Axios for frontend HTTP requests."));
+    assert!(claude.contains("Use Axios for frontend HTTP requests."));
+}
+
+#[test]
 fn render_instructions_only_includes_compile_enabled_always_on_skilllets() {
     let mut skilllets = BTreeMap::new();
     skilllets.insert(

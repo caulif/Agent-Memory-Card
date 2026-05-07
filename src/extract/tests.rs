@@ -7,6 +7,9 @@ fn candidate_with_body(title: &str, body: &str, confidence: f32) -> Candidate {
         body: body.to_string(),
         kind: "preference".to_string(),
         scope: "project".to_string(),
+        memory_tier: crate::candidate::MemoryTier::ProjectRule,
+        abstraction_of: None,
+        abstracted_from: None,
         evidence: body.to_string(),
         confidence: Some(confidence),
         reason: None,
@@ -44,6 +47,31 @@ fn dedupe_candidates_keeps_distinct_tool_preferences() {
 }
 
 #[test]
+fn package_manager_preferences_are_not_extracted_as_skilllets() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let report = extract_high_value_text_to_drafts(
+        temp.path(),
+        "以后 JavaScript 包管理统一使用 Bun，不要用 npm 或 pnpm。",
+        vec!["codex".to_string()],
+        "test",
+        Some("local".to_string()),
+        true,
+        8,
+    )
+    .expect("extract");
+
+    assert!(
+        report.candidates.iter().all(|candidate| {
+            let text =
+                format!("{}\n{}\n{}", candidate.title, candidate.body, candidate.id).to_lowercase();
+            !text.contains("bun") && !text.contains("package") && !text.contains("包管理")
+        }),
+        "package manager preferences should not become Skilllet candidates: {:?}",
+        report.candidates
+    );
+}
+
+#[test]
 fn extracts_chinese_rule_candidate() {
     let candidates = extract_candidates("以后前端请求统一使用 Axios，不要再用 Fetch。");
 
@@ -54,12 +82,215 @@ fn extracts_chinese_rule_candidate() {
 }
 
 #[test]
+fn principle_candidate_preserves_user_wording_instead_of_template_body() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let report = extract_to_drafts(
+        temp.path(),
+        Some(
+            "我希望得到的是对其他项目也同样重要的语句，比如设计的时候先提问、先澄清目标、先规划。"
+                .to_string(),
+        ),
+        None,
+        vec!["codex".to_string()],
+        Some("local".to_string()),
+        true,
+    )
+    .expect("extract");
+
+    let candidate = report
+        .candidates
+        .iter()
+        .find(|candidate| {
+            candidate.scope == "global"
+                && candidate.memory_tier == crate::candidate::MemoryTier::CollaborationPreference
+        })
+        .expect("global collaboration preference");
+
+    assert!(candidate.body.contains("对其他项目也同样重要"));
+    assert!(candidate.body.contains("先提问"));
+    assert!(!candidate.body.contains("ask clarifying questions"));
+    assert_ne!(
+        candidate.matched_template.as_deref(),
+        Some("methodology-abstraction")
+    );
+}
+
+#[test]
+fn principle_request_language_is_not_filtered_when_it_expresses_cross_project_value() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let report = extract_high_value_text_to_drafts(
+        temp.path(),
+        "我希望得到的是对其他项目也同样重要的语句，比如设计的时候先提问、先澄清目标、先规划。",
+        vec!["codex".to_string()],
+        "test",
+        Some("local".to_string()),
+        true,
+        8,
+    )
+    .expect("extract");
+
+    assert!(
+        report.candidates.iter().any(|candidate| {
+            candidate.scope == "global"
+                && candidate.memory_tier == crate::candidate::MemoryTier::CollaborationPreference
+        }),
+        "cross-project planning guidance should survive request-language filtering: {:?}",
+        report.candidates
+    );
+}
+
+#[test]
+fn methodology_preferences_generate_first_class_non_project_candidates() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let report = extract_high_value_text_to_drafts(
+        temp.path(),
+        "开发期间我更在意核心功能和用户视角，设计的时候先提问、先澄清目标、先规划，小修改快测，大改再做完整验证。",
+        vec!["codex".to_string()],
+        "test",
+        Some("local".to_string()),
+        true,
+        10,
+    )
+    .expect("extract");
+
+    assert!(
+        report.candidates.iter().any(|candidate| {
+            candidate.memory_tier == crate::candidate::MemoryTier::CrossProjectPrinciple
+                && candidate.scope == "global"
+        }),
+        "should emit a cross-project principle candidate: {:?}",
+        report.candidates
+    );
+    assert!(
+        report.candidates.iter().any(|candidate| {
+            candidate.memory_tier == crate::candidate::MemoryTier::CollaborationPreference
+                && candidate.scope == "global"
+        }),
+        "should emit a collaboration preference candidate: {:?}",
+        report.candidates
+    );
+}
+
+#[test]
+fn repeated_feedback_rejections_suppress_candidate_generation() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    for item_id in ["one", "two", "three"] {
+        crate::feedback::record_feedback(
+            temp.path(),
+            "candidate",
+            item_id,
+            "rejected",
+            "小修改快测，大改再做完整回归测试",
+            Some("too generic".to_string()),
+        )
+        .expect("record feedback");
+    }
+
+    let report = extract_high_value_text_to_drafts(
+        temp.path(),
+        "小修改快测，大改再做完整回归测试。",
+        vec!["codex".to_string()],
+        "test",
+        Some("local".to_string()),
+        true,
+        8,
+    )
+    .expect("extract");
+
+    assert!(
+        report
+            .skipped
+            .iter()
+            .any(|item| item.contains("feedback-rejected")),
+        "repeated feedback should suppress the matching candidate: {:?}",
+        report.skipped
+    );
+}
+
+#[test]
+fn source_trust_uses_chunk_origin_metadata_not_body_text() {
+    let mut candidate = candidate_with_body(
+        "Assistant Mention",
+        "Prefer explicit assistant handoff only after the user confirms the workflow.",
+        0.8,
+    );
+    candidate.memory_tier = crate::candidate::MemoryTier::CollaborationPreference;
+
+    let user_scores = candidate_value_scores_with_origin(
+        &candidate,
+        Some(crate::extract::chunk::ChunkOrigin::User),
+    );
+    let assistant_scores = candidate_value_scores_with_origin(
+        &candidate,
+        Some(crate::extract::chunk::ChunkOrigin::Assistant),
+    );
+
+    assert_eq!(user_scores.get("source_trust"), Some(&1.0));
+    assert_eq!(assistant_scores.get("source_trust"), Some(&0.60));
+}
+
+#[test]
+fn fallback_methodology_templates_link_dual_output_metadata_when_enabled() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let kernel_dir = config::kernel_dir(temp.path());
+    fs::create_dir_all(&kernel_dir).expect("kernel dir");
+    fs::write(
+        kernel_dir.join("providers.yml"),
+        r#"default: local
+extraction_provider: local
+fallback_methodology_templates: true
+role_providers: {}
+max_candidates_per_batch: 20
+min_confidence: 0.7
+providers:
+  local:
+    type: local-heuristic
+privacy:
+  upload_policy: ask
+  redact_secrets: true
+  include_code_context: false
+  store_prompts_locally: true
+"#,
+    )
+    .expect("write provider config");
+
+    let report = extract_high_value_text_to_drafts(
+        temp.path(),
+        "开发期间关注核心功能，也要从用户视角持续优化体验。",
+        vec!["codex".to_string()],
+        "test",
+        Some("local".to_string()),
+        true,
+        10,
+    )
+    .expect("extract");
+
+    let project = report
+        .candidates
+        .iter()
+        .find(|candidate| candidate.scope == "project")
+        .expect("project candidate");
+    let global = report
+        .candidates
+        .iter()
+        .find(|candidate| candidate.scope == "global")
+        .expect("global candidate");
+
+    assert_eq!(project.abstraction_of.as_deref(), Some(global.id.as_str()));
+    assert_eq!(global.abstracted_from.as_deref(), Some(project.id.as_str()));
+    assert_eq!(
+        global.matched_template.as_deref(),
+        Some("fallback-methodology-template")
+    );
+}
+
+#[test]
 fn extract_command_creates_draft() {
     let temp = tempfile::tempdir().expect("tempdir");
 
     let report = extract_to_drafts(
         temp.path(),
-        Some("Always use Bun for JavaScript package management and scripts.".to_string()),
+        Some("以后前端请求统一使用 Axios，不要再用 Fetch。".to_string()),
         None,
         vec!["codex".to_string()],
         Some("local".to_string()),
@@ -134,7 +365,7 @@ fn dry_run_does_not_create_drafts() {
 
     let report = extract_to_drafts(
         temp.path(),
-        Some("Always use Bun for JavaScript package management and scripts.".to_string()),
+        Some("以后前端请求统一使用 Axios，不要再用 Fetch。".to_string()),
         None,
         vec!["codex".to_string()],
         Some("local".to_string()),
@@ -189,18 +420,15 @@ fn dry_run_keeps_accepted_ai_project_improvements() {
         .expect("extract");
 
     assert_eq!(report.candidates.len(), 1);
-    assert_eq!(report.candidates[0].kind, "procedure");
-    assert!(
-        report.candidates[0]
-            .matched_template
-            .as_deref()
-            .unwrap_or_default()
-            .contains("ai_project_improvement")
-    );
+    assert!(report.candidates.iter().any(|candidate| {
+        candidate.scope == "global"
+            && candidate.memory_tier == crate::candidate::MemoryTier::CollaborationPreference
+            && candidate.body.contains("审阅边界")
+    }));
 }
 
 #[test]
-fn normalizes_bun_package_manager_preference() {
+fn rejects_bun_package_manager_preference() {
     let temp = tempfile::tempdir().expect("tempdir");
 
     let report = extract_to_drafts(
@@ -213,13 +441,7 @@ fn normalizes_bun_package_manager_preference() {
     )
     .expect("extract");
 
-    assert_eq!(report.candidates.len(), 1);
-    assert_eq!(report.candidates[0].id, "project:prefer-bun");
-    assert_eq!(report.candidates[0].title, "Prefer Bun");
-    assert_eq!(
-        report.candidates[0].body,
-        "Use Bun for JavaScript package management and scripts."
-    );
+    assert!(report.candidates.is_empty());
 }
 
 #[test]
@@ -292,20 +514,20 @@ fn project_preference_registry_overrides_built_ins() {
     fs::write(
         registry_dir.join("preference-registry.yml"),
         r#"preferences:
-  - title: Use Bun Runtime
-    body: Use Bun for package management, scripts, and JavaScript runtime tasks.
+  - title: Use Axios Client
+    body: Use Axios with the project request wrapper for frontend HTTP requests.
     required:
-      - bun
+      - axios
     context:
-      - npm
-      - package management
+      - fetch
+      - frontend http
 "#,
     )
     .expect("write registry");
 
     let report = extract_to_drafts(
         temp.path(),
-        Some("Always use Bun instead of npm for package management.".to_string()),
+        Some("以后前端 HTTP 请求统一使用 Axios，不要再直接用 fetch。".to_string()),
         None,
         vec!["codex".to_string()],
         Some("local".to_string()),
@@ -314,11 +536,11 @@ fn project_preference_registry_overrides_built_ins() {
     .expect("extract");
 
     assert_eq!(report.candidates.len(), 1);
-    assert_eq!(report.candidates[0].id, "project:use-bun-runtime");
-    assert_eq!(report.candidates[0].title, "Use Bun Runtime");
+    assert_eq!(report.candidates[0].id, "project:use-axios-client");
+    assert_eq!(report.candidates[0].title, "Use Axios Client");
     assert_eq!(
         report.candidates[0].body,
-        "Use Bun for package management, scripts, and JavaScript runtime tasks."
+        "Use Axios with the project request wrapper for frontend HTTP requests."
     );
 }
 
@@ -440,10 +662,7 @@ fn extraction_redacts_secret_evidence() {
 
     extract_to_drafts(
         temp.path(),
-        Some(
-            "Always use Bun for JavaScript package management; token=supersecret123456789."
-                .to_string(),
-        ),
+        Some("以后前端请求统一使用 Axios，不要再用 Fetch；token=supersecret123456789.".to_string()),
         None,
         vec!["codex".to_string()],
         Some("local".to_string()),
@@ -507,6 +726,27 @@ fn high_value_extraction_rejects_ui_bug_report_and_one_off_planning_requests() {
 }
 
 #[test]
+fn high_value_extraction_filters_one_off_memory_boundaries() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let report = extract_high_value_text_to_drafts(
+        temp.path(),
+        "不要改 Rust。\n只修改 app/src/main.tsx，不要改 src-tauri。\n当前 PR 还有两项没做。\n这个函数现在在 app.py。",
+        vec!["codex".to_string()],
+        "test",
+        Some("local".to_string()),
+        true,
+        8,
+    )
+    .expect("extract");
+
+    assert!(
+        report.candidates.is_empty(),
+        "one-off task state and rebuildable file/path facts should be silently filtered: {:?}",
+        report.candidates
+    );
+}
+
+#[test]
 fn high_value_extraction_rejects_unresolved_feature_requests_with_outcome_words() {
     let temp = tempfile::tempdir().expect("tempdir");
     let report = extract_high_value_text_to_drafts(
@@ -547,6 +787,129 @@ fn high_value_extraction_keeps_only_reusable_project_improvement_lessons() {
 }
 
 #[test]
+fn high_value_extraction_canonicalizes_shorthand_methodology_lists() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let report = extract_high_value_text_to_drafts(
+        temp.path(),
+        "设计阶段：先提问、先澄清目标、先规划、从用户视角看。\n小改快测，大改重测。",
+        vec!["codex".to_string()],
+        "test",
+        Some("local".to_string()),
+        true,
+        8,
+    )
+    .expect("extract");
+
+    assert!(
+        report.candidates.iter().any(|candidate| {
+            candidate.scope == "global"
+                && candidate.memory_tier == crate::candidate::MemoryTier::CollaborationPreference
+                && candidate.body.contains("先提问")
+                && candidate.body.contains("先规划")
+        }),
+        "planning shorthand should preserve the user's methodology wording: {:?}",
+        report.candidates
+    );
+    assert!(
+        report.candidates.iter().any(|candidate| {
+            candidate.scope == "global"
+                && candidate.memory_tier == crate::candidate::MemoryTier::CollaborationPreference
+                && candidate.body.contains("小改快测")
+        }),
+        "test-strategy shorthand should preserve the user's methodology wording: {:?}",
+        report.candidates
+    );
+}
+
+#[test]
+fn high_value_extraction_keeps_history_quality_and_review_boundary_preferences() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let report = extract_high_value_text_to_drafts(
+        temp.path(),
+        "重视真实历史回归，不迷信静态样例。\n更关心候选质量，而不是候选数量。\n希望结果能支持持续自我修正。\n协作阶段：先 review 再 merge、先保留审阅边界、不要让 AI 直接固化规则。",
+        vec!["codex".to_string()],
+        "test",
+        Some("local".to_string()),
+        true,
+        8,
+    )
+    .expect("extract");
+
+    assert!(
+        report
+            .candidates
+            .iter()
+            .any(|candidate| candidate.body.contains("真实历史回归")),
+        "real-history validation should be retained: {:?}",
+        report.candidates
+    );
+    assert!(
+        report
+            .candidates
+            .iter()
+            .any(|candidate| candidate.body.contains("候选质量")),
+        "candidate quality preference should be retained: {:?}",
+        report.candidates
+    );
+    assert!(
+        report
+            .candidates
+            .iter()
+            .any(|candidate| candidate.body.contains("审阅边界")),
+        "review boundary preference should be retained: {:?}",
+        report.candidates
+    );
+    assert!(
+        report
+            .candidates
+            .iter()
+            .any(|candidate| candidate.body.contains("持续自我修正")),
+        "self-correction preference should be retained: {:?}",
+        report.candidates
+    );
+}
+
+#[test]
+fn high_value_extraction_filters_artifacts_before_balanced_selection() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let noisy_prefix = (0..20)
+        .map(|index| {
+            format!("Acceptance criteria {index}: non-dry-run fixture source ids must stay stable.")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let report = extract_high_value_text_to_drafts(
+        temp.path(),
+        &format!(
+            "{noisy_prefix}\n重视真实历史回归，不迷信静态样例。\n更关心候选质量，而不是候选数量。"
+        ),
+        vec!["codex".to_string()],
+        "test",
+        Some("local".to_string()),
+        true,
+        4,
+    )
+    .expect("extract");
+
+    assert!(
+        report
+            .candidates
+            .iter()
+            .any(|candidate| candidate.body.contains("真实历史回归")),
+        "quality-skipped artifacts should not occupy selection slots: {:?}",
+        report.candidates
+    );
+    assert!(
+        report.candidates.iter().all(|candidate| !candidate
+            .body
+            .to_lowercase()
+            .contains("acceptance criteria")),
+        "artifact candidates should be filtered before ranking: {:?}",
+        report.candidates
+    );
+}
+
+#[test]
 fn high_value_extraction_limits_candidate_count() {
     let temp = tempfile::tempdir().expect("tempdir");
     let report = extract_high_value_text_to_drafts(
@@ -575,7 +938,7 @@ fn high_value_extraction_keeps_project_improvement_records() {
     );
     assert!(improvement_body.len() >= 28 && improvement_body.len() <= 360);
     let local_candidates =
-        extract_high_value_candidates_with_preferences(text, &built_in_preferences(), 8);
+        extract_high_value_candidates_with_preferences(text, &built_in_preferences(), 8, false);
     assert!(!local_candidates.is_empty());
     let report = extract_high_value_text_to_drafts(
         temp.path(),

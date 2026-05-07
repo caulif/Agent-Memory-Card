@@ -307,6 +307,22 @@ pub fn reject_candidate(
 }
 
 #[tauri::command]
+pub fn gc_candidates(
+    project_path: String,
+    confirmed_policy: Option<kernel::KernelPolicy>,
+    decision_token: Option<String>,
+) -> CommandResult<agent_kernel::candidate::CandidateGcReport> {
+    enforce_tauri_kernel_policy_for_project(
+        &project_path,
+        kernel::KernelCommand::GcCandidates,
+        serde_json::json!({}),
+        confirmed_policy,
+        decision_token,
+    )?;
+    app_service::gc_candidates(Path::new(&project_path)).map_err(error_to_string)
+}
+
+#[tauri::command]
 pub fn update_draft(
     project_path: String,
     id: String,

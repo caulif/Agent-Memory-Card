@@ -4,26 +4,34 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
 
 use crate::candidate;
+use crate::candidate::MemoryTier;
 use crate::draft::{self, NewDraft};
 use crate::provider;
 use crate::skilllet;
 use crate::textutil;
 
+mod r#abstract;
 mod atomic;
 mod candidate_factory;
 pub mod chunk;
 pub mod classify;
 mod dedupe;
 pub(crate) mod embedding;
+mod feedback_gate;
 pub mod gate;
 pub mod lifecycle;
 mod llm;
+mod llm_pipeline_impl;
+pub(crate) mod memory_gate;
 mod preference;
 pub mod quality;
 mod quality_gate;
 mod ranking;
 mod recurrence;
+mod refine;
+mod report;
 pub mod scoring;
+mod shared_impl;
 mod signals;
 
 pub use preference::{
@@ -37,14 +45,17 @@ use atomic::split_atomic_sentences;
 use candidate_factory::{
     atomic_exception_candidate, classify_kind, draft_id, extraction_metadata_for_chunk,
     high_value_prompt_candidate, infer_scope, looks_like_rule, looks_like_skilllet_signal,
-    normalize_body, normalize_project_improvement_body, scored_signal_candidate, title_from_body,
+    normalize_body, normalize_project_improvement_body, principle_candidates,
+    scored_signal_candidate, self_verification_candidate, title_from_body,
     title_from_project_improvement,
 };
 use dedupe::dedupe_candidates;
+use llm_pipeline_impl::extract_llm_text_to_drafts;
 #[cfg(test)]
 use preference::built_in_preferences;
 use preference::{KnownPreference, load_known_preferences, normalize_known_preference};
 use quality_gate::{QualityDisposition, evaluate_candidate_quality, quality_skip_message};
+use shared_impl::*;
 use signals::{has_explicit_memory_marker, looks_like_project_improvement_signal, split_sentences};
 
 #[derive(Debug)]
@@ -57,60 +68,6 @@ pub struct ExtractReport {
     pub redacted: bool,
 }
 
-impl ExtractReport {
-    pub fn render(&self) -> String {
-        let mut out = String::new();
-        out.push_str("Agent-Kernel extract report\n\n");
-        out.push_str(&format!("Provider: {}\n\n", self.provider));
-        if self.redacted {
-            out.push_str("Secrets: redacted\n\n");
-        }
-        if self.created.is_empty() {
-            if self.dry_run && !self.candidates.is_empty() {
-                out.push_str("Draft candidates:\n");
-                for candidate in &self.candidates {
-                    out.push_str(&format!("- {}: {}\n", candidate.id, candidate.body));
-                    if let Some(confidence) = candidate.confidence {
-                        out.push_str(&format!("  confidence: {:.0}%\n", confidence * 100.0));
-                    }
-                    if let Some(template) = candidate.matched_template.as_deref() {
-                        out.push_str(&format!("  matched_template: {template}\n"));
-                    }
-                    if let Some(reason) = candidate.reason.as_deref() {
-                        out.push_str(&format!("  reason: {reason}\n"));
-                    }
-                    if let Some(classification) = candidate.classification.as_ref() {
-                        out.push_str(&format!(
-                            "  classification: signal={}, artifact={}, hardness={}, activation={}\n",
-                            classification.signal,
-                            classification.artifact_kind,
-                            classification.hardness,
-                            classification.activation,
-                        ));
-                    }
-                    if !candidate.tags.is_empty() {
-                        out.push_str(&format!("  tags: {}\n", candidate.tags.join(", ")));
-                    }
-                }
-            } else {
-                out.push_str("No drafts created.\n");
-            }
-        } else {
-            out.push_str("Drafts created:\n");
-            for id in &self.created {
-                out.push_str(&format!("- {id}\n"));
-            }
-        }
-        if !self.skipped.is_empty() {
-            out.push_str("\nSkipped:\n");
-            for item in &self.skipped {
-                out.push_str(&format!("- {item}\n"));
-            }
-        }
-        out
-    }
-}
-
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ExtractCandidatePreview {
     pub id: String,
@@ -118,6 +75,9 @@ pub struct ExtractCandidatePreview {
     pub body: String,
     pub kind: String,
     pub scope: String,
+    pub memory_tier: MemoryTier,
+    pub abstraction_of: Option<String>,
+    pub abstracted_from: Option<String>,
     pub evidence: String,
     pub confidence: Option<f32>,
     pub reason: Option<String>,
@@ -135,6 +95,9 @@ pub(super) struct Candidate {
     body: String,
     kind: String,
     scope: String,
+    memory_tier: MemoryTier,
+    abstraction_of: Option<String>,
+    abstracted_from: Option<String>,
     evidence: String,
     confidence: Option<f32>,
     reason: Option<String>,
@@ -212,7 +175,11 @@ fn extract_local_text_to_drafts(
     };
     let redacted = redacted_input != input;
     let preferences = load_known_preferences(project_root)?;
-    let mut candidates = extract_candidates_with_preferences(&redacted_input, &preferences);
+    let mut candidates = extract_candidates_with_preferences(
+        &redacted_input,
+        &preferences,
+        provider_cfg.fallback_methodology_templates,
+    );
     recurrence::apply_recurrence_boost(project_root, &mut candidates)?;
 
     let existing_skilllets = skilllet::load_skilllets(project_root)?;
@@ -221,8 +188,8 @@ fn extract_local_text_to_drafts(
     let candidates: Vec<(Candidate, candidate::ExtractionAction)> = candidates
         .into_iter()
         .map(|candidate| {
-            let action = match deduper.dedup_against_existing(&candidate.body, &existing_skilllets)
-            {
+            let scope_skilllets = scoped_skilllets(&existing_skilllets, &candidate.scope);
+            let action = match deduper.dedup_against_existing(&candidate.body, &scope_skilllets) {
                 embedding::DedupResult::Duplicate {
                     similar_id,
                     similarity,
@@ -231,12 +198,45 @@ fn extract_local_text_to_drafts(
             };
             (candidate, action)
         })
-        .filter_map(|(candidate, action)| {
+        .filter_map(|(mut candidate, action)| {
+            let feedback = feedback_gate::apply_candidate_feedback(
+                project_root,
+                &draft_id(&candidate),
+                &mut candidate,
+            );
+            if let Ok(Some(message)) = feedback {
+                skipped.push(message);
+                return None;
+            } else if let Err(error) = feedback {
+                skipped.push(format!("feedback: {error}"));
+            }
             let decision = evaluate_candidate_quality(&candidate, &action);
             if decision.disposition == QualityDisposition::Skip {
                 skipped.push(quality_skip_message(&draft_id(&candidate), &decision));
                 None
             } else {
+                let memory_decision = memory_gate::evaluate_memory_candidate(
+                    &candidate.title,
+                    &candidate.body,
+                    &candidate.evidence,
+                    &candidate.kind,
+                    &candidate.scope,
+                );
+                if memory_decision.disposition == memory_gate::MemoryGateDisposition::Reject {
+                    skipped.push(format!(
+                        "{}: memory-gate ({})",
+                        draft_id(&candidate),
+                        memory_decision.flags.join(",")
+                    ));
+                    return None;
+                }
+                let action = if memory_decision.disposition
+                    == memory_gate::MemoryGateDisposition::ReviewOnly
+                {
+                    action.with_route(memory_decision.route)
+                } else {
+                    action
+                };
                 Some((candidate, action))
             }
         })
@@ -259,16 +259,17 @@ fn extract_local_text_to_drafts(
         };
         let score = scoring::score_chunk(&chunk);
         if score.disposition == scoring::ExtractionDisposition::Candidate
-            || candidate.matched_template.as_deref() == Some("atomic-exception")
+            || is_priority_template(&candidate)
         {
             scored_candidates.push((candidate, score, action, decision));
         }
     }
-    let selected = ranking::select_diverse_candidates(
+    let selected = ranking::select_balanced_candidates(
         &scored_candidates,
         10,
-        |(candidate, _, _, _)| candidate.confidence.unwrap_or(0.0),
+        |(candidate, _, _, _)| candidate_selection_score(candidate),
         |(candidate, _, _, _)| ranking::candidate_cluster_key(candidate),
+        |(candidate, _, _, _)| candidate.memory_tier.clone(),
     );
     let mut slots = scored_candidates
         .into_iter()
@@ -278,6 +279,26 @@ fn extract_local_text_to_drafts(
         .into_iter()
         .filter_map(|index| slots.get_mut(index).and_then(Option::take))
         .collect::<Vec<_>>();
+    let scored_candidates = if should_refine_final_memory(source) {
+        let originals = scored_candidates
+            .iter()
+            .map(|(candidate, _, _, _)| candidate.clone())
+            .collect::<Vec<_>>();
+        let (refined, refine_messages) = refine::refine_candidates(project_root, &originals);
+        skipped.extend(refine_messages);
+        scored_candidates
+            .into_iter()
+            .zip(refined)
+            .filter_map(|((_, score, action, _), refined)| {
+                let candidate = refined?;
+                let decision = evaluate_candidate_quality(&candidate, &action);
+                (decision.disposition != QualityDisposition::Skip)
+                    .then_some((candidate, score, action, decision))
+            })
+            .collect::<Vec<_>>()
+    } else {
+        scored_candidates
+    };
 
     let previews = scored_candidates
         .iter()
@@ -289,14 +310,17 @@ fn extract_local_text_to_drafts(
                 source_kind: source.to_string(),
                 source_observations: Vec::new(),
             };
-            let classification = classify::classify_chunk(&chunk);
-            let routed_action = action.clone().with_route(&classification.artifact_kind);
+            let classification = classification_for_candidate(candidate, &chunk);
+            let routed_action = route_action_for_classification(action, &classification);
             ExtractCandidatePreview {
                 id: draft_id(candidate),
                 title: candidate.title.clone(),
                 body: candidate.body.clone(),
                 kind: candidate.kind.clone(),
                 scope: candidate.scope.clone(),
+                memory_tier: candidate.memory_tier.clone(),
+                abstraction_of: candidate.abstraction_of.clone(),
+                abstracted_from: candidate.abstracted_from.clone(),
                 evidence: format!("{source}: {}", candidate.evidence),
                 confidence: candidate.confidence,
                 reason: candidate.reason.clone(),
@@ -342,7 +366,12 @@ fn extract_local_text_to_drafts(
             .as_ref()
             .map(|classification| classification.artifact_kind.as_str())
             .unwrap_or("review_only");
-        extraction.suggested_action = Some(action.with_route(route));
+        extraction.suggested_action = Some(route_action(action, route));
+        let (memory_tier, value_scores) = build_memory_tier_metadata(&candidate);
+        extraction.memory_tier = memory_tier;
+        extraction.value_scores = value_scores;
+        extraction.abstraction_of = candidate.abstraction_of.clone();
+        extraction.abstracted_from = candidate.abstracted_from.clone();
         let result = draft::add_draft(
             project_root,
             NewDraft {
@@ -370,266 +399,6 @@ fn extract_local_text_to_drafts(
         candidates: previews,
         dry_run,
         provider: "local".to_string(),
-        redacted,
-    })
-}
-
-fn extract_llm_text_to_drafts(
-    project_root: &Path,
-    input: &str,
-    targets: Vec<String>,
-    source: &str,
-    provider_name: &str,
-    dry_run: bool,
-    max_candidates: Option<usize>,
-) -> Result<ExtractReport> {
-    let provider_cfg = provider::load_or_default_provider_config(project_root)?;
-    let redacted_input = if provider_cfg.privacy.redact_secrets {
-        provider::redact_secrets(input)
-    } else {
-        input.to_string()
-    };
-    let redacted = redacted_input != input;
-
-    let paragraphs = signals::split_into_paragraphs(&redacted_input);
-    let candidate_paragraphs = signals::detect_candidate_paragraphs(&paragraphs);
-
-    if candidate_paragraphs.is_empty() {
-        return Ok(ExtractReport {
-            created: Vec::new(),
-            skipped: vec!["No candidate paragraphs detected.".to_string()],
-            candidates: Vec::new(),
-            dry_run,
-            provider: provider_name.to_string(),
-            redacted,
-        });
-    }
-
-    let max_per_batch = provider_cfg.max_candidates_per_batch;
-    let min_confidence = provider_cfg.min_confidence;
-    let mut all_knowledge = Vec::new();
-
-    for batch in candidate_paragraphs.chunks(max_per_batch) {
-        match llm::run_llm_extraction(project_root, batch, 2048) {
-            Ok(items) => all_knowledge.extend(items),
-            Err(e) => {
-                return Ok(ExtractReport {
-                    created: Vec::new(),
-                    skipped: vec![format!("LLM extraction failed: {e}")],
-                    candidates: Vec::new(),
-                    dry_run,
-                    provider: provider_name.to_string(),
-                    redacted,
-                });
-            }
-        }
-    }
-
-    let usable = llm::filter_usable_knowledge(all_knowledge, min_confidence);
-
-    let skilllets = skilllet::load_skilllets(project_root)?;
-    let deduper = embedding::SemanticDeduper::new(0.75, 0.65);
-    let mut deduped_items: Vec<embedding::LlmKnowledgeItem> = Vec::new();
-    for item in usable {
-        if item.is_noise {
-            continue;
-        }
-        let mut suggested_action = match deduper.dedup_against_existing(&item.body, &skilllets) {
-            embedding::DedupResult::Duplicate {
-                similar_id,
-                similarity,
-            } => candidate::ExtractionAction::merge_into_existing(similar_id, similarity),
-            embedding::DedupResult::Unique => candidate::ExtractionAction::new_candidate(),
-        };
-        let similar_skilllets = deduper.top_similar_skilllets(&item.body, &skilllets, 5, 0.35);
-        if !similar_skilllets.is_empty()
-            && let Ok(decision) =
-                llm::run_update_decision(project_root, &item.body, &similar_skilllets)
-        {
-            suggested_action = llm::action_from_update_decision(&decision, suggested_action);
-        }
-        deduped_items.push(embedding::LlmKnowledgeItem {
-            title: item.title.clone(),
-            body: item.body.clone(),
-            kind: llm::knowledge_kind_to_str(&item.kind).to_string(),
-            scope: "project".to_string(),
-            confidence: item.confidence,
-            evidence: item
-                .evidence_quote
-                .as_deref()
-                .map(|quote| format!("{source}: {quote}"))
-                .unwrap_or_else(|| format!("{source}: LLM extraction")),
-            reason: item.rationale.clone(),
-            matched_signal: format!("{:?}", item.kind),
-            is_noise: item.is_noise,
-            suggested_action,
-        });
-    }
-
-    let retained = deduper.dedup_within_batch(&mut deduped_items);
-
-    let final_items: Vec<&embedding::LlmKnowledgeItem> =
-        retained.iter().map(|&i| &deduped_items[i]).collect();
-    let final_limit = max_candidates.unwrap_or(usize::MAX);
-    let mut skipped = Vec::new();
-    let mut scored_items: Vec<(
-        &embedding::LlmKnowledgeItem,
-        scoring::ExtractionScore,
-        quality_gate::QualityGateDecision,
-    )> = Vec::new();
-    for item in final_items {
-        let candidate = Candidate {
-            title: item.title.clone(),
-            body: item.body.clone(),
-            kind: item.kind.clone(),
-            scope: item.scope.clone(),
-            evidence: item.evidence.clone(),
-            confidence: Some(item.confidence),
-            reason: Some(item.reason.clone()),
-            matched_template: Some(item.matched_signal.clone()),
-        };
-        let decision = evaluate_candidate_quality(&candidate, &item.suggested_action);
-        if decision.disposition == QualityDisposition::Skip {
-            skipped.push(quality_skip_message(
-                &format!("project:{}", textutil::slug(&item.title)),
-                &decision,
-            ));
-            continue;
-        }
-        let similar_skilllets = deduper.top_similar_skilllets(&item.body, &skilllets, 5, 0.35);
-        if let Ok(judgment) =
-            llm::run_quality_judge(project_root, &item.body, &item.evidence, &similar_skilllets)
-            && judgment.decision == llm::JudgeDecision::Reject
-        {
-            skipped.push(format!(
-                "project:{}: llm-judge ({})",
-                textutil::slug(&item.title),
-                judgment.reason
-            ));
-            continue;
-        }
-        let chunk = chunk::EvidenceChunk {
-            id: item.title.clone(),
-            text: item.body.clone(),
-            origin: chunk::ChunkOrigin::Assistant,
-            source_kind: source.to_string(),
-            source_observations: Vec::new(),
-        };
-        let score = scoring::score_chunk(&chunk);
-        if score.disposition == scoring::ExtractionDisposition::Candidate {
-            scored_items.push((item, score, decision));
-        }
-    }
-    let selected = ranking::select_diverse_candidates(
-        &scored_items,
-        10.min(final_limit),
-        |(item, _, _)| item.confidence,
-        |(item, _, _)| format!("{}:{}", item.kind, ranking::body_domain(&item.body)),
-    );
-    let mut slots = scored_items
-        .into_iter()
-        .map(Some)
-        .collect::<Vec<Option<_>>>();
-    let scored_items = selected
-        .into_iter()
-        .filter_map(|index| slots.get_mut(index).and_then(Option::take))
-        .collect::<Vec<_>>();
-
-    let previews = scored_items
-        .iter()
-        .map(|(item, score, decision)| {
-            let chunk = chunk::EvidenceChunk {
-                id: item.title.clone(),
-                text: item.body.clone(),
-                origin: chunk::ChunkOrigin::Assistant,
-                source_kind: source.to_string(),
-                source_observations: Vec::new(),
-            };
-            let classification = classify::classify_chunk(&chunk);
-            let routed_action = item
-                .suggested_action
-                .clone()
-                .with_route(&classification.artifact_kind);
-            ExtractCandidatePreview {
-                id: format!("project:{}", textutil::slug(&item.title)),
-                title: item.title.clone(),
-                body: item.body.clone(),
-                kind: item.kind.clone(),
-                scope: item.scope.clone(),
-                evidence: item.evidence.clone(),
-                confidence: Some(item.confidence),
-                reason: Some(score.reason.clone()),
-                matched_template: Some(item.matched_signal.clone()),
-                classification: Some(classification.clone()),
-                tags: classification.tags.clone(),
-                suggested_action: Some(routed_action),
-                operation: decision.operation.clone(),
-                quality_flags: decision.flags.clone(),
-            }
-        })
-        .collect::<Vec<_>>();
-
-    if dry_run {
-        return Ok(ExtractReport {
-            created: Vec::new(),
-            skipped,
-            candidates: previews,
-            dry_run,
-            provider: provider_name.to_string(),
-            redacted,
-        });
-    }
-
-    let mut created = Vec::new();
-    for (item, score, _decision) in scored_items {
-        let id = format!("project:{}", textutil::slug(&item.title));
-        let chunk = chunk::EvidenceChunk {
-            id: item.title.clone(),
-            text: item.body.clone(),
-            origin: chunk::ChunkOrigin::Assistant,
-            source_kind: source.to_string(),
-            source_observations: Vec::new(),
-        };
-        let mut extraction =
-            extraction_metadata_for_chunk(&chunk, &score, item.suggested_action.record_id.clone());
-        let route = extraction
-            .classification
-            .as_ref()
-            .map(|classification| classification.artifact_kind.as_str())
-            .unwrap_or("review_only");
-        extraction.suggested_action = Some(item.suggested_action.clone().with_route(route));
-        let result = candidate::add_candidate(
-            project_root,
-            candidate::NewCandidate {
-                id: id.clone(),
-                title: item.title.clone(),
-                kind: item.kind.clone(),
-                scope: item.scope.clone(),
-                body: item.body.clone(),
-                brief: None,
-                tags: Vec::new(),
-                language: None,
-                targets: targets.clone(),
-                evidence: item.evidence.clone(),
-                confidence: Some(item.confidence),
-                reason: Some(item.reason.clone()),
-                matched_template: Some(item.matched_signal.clone()),
-                source_observations: Vec::new(),
-                extraction,
-            },
-        );
-        match result {
-            Ok(()) => created.push(id),
-            Err(error) => skipped.push(format!("{id}: {error}")),
-        }
-    }
-
-    Ok(ExtractReport {
-        created,
-        skipped,
-        candidates: previews,
-        dry_run,
-        provider: provider_name.to_string(),
         redacted,
     })
 }
@@ -691,6 +460,7 @@ fn extract_local_high_value_text_to_drafts(
         &redacted_input,
         &preferences,
         max_candidates,
+        provider_cfg.fallback_methodology_templates,
     );
     recurrence::apply_recurrence_boost(project_root, &mut candidates)?;
 
@@ -704,8 +474,8 @@ fn extract_local_high_value_text_to_drafts(
     )> = candidates
         .into_iter()
         .map(|candidate| {
-            let action = match deduper.dedup_against_existing(&candidate.body, &existing_skilllets)
-            {
+            let scope_skilllets = scoped_skilllets(&existing_skilllets, &candidate.scope);
+            let action = match deduper.dedup_against_existing(&candidate.body, &scope_skilllets) {
                 embedding::DedupResult::Duplicate {
                     similar_id,
                     similarity,
@@ -714,16 +484,73 @@ fn extract_local_high_value_text_to_drafts(
             };
             (candidate, action)
         })
-        .filter_map(|(candidate, action)| {
+        .filter_map(|(mut candidate, action)| {
+            let feedback = feedback_gate::apply_candidate_feedback(
+                project_root,
+                &draft_id(&candidate),
+                &mut candidate,
+            );
+            if let Ok(Some(message)) = feedback {
+                skipped.push(message);
+                return None;
+            } else if let Err(error) = feedback {
+                skipped.push(format!("feedback: {error}"));
+            }
             let decision = evaluate_candidate_quality(&candidate, &action);
             if decision.disposition == QualityDisposition::Skip {
                 skipped.push(quality_skip_message(&draft_id(&candidate), &decision));
                 None
             } else {
+                let memory_decision = memory_gate::evaluate_memory_candidate(
+                    &candidate.title,
+                    &candidate.body,
+                    &candidate.evidence,
+                    &candidate.kind,
+                    &candidate.scope,
+                );
+                if memory_decision.disposition == memory_gate::MemoryGateDisposition::Reject {
+                    skipped.push(format!(
+                        "{}: memory-gate ({})",
+                        draft_id(&candidate),
+                        memory_decision.flags.join(",")
+                    ));
+                    return None;
+                }
+                let action = if memory_decision.disposition
+                    == memory_gate::MemoryGateDisposition::ReviewOnly
+                {
+                    action.with_route(memory_decision.route)
+                } else {
+                    action
+                };
                 Some((candidate, action, decision))
             }
         })
         .collect();
+
+    let candidates = if should_refine_final_memory(source) {
+        let originals = candidates
+            .iter()
+            .map(|(candidate, _, _)| candidate.clone())
+            .collect::<Vec<_>>();
+        let (refined, refine_messages) = refine::refine_candidates(project_root, &originals);
+        skipped.extend(refine_messages);
+        candidates
+            .into_iter()
+            .zip(refined)
+            .filter_map(|((_, action, _), refined)| {
+                let candidate = refined?;
+                let decision = evaluate_candidate_quality(&candidate, &action);
+                if decision.disposition == QualityDisposition::Skip {
+                    skipped.push(quality_skip_message(&draft_id(&candidate), &decision));
+                    return None;
+                }
+                Some((candidate, action, decision))
+            })
+            .collect::<Vec<_>>()
+    } else {
+        candidates
+    };
 
     let previews = candidates
         .iter()
@@ -735,14 +562,17 @@ fn extract_local_high_value_text_to_drafts(
                 source_kind: source.to_string(),
                 source_observations: Vec::new(),
             };
-            let classification = classify::classify_chunk(&chunk);
-            let routed_action = action.clone().with_route(&classification.artifact_kind);
+            let classification = classification_for_candidate(candidate, &chunk);
+            let routed_action = route_action_for_classification(action, &classification);
             ExtractCandidatePreview {
                 id: draft_id(candidate),
                 title: candidate.title.clone(),
                 body: candidate.body.clone(),
                 kind: candidate.kind.clone(),
                 scope: candidate.scope.clone(),
+                memory_tier: candidate.memory_tier.clone(),
+                abstraction_of: candidate.abstraction_of.clone(),
+                abstracted_from: candidate.abstracted_from.clone(),
                 evidence: format!("{source}: {}", candidate.evidence),
                 confidence: candidate.confidence,
                 reason: candidate.reason.clone(),
@@ -789,7 +619,12 @@ fn extract_local_high_value_text_to_drafts(
             .as_ref()
             .map(|classification| classification.artifact_kind.as_str())
             .unwrap_or("review_only");
-        extraction.suggested_action = Some(action.with_route(route));
+        extraction.suggested_action = Some(route_action(action, route));
+        let (memory_tier, value_scores) = build_memory_tier_metadata(&candidate);
+        extraction.memory_tier = memory_tier;
+        extraction.value_scores = value_scores;
+        extraction.abstraction_of = candidate.abstraction_of.clone();
+        extraction.abstracted_from = candidate.abstracted_from.clone();
         let result = draft::add_draft(
             project_root,
             NewDraft {
@@ -821,20 +656,60 @@ fn extract_local_high_value_text_to_drafts(
     })
 }
 
+fn route_action_for_classification(
+    action: &candidate::ExtractionAction,
+    classification: &classify::KnowledgeClassification,
+) -> candidate::ExtractionAction {
+    route_action(action.clone(), &classification.artifact_kind)
+}
+
+fn should_refine_final_memory(source: &str) -> bool {
+    let lower = source.to_lowercase();
+    lower.contains("observation synthesis")
+        || lower.contains("methodology prefilter")
+        || lower.contains("gold methodology")
+        || lower.contains("chunk ")
+}
+
+fn route_action(action: candidate::ExtractionAction, route: &str) -> candidate::ExtractionAction {
+    if action.route == "review_only" {
+        action.with_route("review_only")
+    } else {
+        action.with_route(route)
+    }
+}
+
 #[cfg(test)]
 fn extract_candidates(input: &str) -> Vec<Candidate> {
     let preferences = built_in_preferences();
-    extract_candidates_with_preferences(input, &preferences)
+    extract_candidates_with_preferences(input, &preferences, false)
 }
 
 fn extract_candidates_with_preferences(
     input: &str,
     preferences: &[KnownPreference],
+    fallback_methodology_templates: bool,
 ) -> Vec<Candidate> {
     let mut candidates = Vec::new();
     for raw_sentence in split_sentences(input) {
         for sentence in split_atomic_sentences(raw_sentence) {
             let sentence = sentence.as_str();
+            if fallback_methodology_templates {
+                let methodology_candidates = methodology_pair_candidates(sentence);
+                if !methodology_candidates.is_empty() {
+                    candidates.extend(methodology_candidates);
+                    continue;
+                }
+            }
+            if let Some(candidate) = self_verification_candidate(sentence) {
+                candidates.push(candidate);
+                continue;
+            }
+            let principle_signal_candidates = principle_candidates(sentence);
+            if !principle_signal_candidates.is_empty() {
+                candidates.extend(principle_signal_candidates);
+                continue;
+            }
             if let Some(candidate) = high_value_prompt_candidate(sentence) {
                 candidates.push(candidate);
                 continue;
@@ -848,6 +723,9 @@ fn extract_candidates_with_preferences(
                     body,
                     kind: "procedure".to_string(),
                     scope: infer_scope(sentence).to_string(),
+                    memory_tier: MemoryTier::ProjectRule,
+                    abstraction_of: None,
+                    abstracted_from: None,
                     evidence: sentence.to_string(),
                     confidence: Some(0.82),
                     reason: Some(
@@ -885,6 +763,9 @@ fn extract_candidates_with_preferences(
                 body,
                 kind: classify_kind(sentence).to_string(),
                 scope: "project".to_string(),
+                memory_tier: MemoryTier::ProjectRule,
+                abstraction_of: None,
+                abstracted_from: None,
                 evidence: sentence.to_string(),
                 confidence: Some(0.62),
                 reason: Some("Matched local rule-like sentence heuristic.".to_string()),
@@ -899,6 +780,7 @@ fn extract_high_value_candidates_with_preferences(
     input: &str,
     preferences: &[KnownPreference],
     max_candidates: usize,
+    fallback_methodology_templates: bool,
 ) -> Vec<Candidate> {
     let mut candidates = Vec::new();
     let mut weak_counts = std::collections::BTreeMap::<String, usize>::new();
@@ -907,6 +789,22 @@ fn extract_high_value_candidates_with_preferences(
     for raw_sentence in split_sentences(input) {
         for sentence in split_atomic_sentences(raw_sentence) {
             let sentence = sentence.as_str();
+            if fallback_methodology_templates {
+                let methodology_candidates = methodology_pair_candidates(sentence);
+                if !methodology_candidates.is_empty() {
+                    candidates.extend(methodology_candidates);
+                    continue;
+                }
+            }
+            if let Some(candidate) = self_verification_candidate(sentence) {
+                candidates.push(candidate);
+                continue;
+            }
+            let principle_signal_candidates = principle_candidates(sentence);
+            if !principle_signal_candidates.is_empty() {
+                candidates.extend(principle_signal_candidates);
+                continue;
+            }
             if let Some(candidate) = high_value_prompt_candidate(sentence) {
                 candidates.push(candidate);
                 continue;
@@ -920,6 +818,9 @@ fn extract_high_value_candidates_with_preferences(
                     body,
                     kind: "procedure".to_string(),
                     scope: infer_scope(sentence).to_string(),
+                    memory_tier: MemoryTier::ProjectRule,
+                    abstraction_of: None,
+                    abstracted_from: None,
                     evidence: sentence.to_string(),
                     confidence: Some(0.82),
                     reason: Some(
@@ -962,6 +863,9 @@ fn extract_high_value_candidates_with_preferences(
             body,
             kind: classify_kind(sentence).to_string(),
             scope: infer_scope(sentence).to_string(),
+            memory_tier: MemoryTier::ProjectRule,
+            abstraction_of: None,
+            abstracted_from: None,
             evidence: sentence.to_string(),
             confidence: Some(0.78),
             reason: Some(
@@ -984,11 +888,12 @@ fn extract_high_value_candidates_with_preferences(
     }
 
     let deduped = dedupe_candidates(candidates);
-    let selected = ranking::select_diverse_candidates(
+    let selected = ranking::select_balanced_candidates(
         &deduped,
         max_candidates,
-        |candidate| candidate.confidence.unwrap_or(0.0),
+        candidate_selection_score,
         ranking::candidate_cluster_key,
+        |candidate| candidate.memory_tier.clone(),
     );
     selected
         .into_iter()
@@ -996,5 +901,7 @@ fn extract_high_value_candidates_with_preferences(
         .collect()
 }
 
+#[cfg(test)]
+mod methodology_tests;
 #[cfg(test)]
 mod tests;

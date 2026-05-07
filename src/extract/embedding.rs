@@ -75,7 +75,7 @@ impl SemanticMatcher for FastEmbedMatcher {
 }
 
 pub(crate) struct SemanticDeduper {
-    matcher: Box<dyn SemanticMatcher>,
+    matcher: Mutex<Option<Box<dyn SemanticMatcher>>>,
     existing_threshold: f32,
     batch_threshold: f32,
 }
@@ -83,7 +83,7 @@ pub(crate) struct SemanticDeduper {
 impl SemanticDeduper {
     pub(crate) fn new(existing_threshold: f32, batch_threshold: f32) -> Self {
         Self {
-            matcher: default_matcher(),
+            matcher: Mutex::new(None),
             existing_threshold,
             batch_threshold,
         }
@@ -96,10 +96,19 @@ impl SemanticDeduper {
         batch_threshold: f32,
     ) -> Self {
         Self {
-            matcher,
+            matcher: Mutex::new(Some(matcher)),
             existing_threshold,
             batch_threshold,
         }
+    }
+
+    fn compute_similarity(&self, left: &str, right: &str) -> f32 {
+        let mut matcher = self
+            .matcher
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let matcher = matcher.get_or_insert_with(default_matcher);
+        matcher.compute_similarity(left, right)
     }
 
     pub(crate) fn dedup_against_existing(
@@ -108,7 +117,7 @@ impl SemanticDeduper {
         existing_skilllets: &[SkillletRecord],
     ) -> DedupResult {
         for skilllet in existing_skilllets {
-            let similarity = self.matcher.compute_similarity(body, &skilllet.body);
+            let similarity = self.compute_similarity(body, &skilllet.body);
             if similarity > self.existing_threshold {
                 return DedupResult::Duplicate {
                     similar_id: skilllet.id.clone(),
@@ -129,7 +138,7 @@ impl SemanticDeduper {
         let mut scored = existing_skilllets
             .iter()
             .filter_map(|skilllet| {
-                let similarity = self.matcher.compute_similarity(body, &skilllet.body);
+                let similarity = self.compute_similarity(body, &skilllet.body);
                 (similarity >= min_similarity)
                     .then(|| (skilllet.id.clone(), skilllet.body.clone(), similarity))
             })
@@ -153,7 +162,7 @@ impl SemanticDeduper {
 
             let mut is_duplicate = false;
             for kept in &kept_items {
-                let similarity = self.matcher.compute_similarity(&item.body, &kept.body);
+                let similarity = self.compute_similarity(&item.body, &kept.body);
                 if similarity > self.batch_threshold {
                     is_duplicate = true;
                     break;
@@ -193,12 +202,19 @@ pub(crate) struct LlmKnowledgeItem {
     pub body: String,
     pub kind: String,
     pub scope: String,
+    pub memory_tier: crate::candidate::MemoryTier,
+    pub abstraction_of: Option<String>,
+    pub abstracted_from: Option<String>,
     pub confidence: f32,
     pub evidence: String,
     pub reason: String,
     pub matched_signal: String,
     pub is_noise: bool,
     pub suggested_action: crate::candidate::ExtractionAction,
+    pub durability_score: Option<f32>,
+    pub reusability_score: Option<f32>,
+    pub specificity_score: Option<f32>,
+    pub source_trust_score: Option<f32>,
 }
 
 #[derive(Debug, Clone)]
@@ -308,5 +324,23 @@ mod tests {
             }
             DedupResult::Unique => panic!("should detect duplicate"),
         }
+    }
+
+    #[test]
+    fn semantic_deduper_does_not_initialize_matcher_for_empty_existing_set() {
+        let deduper = SemanticDeduper::new(0.75, 0.65);
+
+        let result = deduper.dedup_against_existing("Use Bun for package management", &[]);
+
+        assert!(matches!(result, DedupResult::Unique));
+        assert!(
+            deduper
+                .matcher
+                .lock()
+                .expect("matcher lock")
+                .as_ref()
+                .is_none(),
+            "matcher should stay lazy when there is nothing to compare"
+        );
     }
 }

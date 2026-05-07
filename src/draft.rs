@@ -4,10 +4,12 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, anyhow};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 use crate::candidate::ExtractionMetadata;
 use crate::config;
 use crate::fsutil;
+use crate::provider::{self, ProviderJsonSchema, ProviderRequest};
 use crate::skilllet;
 use crate::textutil;
 
@@ -235,6 +237,15 @@ pub fn load_drafts(project_root: &Path) -> Result<Vec<DraftRecord>> {
     Ok(records)
 }
 
+pub fn load_reviewable_drafts(project_root: &Path) -> Result<Vec<DraftRecord>> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    let existing = ExistingSkillletIndex::load(&root)?;
+    Ok(load_drafts(&root)?
+        .into_iter()
+        .filter(|draft| !existing.represents_draft(draft))
+        .collect())
+}
+
 pub fn approve_draft(project_root: &Path, id: &str) -> Result<()> {
     let root = fsutil::normalize_project_root(project_root)?;
     let path = draft_path(&root, id)?;
@@ -242,7 +253,7 @@ pub fn approve_draft(project_root: &Path, id: &str) -> Result<()> {
         return Err(anyhow!("draft `{id}` does not exist"));
     }
     let draft: DraftRecord = serde_yaml::from_str(&fs::read_to_string(&path)?)?;
-    // 检查同名 skilllet 是否已存在；若 body 语义相似则直接删除草稿（视为已批准）
+    // 检查同名 skilllet 是否已存在；若是同一概念的更新，则吸收到现有 Skilllet。
     let existing_skilllets = skilllet::load_skilllets(&root)?;
     if let Some(existing_skilllet) = existing_skilllets
         .iter()
@@ -252,10 +263,30 @@ pub fn approve_draft(project_root: &Path, id: &str) -> Result<()> {
             fs::remove_file(path)?;
             return Ok(());
         }
+        if skilllet::review_update_matches_existing(existing_skilllet, &draft.title, &draft.body) {
+            skilllet::update_skilllet_from_review(
+                &root,
+                &draft.id,
+                draft.title.clone(),
+                draft.body.clone(),
+                draft.brief.clone(),
+                draft.tags.clone(),
+                draft.language.clone(),
+                draft.kind.clone(),
+                draft.scope.clone(),
+            )?;
+            fs::remove_file(path)?;
+            return Ok(());
+        }
         return Err(anyhow!(
             "skilllet id conflict for `{}` (different body); review or merge the existing Skilllet before approving this Draft",
             draft.id
         ));
+    }
+    let existing_index = ExistingSkillletIndex::from_records(&root, &existing_skilllets)?;
+    if existing_index.represents_draft(&draft) {
+        fs::remove_file(path)?;
+        return Ok(());
     }
     skilllet::add_skilllet_with_provenance(
         &root,
@@ -271,6 +302,124 @@ pub fn approve_draft(project_root: &Path, id: &str) -> Result<()> {
     )?;
     fs::remove_file(path)?;
     Ok(())
+}
+
+#[derive(Debug, Default)]
+struct ExistingSkillletIndex {
+    ids: BTreeSet<String>,
+    id_slugs: BTreeSet<String>,
+    title_slugs: BTreeSet<String>,
+    bodies: Vec<String>,
+}
+
+impl ExistingSkillletIndex {
+    fn load(project_root: &Path) -> Result<Self> {
+        let skilllets = skilllet::load_skilllets(project_root)?;
+        Self::from_records(project_root, &skilllets)
+    }
+
+    fn from_records(project_root: &Path, skilllets: &[skilllet::SkillletRecord]) -> Result<Self> {
+        let mut index = Self::default();
+        for skilllet in skilllets {
+            index.add_id(&skilllet.id);
+            index.title_slugs.insert(review_title_slug(&skilllet.title));
+            index.bodies.push(skilllet.body.clone());
+        }
+
+        let project = config::load_or_default_project_config(project_root)?;
+        for included in project.skilllets.include {
+            index.add_id(&included.id);
+        }
+
+        Ok(index)
+    }
+
+    fn add_id(&mut self, id: &str) {
+        self.ids.insert(id.to_string());
+        self.id_slugs.insert(review_id_slug(id));
+        for variant in id_scope_variants(id) {
+            self.ids.insert(variant);
+        }
+    }
+
+    fn represents_draft(&self, draft: &DraftRecord) -> bool {
+        if self.ids.contains(&draft.id) {
+            return true;
+        }
+        if id_scope_variants(&draft.id)
+            .iter()
+            .any(|variant| self.ids.contains(variant))
+        {
+            return true;
+        }
+        let id_slug = review_id_slug(&draft.id);
+        if !id_slug.is_empty() && self.id_slugs.contains(&id_slug) {
+            return true;
+        }
+        let title_slug = review_title_slug(&draft.title);
+        if !title_slug.is_empty()
+            && (self.title_slugs.contains(&title_slug) || self.id_slugs.contains(&title_slug))
+        {
+            return true;
+        }
+        self.bodies
+            .iter()
+            .any(|body| body_matches_existing(body, &draft.body))
+    }
+}
+
+fn id_scope_variants(id: &str) -> Vec<String> {
+    let Some((scope, rest)) = id.split_once(':') else {
+        return Vec::new();
+    };
+    match scope {
+        "project" => vec![format!("global:{rest}")],
+        "global" => vec![format!("project:{rest}")],
+        _ => Vec::new(),
+    }
+}
+
+fn review_id_slug(id: &str) -> String {
+    let raw = id
+        .split_once(':')
+        .map(|(_, rest)| rest)
+        .unwrap_or(id)
+        .trim();
+    review_slug(raw)
+}
+
+fn review_title_slug(title: &str) -> String {
+    review_slug(title)
+}
+
+fn review_slug(value: &str) -> String {
+    let mut text = value.trim();
+    for suffix in [" Fusion", " fusion", "-fusion", " 融合", "融合"] {
+        if let Some(stripped) = text.strip_suffix(suffix) {
+            text = stripped.trim();
+            break;
+        }
+    }
+    textutil::slug(text)
+}
+
+fn body_matches_existing(existing: &str, draft: &str) -> bool {
+    if textutil::jaccard_similarity(existing, draft) >= 0.72 {
+        return true;
+    }
+    let left = compact_text(existing);
+    let right = compact_text(draft);
+    left.chars().count() >= 24
+        && right.chars().count() >= 24
+        && (left.contains(&right) || right.contains(&left))
+}
+
+fn compact_text(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || ('\u{4e00}'..='\u{9fff}').contains(ch))
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 pub fn reject_draft(project_root: &Path, id: &str) -> Result<()> {
@@ -476,11 +625,8 @@ pub fn fuse_skilllets_to_draft(
         return Err(anyhow!("missing source skilllets: {}", missing.join(", ")));
     }
 
-    let body = sources
-        .iter()
-        .map(|skilllet| format!("## {}\n\n{}", skilllet.title, skilllet.body))
-        .collect::<Vec<_>>()
-        .join("\n\n");
+    let body = fuse_skilllet_body_with_provider(&root, title, &sources)
+        .unwrap_or_else(|| fuse_skilllet_body_deterministic(title, &sources));
     let evidence = format!("Fused Skilllets: {}", source_ids.join(", "));
     let confidence = Some(0.8);
     let mut targets = targets;
@@ -499,7 +645,7 @@ pub fn fuse_skilllets_to_draft(
             evidence,
             confidence,
             reason: Some(format!(
-                "Created as a reviewable fusion candidate from {} skilllets.",
+                "Synthesized a reviewable fusion candidate from {} skilllets.",
                 sources.len()
             )),
             matched_template: Some("manual:skilllet-fusion".to_string()),
@@ -507,15 +653,100 @@ pub fn fuse_skilllets_to_draft(
         },
     )?;
 
-    // 融合后删除源 skilllet，只保留融合结果
-    for source_id in &source_ids {
-        skilllet::delete_skilllet(&root, source_id)?;
-    }
-
     load_drafts(&root)?
         .into_iter()
         .find(|draft| draft.id == id)
         .ok_or_else(|| anyhow!("fused draft `{id}` was not written"))
+}
+
+#[derive(Debug, Deserialize)]
+struct FuseSkillletResponse {
+    body: String,
+}
+
+fn fuse_skilllet_body_with_provider(
+    project_root: &Path,
+    title: &str,
+    sources: &[skilllet::SkillletRecord],
+) -> Option<String> {
+    let cfg = provider::load_or_default_provider_config(project_root).ok()?;
+    let request = build_fuse_skilllet_prompt(title, sources);
+    let output =
+        provider::call_provider_for_role(&cfg, provider::ProviderRole::Refine, &request, 2048)
+            .ok()?;
+    let parsed: FuseSkillletResponse = serde_json::from_str(output.trim()).ok()?;
+    let body = parsed.body.trim().to_string();
+    is_valid_fused_body(&body).then_some(body)
+}
+
+fn build_fuse_skilllet_prompt(
+    title: &str,
+    sources: &[skilllet::SkillletRecord],
+) -> ProviderRequest {
+    let skilllets = sources
+        .iter()
+        .map(|source| {
+            serde_json::json!({
+                "id": source.id,
+                "title": source.title,
+                "kind": source.kind,
+                "scope": source.scope,
+                "body": source.body,
+                "brief": source.brief,
+                "tags": source.tags,
+            })
+        })
+        .collect::<Vec<_>>();
+    ProviderRequest {
+        system_prompt: r#"你把多个 Skilllet 融合成一个新的高质量 Draft Skilllet。
+
+要求：
+- 输出一条新的综合规则，不要简单拼接源 Skilllet 标题或 Markdown 小节。
+- 保留每个源 Skilllet 的核心触发条件、动作和边界。
+- 删除重复内容，冲突处写成需要 review 的边界。
+- 中文输入优先输出中文；英文输入可输出英文。
+- 只返回 JSON。"#
+            .to_string(),
+        user_prompt: serde_json::json!({
+            "new_title": title,
+            "source_skilllets": skilllets,
+        })
+        .to_string(),
+        json_schema: Some(ProviderJsonSchema {
+            name: "FuseSkilllets".to_string(),
+            strict: true,
+            schema: serde_json::json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "body": { "type": "string" }
+                },
+                "required": ["body"]
+            }),
+        }),
+    }
+}
+
+fn fuse_skilllet_body_deterministic(title: &str, sources: &[skilllet::SkillletRecord]) -> String {
+    let bodies = sources
+        .iter()
+        .map(|skilllet| skilllet.body.trim().trim_end_matches(['.', '。']))
+        .filter(|body| !body.is_empty())
+        .collect::<Vec<_>>();
+    format!(
+        "当需要执行“{}”相关流程时，综合遵循这些 Skilllet：{}。目标是把多个片段压缩成一条可审阅、可执行的新规则，而不是保留多个重复草稿。",
+        title.trim(),
+        bodies.join("；")
+    )
+}
+
+fn is_valid_fused_body(body: &str) -> bool {
+    let lower = body.to_lowercase();
+    body.chars().count() >= 24
+        && body.chars().count() <= 1000
+        && !body.lines().any(|line| line.trim_start().starts_with('#'))
+        && !lower.contains("source skilllet")
+        && !lower.contains("源 skilllet")
 }
 
 /// 删除指定草稿文件

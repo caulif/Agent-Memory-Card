@@ -93,6 +93,7 @@ pub enum KernelCommand {
     RejectCandidate {
         id: String,
     },
+    GcCandidates,
     MergeDrafts {
         ids: Vec<String>,
     },
@@ -309,6 +310,7 @@ pub fn command_risk(command: &KernelCommand) -> KernelRisk {
         KernelCommand::PromoteCandidate { .. } => KernelRisk::Medium,
         KernelCommand::HideCandidate { .. } => KernelRisk::Low,
         KernelCommand::RejectCandidate { .. } => KernelRisk::Low,
+        KernelCommand::GcCandidates => KernelRisk::Low,
         KernelCommand::MergeDrafts { .. } => KernelRisk::Medium,
         KernelCommand::AssignSkilllet { .. } => KernelRisk::Low,
         KernelCommand::SetAgentEnabled { .. } => KernelRisk::Low,
@@ -358,6 +360,7 @@ fn command_label(command: &KernelCommand) -> String {
         KernelCommand::PromoteCandidate { .. } => "promote-candidate",
         KernelCommand::HideCandidate { .. } => "hide-candidate",
         KernelCommand::RejectCandidate { .. } => "reject-candidate",
+        KernelCommand::GcCandidates => "gc-candidates",
         KernelCommand::MergeDrafts { .. } => "merge-drafts",
         KernelCommand::MergeSkilllets { .. } => "merge-skilllets",
         KernelCommand::FuseSkilllets { .. } => "fuse-skilllets",

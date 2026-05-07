@@ -176,6 +176,9 @@ pub fn test_preference_text(project_root: &Path, text: &str) -> Result<Preferenc
                     body: preference.body.clone(),
                     kind: "preference".to_string(),
                     scope: "project".to_string(),
+                    memory_tier: crate::candidate::MemoryTier::ProjectRule,
+                    abstraction_of: None,
+                    abstracted_from: None,
                     evidence: sentence.to_string(),
                     confidence: Some(0.92),
                     reason: Some(format_match_reason(&reason)),
@@ -207,6 +210,9 @@ pub(super) fn normalize_known_preference(
             body: preference.body.clone(),
             kind: "preference".to_string(),
             scope: "project".to_string(),
+            memory_tier: crate::candidate::MemoryTier::ProjectRule,
+            abstraction_of: None,
+            abstracted_from: None,
             evidence: sentence.to_string(),
             confidence: Some(0.92),
             reason: Some(format_match_reason(&reason)),
@@ -339,24 +345,6 @@ const DEFAULT_PREFERENCE_REGISTRY: &str = r#"preferences:
 
 pub(super) fn built_in_preferences() -> Vec<KnownPreference> {
     vec![
-        KnownPreference {
-            title: "Prefer Bun".to_string(),
-            body: "Use Bun for JavaScript package management and scripts.".to_string(),
-            source: "built-in".to_string(),
-            required: strings(&["bun"]),
-            context: strings(&[
-                "npm",
-                "pnpm",
-                "yarn",
-                "bun run",
-                "bunx",
-                "包管理",
-                "package manager",
-                "package management",
-                "javascript package",
-                "js 脚本",
-            ]),
-        },
         KnownPreference {
             title: "Use Axios".to_string(),
             body: "Use Axios for frontend HTTP requests.".to_string(),

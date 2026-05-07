@@ -25,6 +25,18 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy -- -D warnings
       - run: cargo test
+      - run: cargo test
+        working-directory: src-tauri
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run --cwd app test
+      - run: bun run --cwd app build
   bun-wrapper:
     strategy:
       fail-fast: false

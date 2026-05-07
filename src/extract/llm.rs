@@ -27,6 +27,21 @@ pub(super) struct LlmExtractedKnowledge {
     /// 原文语言：zh / en / mixed
     #[serde(default)]
     pub language: Option<String>,
+    /// 记忆层级猜测：project_rule / cross_project_principle / collaboration_preference
+    #[serde(default)]
+    pub memory_tier_guess: Option<String>,
+    /// 跨项目可复用性评分
+    #[serde(default)]
+    pub reusability_score: Option<f32>,
+    /// 长期有效性评分
+    #[serde(default)]
+    pub durability_score: Option<f32>,
+    /// 自包含和可执行程度评分
+    #[serde(default)]
+    pub specificity_score: Option<f32>,
+    /// 来源可信度评分，用户明确确认最高，assistant 自说自话较低
+    #[serde(default)]
+    pub source_trust_score: Option<f32>,
     /// 是否标记为噪音
     #[serde(default)]
     pub is_noise: bool,
@@ -67,6 +82,16 @@ pub(super) struct LlmQualityJudgment {
     pub reason: String,
     #[serde(default)]
     pub confidence: Option<f32>,
+    #[serde(default)]
+    pub durability: Option<f32>,
+    #[serde(default)]
+    pub reusability: Option<f32>,
+    #[serde(default)]
+    pub specificity: Option<f32>,
+    #[serde(default)]
+    pub evidence_grounded: Option<f32>,
+    #[serde(default)]
+    pub noise_risk: Option<f32>,
 }
 
 /// 知识类型枚举
@@ -124,6 +149,11 @@ pub(super) fn build_extraction_prompt(
 - body 必须简洁、通用、命令式、可复用
 - evidence_quote 必须从原文复制支持该结论的短句，不要输出 observation id、sha256 或内部评分字段
 - language 只能是 zh / en / mixed
+- memory_tier_guess 只能是 project_rule / cross_project_principle / collaboration_preference
+- reusability_score 取值 0.0-1.0，用来判断这条知识是否值得抽象成跨项目原则
+- durability_score 取值 0.0-1.0，判断它是否长期有效而不是一次性任务
+- specificity_score 取值 0.0-1.0，判断它是否自包含、具体、可执行
+- source_trust_score 取值 0.0-1.0，用户明确表达或确认最高，assistant 未确认内容较低
 - title 跟随原文语言（中文原文用中文标题，英文原文用英文标题）
 - 只提取对以后任务有用的内容，忽略所有一次性指令
 
@@ -137,6 +167,7 @@ Update phase schema:
 后续会把每条 atomic fact 与相似 Skilllet 比较，并要求你只返回 ADD / UPDATE / SUPERSEDE / CONFLICT / NOOP 之一。"#
             .to_string(),
         user_prompt: format!("待分析的对话段落：\n{material}"),
+        json_schema: Some(extraction_schema()),
     }
 }
 
@@ -168,6 +199,9 @@ fn signal_label(signal: &SignalType) -> &'static str {
         SignalType::WorkflowDescription => "流程描述",
         SignalType::ArchitectureDecision => "架构决策",
         SignalType::ExplicitMemoryMarker => "耐久标记",
+        SignalType::PrincipleStatement => "方法论原则",
+        SignalType::PlanningHeuristic => "规划启发",
+        SignalType::CollaborationPreference => "协作偏好",
     }
 }
 
@@ -180,32 +214,41 @@ pub(super) fn parse_extraction_output(
         return Err(ParseError::EmptyOutput);
     }
 
-    // 先尝试直接解析 JSON 数组
-    if let Ok(knowledge) = serde_json::from_str::<Vec<LlmExtractedKnowledge>>(trimmed) {
-        return Ok(knowledge);
-    }
+    let items = serde_json::from_str::<Vec<LlmExtractedKnowledge>>(trimmed)
+        .map_err(|_| ParseError::InvalidJson(trimmed.chars().take(200).collect()))?;
+    validate_extracted_knowledge(&items)?;
+    Ok(items)
+}
 
-    // 尝试找到 JSON 数组的起止位置（处理 LLM 输出中可能包含的前后文字）
-    if let Some(start) = trimmed.find('[')
-        && let Some(end) = trimmed.rfind(']')
-    {
-        let json_slice = &trimmed[start..=end];
-        if let Ok(knowledge) = serde_json::from_str::<Vec<LlmExtractedKnowledge>>(json_slice) {
-            return Ok(knowledge);
+fn validate_extracted_knowledge(items: &[LlmExtractedKnowledge]) -> Result<(), ParseError> {
+    for (index, item) in items.iter().enumerate() {
+        if item.is_noise {
+            continue;
+        }
+        for (field, value) in [
+            ("memory_tier_guess", item.memory_tier_guess.as_deref()),
+            (
+                "reusability_score",
+                item.reusability_score.map(|_| "present"),
+            ),
+            ("durability_score", item.durability_score.map(|_| "present")),
+            (
+                "specificity_score",
+                item.specificity_score.map(|_| "present"),
+            ),
+            (
+                "source_trust_score",
+                item.source_trust_score.map(|_| "present"),
+            ),
+        ] {
+            if value.is_none() {
+                return Err(ParseError::MissingRequired(format!(
+                    "item {index} missing required {field}"
+                )));
+            }
         }
     }
-
-    // 尝试按行解析（不同 LLM 可能输出不同格式）
-    if let Some(start) = trimmed.find('{')
-        && let Some(end) = trimmed.rfind('}')
-    {
-        let json_slice = &trimmed[start..=end];
-        if let Ok(item) = serde_json::from_str::<LlmExtractedKnowledge>(json_slice) {
-            return Ok(vec![item]);
-        }
-    }
-
-    Err(ParseError::InvalidJson(trimmed.chars().take(200).collect()))
+    Ok(())
 }
 
 pub(super) fn build_update_decision_prompt(
@@ -240,6 +283,7 @@ Use noop when the fact is duplicate, low value, or already implied."#
                 similar
             }
         ),
+        json_schema: Some(update_decision_schema()),
     }
 }
 
@@ -248,18 +292,8 @@ pub(super) fn parse_update_decision_output(output: &str) -> Result<LlmUpdateDeci
     if trimmed.is_empty() {
         return Err(ParseError::EmptyOutput);
     }
-    if let Ok(decision) = serde_json::from_str::<LlmUpdateDecision>(trimmed) {
-        return Ok(decision);
-    }
-    if let Some(start) = trimmed.find('{')
-        && let Some(end) = trimmed.rfind('}')
-    {
-        let json_slice = &trimmed[start..=end];
-        if let Ok(decision) = serde_json::from_str::<LlmUpdateDecision>(json_slice) {
-            return Ok(decision);
-        }
-    }
-    Err(ParseError::InvalidJson(trimmed.chars().take(200).collect()))
+    serde_json::from_str::<LlmUpdateDecision>(trimmed)
+        .map_err(|_| ParseError::InvalidJson(trimmed.chars().take(200).collect()))
 }
 
 pub(super) fn run_update_decision(
@@ -297,7 +331,12 @@ Return only JSON:
 {
   "decision": "keep" | "reject",
   "reason": "short reason",
-  "confidence": 0.0-1.0
+  "confidence": 0.0-1.0,
+  "durability": 0.0-1.0,
+  "reusability": 0.0-1.0,
+  "specificity": 0.0-1.0,
+  "evidence_grounded": 0.0-1.0,
+  "noise_risk": 0.0-1.0
 }
 
 KEEP only when the candidate is durable, reusable, self-contained, and useful for future coding-agent behavior.
@@ -312,6 +351,7 @@ Judge the candidate independently. Do not compare candidates against each other.
                 existing
             }
         ),
+        json_schema: Some(quality_judge_schema()),
     }
 }
 
@@ -322,18 +362,8 @@ pub(super) fn parse_quality_judgment_output(
     if trimmed.is_empty() {
         return Err(ParseError::EmptyOutput);
     }
-    if let Ok(judgment) = serde_json::from_str::<LlmQualityJudgment>(trimmed) {
-        return Ok(judgment);
-    }
-    if let Some(start) = trimmed.find('{')
-        && let Some(end) = trimmed.rfind('}')
-    {
-        let json_slice = &trimmed[start..=end];
-        if let Ok(judgment) = serde_json::from_str::<LlmQualityJudgment>(json_slice) {
-            return Ok(judgment);
-        }
-    }
-    Err(ParseError::InvalidJson(trimmed.chars().take(200).collect()))
+    serde_json::from_str::<LlmQualityJudgment>(trimmed)
+        .map_err(|_| ParseError::InvalidJson(trimmed.chars().take(200).collect()))
 }
 
 pub(super) fn run_quality_judge(
@@ -345,15 +375,153 @@ pub(super) fn run_quality_judge(
     let prompt = build_quality_judge_prompt(body, evidence, existing_skilllets);
     let cfg = provider::load_or_default_provider_config(project_root)
         .map_err(|e| LlmExtractionError::ProviderError(e.to_string()))?;
-    let output =
-        provider::call_provider_for_role(&cfg, provider::ProviderRole::Judge, &prompt, 512)
-            .map_err(|e| LlmExtractionError::ProviderError(e.to_string()))?;
+    let first = run_quality_judge_once(&cfg, &prompt)?;
+    if !is_ambiguous_quality_judgment(&first, &cfg.judge) {
+        return Ok(first);
+    }
+    let mut judgments = vec![first];
+    for _ in 0..2 {
+        judgments.push(run_quality_judge_once(&cfg, &prompt)?);
+    }
+    Ok(combine_quality_judgments(judgments))
+}
+
+fn run_quality_judge_once(
+    cfg: &provider::ProviderConfig,
+    prompt: &provider::ProviderRequest,
+) -> Result<LlmQualityJudgment, LlmExtractionError> {
+    let output = provider::call_provider_for_role(cfg, provider::ProviderRole::Judge, prompt, 512)
+        .map_err(|e| LlmExtractionError::ProviderError(e.to_string()))?;
     parse_quality_judgment_output(&output).map_err(|e| {
         LlmExtractionError::ParseError(format!(
             "{e}: {}",
             &output.chars().take(200).collect::<String>()
         ))
     })
+}
+
+fn is_ambiguous_quality_judgment(
+    judgment: &LlmQualityJudgment,
+    cfg: &provider::JudgeConfig,
+) -> bool {
+    judgment
+        .noise_risk
+        .is_some_and(|score| score >= cfg.ambiguous_noise_low && score <= cfg.ambiguous_noise_high)
+        || judgment.evidence_grounded.is_some_and(|score| {
+            score >= cfg.ambiguous_grounding_low && score <= cfg.ambiguous_grounding_high
+        })
+}
+
+fn combine_quality_judgments(judgments: Vec<LlmQualityJudgment>) -> LlmQualityJudgment {
+    let keep_votes = judgments
+        .iter()
+        .filter(|judgment| judgment.decision == JudgeDecision::Keep)
+        .count();
+    let reject_votes = judgments.len().saturating_sub(keep_votes);
+    let decision = if keep_votes >= reject_votes {
+        JudgeDecision::Keep
+    } else {
+        JudgeDecision::Reject
+    };
+    let reason = judgments
+        .iter()
+        .map(|judgment| judgment.reason.as_str())
+        .filter(|reason| !reason.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("; ");
+    LlmQualityJudgment {
+        decision,
+        reason,
+        confidence: average_score(judgments.iter().filter_map(|judgment| judgment.confidence)),
+        durability: average_score(judgments.iter().filter_map(|judgment| judgment.durability)),
+        reusability: average_score(judgments.iter().filter_map(|judgment| judgment.reusability)),
+        specificity: average_score(judgments.iter().filter_map(|judgment| judgment.specificity)),
+        evidence_grounded: average_score(
+            judgments
+                .iter()
+                .filter_map(|judgment| judgment.evidence_grounded),
+        ),
+        noise_risk: average_score(judgments.iter().filter_map(|judgment| judgment.noise_risk)),
+    }
+}
+
+fn average_score(values: impl Iterator<Item = f32>) -> Option<f32> {
+    let values = values.collect::<Vec<_>>();
+    if values.is_empty() {
+        None
+    } else {
+        Some(values.iter().sum::<f32>() / values.len() as f32)
+    }
+}
+
+fn extraction_schema() -> provider::ProviderJsonSchema {
+    provider::ProviderJsonSchema {
+        name: "AtomicFactExtraction".to_string(),
+        strict: true,
+        schema: serde_json::json!({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "kind": { "type": "string", "enum": ["preference", "constraint", "procedure", "correction", "decision", "supplement"] },
+                    "title": { "type": "string" },
+                    "body": { "type": "string" },
+                    "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                    "rationale": { "type": "string" },
+                    "evidence_quote": { "type": ["string", "null"] },
+                    "language": { "type": ["string", "null"], "enum": ["zh", "en", "mixed", null] },
+                    "memory_tier_guess": { "type": ["string", "null"], "enum": ["project_rule", "cross_project_principle", "collaboration_preference", null] },
+                    "reusability_score": { "type": ["number", "null"], "minimum": 0.0, "maximum": 1.0 },
+                    "durability_score": { "type": ["number", "null"], "minimum": 0.0, "maximum": 1.0 },
+                    "specificity_score": { "type": ["number", "null"], "minimum": 0.0, "maximum": 1.0 },
+                    "source_trust_score": { "type": ["number", "null"], "minimum": 0.0, "maximum": 1.0 },
+                    "is_noise": { "type": "boolean" }
+                },
+                "required": ["kind", "title", "body", "confidence", "rationale", "evidence_quote", "language", "memory_tier_guess", "reusability_score", "durability_score", "specificity_score", "source_trust_score", "is_noise"]
+            }
+        }),
+    }
+}
+
+fn update_decision_schema() -> provider::ProviderJsonSchema {
+    provider::ProviderJsonSchema {
+        name: "SkillletUpdateDecision".to_string(),
+        strict: true,
+        schema: serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "operation": { "type": "string", "enum": ["add", "update", "supersede", "conflict", "noop"] },
+                "target_id": { "type": ["string", "null"] },
+                "body": { "type": ["string", "null"] },
+                "reason": { "type": "string" }
+            },
+            "required": ["operation", "target_id", "body", "reason"]
+        }),
+    }
+}
+
+fn quality_judge_schema() -> provider::ProviderJsonSchema {
+    provider::ProviderJsonSchema {
+        name: "CandidateQualityJudgment".to_string(),
+        strict: true,
+        schema: serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "decision": { "type": "string", "enum": ["keep", "reject"] },
+                "reason": { "type": "string" },
+                "confidence": { "type": ["number", "null"], "minimum": 0.0, "maximum": 1.0 },
+                "durability": { "type": ["number", "null"], "minimum": 0.0, "maximum": 1.0 },
+                "reusability": { "type": ["number", "null"], "minimum": 0.0, "maximum": 1.0 },
+                "specificity": { "type": ["number", "null"], "minimum": 0.0, "maximum": 1.0 },
+                "evidence_grounded": { "type": ["number", "null"], "minimum": 0.0, "maximum": 1.0 },
+                "noise_risk": { "type": ["number", "null"], "minimum": 0.0, "maximum": 1.0 }
+            },
+            "required": ["decision", "reason", "confidence", "durability", "reusability", "specificity", "evidence_grounded", "noise_risk"]
+        }),
+    }
 }
 
 pub(super) fn action_from_update_decision(
@@ -429,6 +597,7 @@ pub(super) fn run_llm_extraction(
 pub(super) enum ParseError {
     EmptyOutput,
     InvalidJson(String),
+    MissingRequired(String),
 }
 
 impl std::fmt::Display for ParseError {
@@ -437,6 +606,9 @@ impl std::fmt::Display for ParseError {
             ParseError::EmptyOutput => write!(f, "LLM returned empty output"),
             ParseError::InvalidJson(preview) => {
                 write!(f, "failed to parse LLM JSON output: {preview}...")
+            }
+            ParseError::MissingRequired(message) => {
+                write!(f, "missing required LLM field: {message}")
             }
         }
     }
@@ -509,6 +681,13 @@ mod tests {
                 "body": "Use Axios for frontend HTTP requests.",
                 "confidence": 0.92,
                 "rationale": "Repeated preference detected.",
+                "evidence_quote": "Use Axios",
+                "language": "en",
+                "memory_tier_guess": "project_rule",
+                "reusability_score": 0.4,
+                "durability_score": 0.8,
+                "specificity_score": 0.7,
+                "source_trust_score": 1.0,
                 "is_noise": false
             }
         ]"#;
@@ -535,9 +714,29 @@ mod tests {
 ]
 That concludes the extraction."#;
 
-        let items = parse_extraction_output(output).expect("parse with wrapper");
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].kind, KnowledgeKind::Procedure);
+        let error = parse_extraction_output(output).expect_err("strict parse rejects wrapper");
+        assert!(error.to_string().contains("failed to parse"));
+    }
+
+    #[test]
+    fn parse_non_noise_item_requires_all_value_scores() {
+        let json = r#"[
+            {
+                "kind": "preference",
+                "title": "Incomplete",
+                "body": "Use durable evidence for extraction changes.",
+                "confidence": 0.92,
+                "rationale": "Missing score fields.",
+                "evidence_quote": "durable evidence",
+                "language": "en",
+                "memory_tier_guess": "collaboration_preference",
+                "is_noise": false
+            }
+        ]"#;
+
+        let error = parse_extraction_output(json).expect_err("missing scores should fail");
+
+        assert!(error.to_string().contains("missing required"));
     }
 
     #[test]
@@ -551,6 +750,11 @@ That concludes the extraction."#;
                 rationale: "test".into(),
                 evidence_quote: Some("Useful knowledge".into()),
                 language: Some("en".into()),
+                memory_tier_guess: Some("project_rule".into()),
+                reusability_score: Some(0.4),
+                durability_score: Some(0.8),
+                specificity_score: Some(0.7),
+                source_trust_score: Some(1.0),
                 is_noise: false,
             },
             LlmExtractedKnowledge {
@@ -561,6 +765,11 @@ That concludes the extraction."#;
                 rationale: "test".into(),
                 evidence_quote: None,
                 language: None,
+                memory_tier_guess: None,
+                reusability_score: None,
+                durability_score: None,
+                specificity_score: None,
+                source_trust_score: None,
                 is_noise: true,
             },
             LlmExtractedKnowledge {
@@ -571,6 +780,11 @@ That concludes the extraction."#;
                 rationale: "test".into(),
                 evidence_quote: None,
                 language: None,
+                memory_tier_guess: None,
+                reusability_score: None,
+                durability_score: None,
+                specificity_score: None,
+                source_trust_score: None,
                 is_noise: false,
             },
         ];
@@ -593,6 +807,52 @@ That concludes the extraction."#;
         assert!(prompt.system_prompt.contains("可复用知识类型"));
         assert!(prompt.system_prompt.contains("atomic facts"));
         assert!(prompt.system_prompt.contains("evidence_quote"));
+    }
+
+    #[test]
+    fn extraction_schema_requires_multidimensional_value_scores() {
+        let schema = extraction_schema().schema;
+        let required = schema["items"]["required"]
+            .as_array()
+            .expect("required fields");
+
+        for field in [
+            "durability_score",
+            "specificity_score",
+            "source_trust_score",
+        ] {
+            assert!(
+                required.iter().any(|value| value.as_str() == Some(field)),
+                "{field} should be required in structured LLM extraction"
+            );
+            assert!(
+                schema["items"]["properties"].get(field).is_some(),
+                "{field} should have a schema property"
+            );
+        }
+    }
+
+    #[test]
+    fn quality_judge_schema_exposes_rubric_scores() {
+        let schema = quality_judge_schema().schema;
+        let required = schema["required"].as_array().expect("required fields");
+
+        for field in [
+            "durability",
+            "reusability",
+            "specificity",
+            "evidence_grounded",
+            "noise_risk",
+        ] {
+            assert!(
+                required.iter().any(|value| value.as_str() == Some(field)),
+                "{field} should be required in quality judge schema"
+            );
+            assert!(
+                schema["properties"].get(field).is_some(),
+                "{field} should have a schema property"
+            );
+        }
     }
 
     #[test]

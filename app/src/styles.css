@@ -750,7 +750,16 @@ button:disabled {
 }
 
 .matrix-title {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
   color: var(--color-text-primary);
+  font-weight: 700;
+}
+
+.matrix-scope {
+  color: var(--color-text-secondary);
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -1006,4 +1015,3 @@ button:disabled {
 .theme-switcher button[aria-checked="true"] {
   font-weight: 700;
 }
-

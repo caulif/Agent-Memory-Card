@@ -71,6 +71,35 @@ fn import_jsonl_skips_system_and_local_command_noise() {
 }
 
 #[test]
+fn import_jsonl_with_only_filtered_noise_creates_no_observation() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let transcript = temp.path().join("session.jsonl");
+    fs::write(
+        &transcript,
+        r#"{"type":"queue-operation","operation":"enqueue"}
+{"type":"user","message":{"role":"user","content":"<local-command-caveat>noise</local-command-caveat>"},"isMeta":true}
+{"type":"user","message":{"role":"user","content":"<command-name>/model</command-name>"}}"#,
+    )
+    .expect("write transcript");
+
+    let report = import_observation_file(
+        temp.path(),
+        &transcript,
+        "claude-code-session",
+        Some("claude-code"),
+    )
+    .expect("import");
+
+    assert_eq!(report.created, 0);
+    assert_eq!(report.skipped, 1);
+    assert!(
+        load_observations(temp.path())
+            .expect("observations")
+            .is_empty()
+    );
+}
+
+#[test]
 fn import_file_skips_existing_observation() {
     let temp = tempfile::tempdir().expect("tempdir");
     let transcript = temp.path().join("session.jsonl");
@@ -246,6 +275,129 @@ fn incremental_import_filters_sessions_to_matching_project() {
 }
 
 #[test]
+fn project_filter_includes_child_directory_sessions() {
+    let project = tempfile::tempdir().expect("project");
+    let child = project.path().join("src-tauri");
+    fs::create_dir_all(&child).expect("child dir");
+    let file = ConversationFile {
+        agent: "claude-code".to_string(),
+        source_kind: "claude-code-session".to_string(),
+        path: child.join("session.jsonl"),
+        project_path: Some(child),
+    };
+
+    assert!(conversation_belongs_to_project(&file, project.path()));
+}
+
+#[test]
+fn project_filter_excludes_unknown_project_by_default() {
+    let project = tempfile::tempdir().expect("project");
+    let file = ConversationFile {
+        agent: "codex".to_string(),
+        source_kind: "codex-session".to_string(),
+        path: project.path().join("session.jsonl"),
+        project_path: None,
+    };
+
+    assert!(!conversation_belongs_to_project(&file, project.path()));
+}
+
+#[test]
+fn replay_reads_all_matching_project_and_child_sessions_without_index() {
+    let project = tempfile::tempdir().expect("project");
+    let other = tempfile::tempdir().expect("other");
+    let home = tempfile::tempdir().expect("home");
+    fs::create_dir_all(project.path().join("src-tauri")).expect("child project dir");
+    let session_dir = home
+        .path()
+        .join(".codex")
+        .join("sessions")
+        .join("2026")
+        .join("05")
+        .join("01");
+    fs::create_dir_all(&session_dir).expect("session dir");
+    let project_session = session_dir.join("project.jsonl");
+    let child_session = session_dir.join("child.jsonl");
+    let other_session = session_dir.join("other.jsonl");
+    let unknown_session = session_dir.join("unknown.jsonl");
+    fs::write(
+        &project_session,
+        format!(
+            "{}\n{}",
+            serde_json::json!({
+                "type": "session_meta",
+                "payload": { "cwd": project.path().to_string_lossy() }
+            }),
+            serde_json::json!({
+                "type": "user",
+                "message": "以后所有 Rust 项目必须先运行 cargo test 再提交。"
+            })
+        ),
+    )
+    .expect("project session");
+    fs::write(
+        &child_session,
+        format!(
+            "{}\n{}",
+            serde_json::json!({
+                "type": "session_meta",
+                "payload": { "cwd": project.path().join("src-tauri").to_string_lossy() }
+            }),
+            serde_json::json!({
+                "type": "user",
+                "message": "不要直接覆盖 AGENTS.md，先保留人工审阅边界。"
+            })
+        ),
+    )
+    .expect("child session");
+    fs::write(
+        &other_session,
+        format!(
+            "{}\n{}",
+            serde_json::json!({
+                "type": "session_meta",
+                "payload": { "cwd": other.path().to_string_lossy() }
+            }),
+            serde_json::json!({
+                "type": "user",
+                "message": "Always use Vitest."
+            })
+        ),
+    )
+    .expect("other session");
+    fs::write(
+        &unknown_session,
+        serde_json::json!({
+            "type": "user",
+            "message": "Always use Axios."
+        })
+        .to_string(),
+    )
+    .expect("unknown session");
+
+    let report = replay_local_conversations(
+        project.path(),
+        home.path(),
+        vec!["codex".to_string()],
+        true,
+        "local",
+        false,
+    )
+    .expect("replay");
+
+    assert_eq!(report.discovered_sources, 4);
+    assert_eq!(report.matched_sources, 2);
+    assert_eq!(report.excluded_other_project, 1);
+    assert_eq!(report.excluded_unknown_project, 1);
+    assert_eq!(report.imported, 2);
+    assert!(
+        load_observations(project.path())
+            .expect("observations")
+            .is_empty()
+    );
+}
+
+#[test]
 fn discover_local_conversation_files_finds_claude_and_codex_jsonl() {
     let home = tempfile::tempdir().expect("home");
     let claude = home
@@ -271,6 +423,24 @@ fn discover_local_conversation_files_finds_claude_and_codex_jsonl() {
 
     assert!(files.iter().any(|item| item.agent == "claude-code"));
     assert!(files.iter().any(|item| item.agent == "codex"));
+}
+
+#[test]
+fn discover_local_conversation_files_skips_subagent_jsonl() {
+    let home = tempfile::tempdir().expect("home");
+    let subagent = home
+        .path()
+        .join(".claude")
+        .join("projects")
+        .join("demo")
+        .join("subagents")
+        .join("agent-1.jsonl");
+    fs::create_dir_all(subagent.parent().expect("subagent parent")).expect("subagent dir");
+    fs::write(&subagent, "subagent").expect("subagent file");
+
+    let files = discover_local_conversation_files(home.path()).expect("discover");
+
+    assert!(files.is_empty());
 }
 
 #[test]
@@ -301,8 +471,43 @@ fn synthesize_observations_creates_reviewable_candidates() {
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0].targets, vec!["claude-code", "codex"]);
     assert!(candidates[0].body.contains("cargo test"));
-    assert!(candidates[0].evidence.contains("observation:obs:codex"));
+    assert!(candidates[0].evidence.contains("observation synthesis"));
     assert!(draft::load_drafts(temp.path()).expect("drafts").is_empty());
+}
+
+#[test]
+fn synthesize_observations_narrows_source_observations_to_relevant_evidence() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let first = temp.path().join("one.jsonl");
+    let second = temp.path().join("two.jsonl");
+    fs::write(
+        &first,
+        r#"{"type":"user","message":"以后所有 Rust 项目必须先运行 cargo test 再提交。"}"#,
+    )
+    .expect("write first");
+    fs::write(&second, r#"{"type":"user","message":"你是什么模型"}"#).expect("write second");
+
+    import_observation_file(temp.path(), &first, "codex-session", Some("codex"))
+        .expect("import first");
+    import_observation_file(temp.path(), &second, "codex-session", Some("codex"))
+        .expect("import second");
+
+    synthesize_observations_to_drafts(
+        temp.path(),
+        vec!["codex".to_string(), "claude-code".to_string()],
+        false,
+    )
+    .expect("synthesize");
+
+    let candidates = candidate::load_candidates(temp.path()).expect("candidates");
+
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].source_observations.len(), 1);
+    assert!(
+        candidates[0].source_observations[0].contains("obs:codex"),
+        "candidate should point to the relevant observation only: {:#?}",
+        candidates[0].source_observations
+    );
 }
 
 #[test]
@@ -329,6 +534,36 @@ fn synthesize_dry_run_does_not_write_drafts() {
     assert_eq!(report.candidates, 1);
     assert_eq!(report.candidate_drafts, vec!["project:use-vitest"]);
     assert!(draft::load_drafts(temp.path()).expect("drafts").is_empty());
+}
+
+#[test]
+fn synthesize_preserves_cross_project_and_collaboration_candidates_in_top_results() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let transcript = temp.path().join("session.jsonl");
+    fs::write(
+        &transcript,
+        r#"{"type":"user","message":"以后所有 Rust 项目必须先运行 cargo test 再提交。设计的时候先提问、先澄清目标、先规划。开发期间优先关注核心功能，并从用户视角持续优化体验。小修改快测，大改再做完整回归。"}"#,
+    )
+    .expect("write transcript");
+    import_observation_file(temp.path(), &transcript, "codex-session", Some("codex"))
+        .expect("import");
+
+    let report = synthesize_observations_to_drafts(temp.path(), vec!["codex".to_string()], true)
+        .expect("synthesize");
+
+    assert!(
+        report
+            .candidate_drafts
+            .iter()
+            .any(|id| id.starts_with("global:")),
+        "full synthesis should preserve non-project candidates: {:?}",
+        report.candidate_drafts
+    );
+    assert!(
+        report.candidate_drafts.len() >= 3,
+        "expected multiple candidate types to survive synthesis: {:?}",
+        report.candidate_drafts
+    );
 }
 
 #[test]
@@ -364,6 +599,55 @@ fn agent_synthesis_material_uses_prefiltered_candidates_not_raw_observations() {
 }
 
 #[test]
+fn agent_synthesis_prompt_asks_for_global_and_collaboration_recall() {
+    let prompt = agent_synthesis_prompt(
+        "body:\n用户视角和核心功能优先。\nbody:\n小改快测，大改重测。\nbody:\n除引擎推理外不应该卡顿。",
+    );
+
+    assert!(prompt.contains("cross-project"));
+    assert!(prompt.contains("collaboration"));
+    assert!(prompt.contains("product quality constraint"));
+}
+
+#[test]
+fn sparse_agent_report_falls_back_to_prefiltered_recall() {
+    let report = ObservationSynthesisReport {
+        engine: "claude-code".to_string(),
+        created: 0,
+        skipped: 0,
+        candidates: 2,
+        drafts: Vec::new(),
+        candidate_drafts: vec!["project:one".to_string(), "global:two".to_string()],
+        dry_run: true,
+    };
+
+    assert!(!agent_report_has_enough_recall(&report, 3));
+}
+
+#[test]
+fn agent_gate_rejects_generated_enabled_skilllet_candidates() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let retained = filter_agent_candidates_through_local_gate(
+        temp.path(),
+        vec![AgentSkillletCandidate {
+            title: "Use Axios".to_string(),
+            body: "Use Axios for frontend HTTP requests.".to_string(),
+            brief: Some("generated skilllet".to_string()),
+            tags: vec!["axios".to_string()],
+            language: None,
+            kind: "procedure".to_string(),
+            scope: "project".to_string(),
+            confidence: Some(0.95),
+            reason: Some("From enabled skilllets block.".to_string()),
+        }],
+        "observation synthesis",
+    )
+    .expect("gate");
+
+    assert!(retained.is_empty());
+}
+
+#[test]
 fn evolve_local_conversations_imports_and_synthesizes_candidates() {
     let temp = tempfile::tempdir().expect("project");
     let home = tempfile::tempdir().expect("home");
@@ -378,7 +662,17 @@ fn evolve_local_conversations_imports_and_synthesizes_candidates() {
     fs::create_dir_all(codex.parent().expect("codex parent")).expect("codex dir");
     fs::write(
         &codex,
-        r#"{"type":"user","message":"Always run cargo clippy before pushing."}"#,
+        format!(
+            "{}\n{}",
+            serde_json::json!({
+                "type": "session_meta",
+                "payload": { "cwd": temp.path().to_string_lossy() }
+            }),
+            serde_json::json!({
+                "type": "user",
+                "message": "Always run cargo clippy before pushing."
+            })
+        ),
     )
     .expect("write codex session");
 
@@ -420,7 +714,7 @@ fn auto_evolve_from_discovered_files_reuses_one_conversation_file_list_for_proje
             format!(
                 "{}\n{}",
                 serde_json::json!({"cwd": project_b.path()}),
-                serde_json::json!({"type":"user","message":"Prefer Bun scripts for JavaScript tooling."})
+                serde_json::json!({"type":"user","message":"Always use Axios for frontend HTTP requests."})
             ),
         )
         .expect("write b");
@@ -468,8 +762,8 @@ fn parses_agent_json_candidates_from_plain_or_fenced_output() {
     let output = r#"Here are candidates:
 [
   {
-    "title": "Prefer Bun",
-    "body": "Use Bun for JavaScript package management.",
+    "title": "Use Axios",
+    "body": "Use Axios for frontend HTTP requests.",
     "kind": "preference",
     "scope": "project",
     "confidence": 0.91,
@@ -481,7 +775,7 @@ fn parses_agent_json_candidates_from_plain_or_fenced_output() {
     let candidates = parse_agent_candidates(output).expect("parse");
 
     assert_eq!(candidates.len(), 1);
-    assert_eq!(candidates[0].title, "Prefer Bun");
+    assert_eq!(candidates[0].title, "Use Axios");
     assert!(is_usable_agent_candidate(&candidates[0]));
 }
 
@@ -517,8 +811,8 @@ fn agent_synthesis_candidates_must_pass_local_future_value_gate() {
             reason: Some("Sounds nice but has no operational trigger.".to_string()),
         },
         AgentSkillletCandidate {
-            title: "Prefer Bun".to_string(),
-            body: "Always use Bun for JavaScript package management and scripts.".to_string(),
+            title: "Run Cargo Test Before Commit".to_string(),
+            body: "以后所有 Rust 项目必须先运行 cargo test 再提交。".to_string(),
             brief: None,
             tags: Vec::new(),
             language: None,
@@ -537,7 +831,7 @@ fn agent_synthesis_candidates_must_pass_local_future_value_gate() {
     .expect("filter");
 
     assert_eq!(filtered.len(), 1);
-    assert_eq!(filtered[0].0.title, "Prefer Bun");
+    assert_eq!(filtered[0].0.title, "Run Cargo Test Before Commit");
     assert_eq!(
         filtered[0].2.action, "new_candidate",
         "agent output should still carry a local action decision"

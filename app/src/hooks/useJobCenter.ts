@@ -83,7 +83,11 @@ export function useJobCenter({
         const projectPath = selectedProjectRef.current;
         if (projectPath) {
           void loadDashboard(projectPath);
-          void loadReadModelsForPage(projectPath, page);
+          if (job.key === "融合Skilllet") {
+            void loadReadModelsForPage(projectPath, "settings");
+          } else {
+            void loadReadModelsForPage(projectPath, page);
+          }
         }
       }
     }

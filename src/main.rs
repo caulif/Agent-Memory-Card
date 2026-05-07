@@ -1,13 +1,15 @@
 use std::path::PathBuf;
 
 use agent_kernel::{
-    build, candidate, catalog, config, draft, extract, hooks, index, mcp, migration, observation,
-    project_registry, provider, review, rule_test, scanner, skilllet,
+    build, candidate, catalog, config, draft, extract, feedback, hooks, index, mcp, migration,
+    observation, project_registry, provider, review, rule_test, scanner, skilllet,
 };
 use anyhow::Result;
 use clap::Parser;
 
 mod cli;
+#[cfg(test)]
+mod cli_tests;
 
 use cli::{
     AgentCommands, CatalogCommands, Cli, Commands, DraftCommands, HookCommands, IndexCommands,
@@ -204,7 +206,7 @@ async fn main() -> Result<()> {
                 println!("Added draft `{id}`");
             }
             DraftCommands::List { project } => {
-                let records = draft::load_drafts(&project)?;
+                let records = draft::load_reviewable_drafts(&project)?;
                 if records.is_empty() {
                     println!("No drafts found.");
                 } else {
@@ -254,7 +256,7 @@ async fn main() -> Result<()> {
             }
             DraftCommands::Approve { id, project } => {
                 draft::approve_draft(&project, &id)?;
-                println!("Approved draft `{id}` into owned Skilllet");
+                println!("Approved or cleared draft `{id}`");
             }
             DraftCommands::Reject { id, project } => {
                 draft::reject_draft(&project, &id)?;
@@ -345,11 +347,13 @@ async fn main() -> Result<()> {
             }
             ObserveCommands::Synthesize {
                 targets,
+                engine,
                 dry_run,
                 project,
             } => {
-                let report =
-                    observation::synthesize_observations_to_drafts(&project, targets, dry_run)?;
+                let report = observation::synthesize_observations_to_drafts_with_engine(
+                    &project, targets, dry_run, &engine,
+                )?;
                 println!("{}", report.render());
             }
             ObserveCommands::Evolve {
@@ -362,6 +366,34 @@ async fn main() -> Result<()> {
                 let report =
                     observation::evolve_local_conversations(&project, &home, targets, dry_run)?;
                 println!("{}", report.render());
+            }
+            ObserveCommands::Replay {
+                home,
+                targets,
+                engine,
+                dry_run,
+                include_unknown_project,
+                project,
+            } => {
+                let home = home.unwrap_or_else(default_home_dir);
+                let report = observation::replay_local_conversations(
+                    &project,
+                    &home,
+                    targets,
+                    dry_run,
+                    &engine,
+                    include_unknown_project,
+                )?;
+                println!("{}", report.render());
+            }
+            ObserveCommands::Reflect { project } => {
+                match feedback::write_weekly_reflexion_proposal(&project)? {
+                    Some(path) => {
+                        println!("Wrote extraction reflexion proposal:");
+                        println!("{}", path.display());
+                    }
+                    None => println!("No repeated rejection patterns found yet."),
+                }
             }
         },
         Commands::Provider { command } => match command {

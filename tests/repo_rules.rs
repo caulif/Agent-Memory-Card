@@ -37,6 +37,44 @@ fn rust_source_files_stay_within_1000_lines() {
 }
 
 #[test]
+fn production_rust_sources_do_not_use_include_splices() {
+    let roots = ["src", "src-tauri/src"];
+    let mut violations = Vec::new();
+
+    for root in roots {
+        let path = Path::new(root);
+        if !path.exists() {
+            continue;
+        }
+        for entry in walkdir::WalkDir::new(path).follow_links(false) {
+            let entry = entry.expect("walkdir entry");
+            if !entry.file_type().is_file() {
+                continue;
+            }
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("rs")
+                || path
+                    .components()
+                    .any(|component| component.as_os_str() == "tests")
+                || path.file_name().and_then(|value| value.to_str()) == Some("tests.rs")
+            {
+                continue;
+            }
+            let text = fs::read_to_string(path).expect("source file");
+            if text.contains("include!(") {
+                violations.push(path.display().to_string());
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "production Rust sources should use mod declarations instead of include! splices:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
 fn generated_agent_skills_follow_open_structure() {
     let temp = tempfile::tempdir().expect("tempdir");
     agent_kernel::skilllet::add_skilllet(

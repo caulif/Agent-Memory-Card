@@ -138,6 +138,7 @@ pub fn run() {
             commands::core::promote_candidate,
             commands::core::hide_candidate,
             commands::core::reject_candidate,
+            commands::core::gc_candidates,
             commands::core::update_draft,
             commands::core::merge_drafts,
             commands::core::set_agent_enabled,
@@ -213,7 +214,7 @@ mod tests {
     use super::*;
     use crate::commands::core::{
         add_project, approve_draft, enforce_tauri_kernel_policy,
-        enforce_tauri_kernel_policy_for_project, plan_kernel_command_input, reject_draft,
+        enforce_tauri_kernel_policy_for_project, gc_candidates, plan_kernel_command_input, reject_draft,
         sync_project_for_test,
     };
 
@@ -855,6 +856,47 @@ mod tests {
         assert_eq!(
             audit[0].status,
             agent_kernel::kernel::KernelAuditStatus::Authorized
+        );
+    }
+
+    #[test]
+    fn gc_candidates_tauri_command_hides_low_value_candidates() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        agent_kernel::candidate::add_candidate(
+            temp.path(),
+            agent_kernel::candidate::NewCandidate {
+                id: "project:do-not-touch-rust".to_string(),
+                title: "不要改 Rust".to_string(),
+                body: "不要改 Rust".to_string(),
+                brief: None,
+                tags: Vec::new(),
+                language: None,
+                kind: "constraint".to_string(),
+                scope: "project".to_string(),
+                targets: vec!["codex".to_string()],
+                evidence: "不要改 Rust。".to_string(),
+                confidence: Some(0.94),
+                reason: Some("test".to_string()),
+                matched_template: Some("constraint".to_string()),
+                source_observations: Vec::new(),
+                extraction: agent_kernel::candidate::ExtractionMetadata::default(),
+            },
+        )
+        .expect("candidate");
+
+        let report = gc_candidates(
+            fsutil::path_to_slash(temp.path()),
+            Some(agent_kernel::kernel::KernelPolicy::agent_managed()),
+            None,
+        )
+        .expect("gc candidates");
+
+        assert_eq!(report.hidden, vec!["project:do-not-touch-rust"]);
+        assert_eq!(
+            agent_kernel::candidate::list_visible_candidates(temp.path())
+                .expect("visible")
+                .len(),
+            0
         );
     }
 

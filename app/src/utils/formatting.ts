@@ -9,7 +9,7 @@ const kindLabels: Record<string, string> = {
   rule: "规则",
   skilllet: "技能片段",
   observation: "观察",
-  package: "包",
+  package: "条目",
   preference: "偏好",
   constraint: "约束",
   procedure: "流程",
@@ -21,9 +21,6 @@ const scopeLabels: Record<string, string> = {
   global: "全局",
   agent: "智能体",
 };
-
-export const PACKAGE_MANAGER_EXPLANATION =
-  "包管理是本地 Skilllet 包商店：安装内置或社区最佳实践包，再分配给 Claude Code / Codex 或加入当前项目。";
 
 export function formatAgent(agent: string) {
   return agentLabels[agent] ?? agent;

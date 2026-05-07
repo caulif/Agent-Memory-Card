@@ -34,6 +34,9 @@ export function buildKernelPlanForInvoke(commandName: string, args: Record<strin
   if (commandName === "reject_candidate") {
     return { command: { type: "reject-candidate", id: args.id }, payload: { id: args.id, reason: args.reason ?? null } };
   }
+  if (commandName === "gc_candidates") {
+    return { command: { type: "gc-candidates" }, payload: {} };
+  }
   if (commandName === "sync_project") {
     return { command: { type: "compile-project", dry_run: false }, payload: { dry_run: false } };
   }

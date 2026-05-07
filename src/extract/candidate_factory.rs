@@ -18,6 +18,9 @@ pub(super) fn high_value_prompt_candidate(sentence: &str) -> Option<Candidate> {
         body,
         kind: "procedure".to_string(),
         scope: infer_scope(sentence).to_string(),
+        memory_tier: crate::candidate::MemoryTier::ProjectRule,
+        abstraction_of: None,
+        abstracted_from: None,
         evidence: sentence.to_string(),
         confidence: Some(0.84),
         reason: Some(
@@ -26,6 +29,122 @@ pub(super) fn high_value_prompt_candidate(sentence: &str) -> Option<Candidate> {
         ),
         matched_template: Some("high-value-prompt".to_string()),
     })
+}
+
+pub(super) fn principle_candidates(sentence: &str) -> Vec<Candidate> {
+    let lower = sentence.to_lowercase();
+    let has_principle = signals::has_principle_signal(&lower);
+    let has_planning = signals::has_planning_heuristic_signal(&lower);
+    let has_collaboration = signals::has_collaboration_preference_signal(&lower);
+    if !has_principle && !has_planning && !has_collaboration {
+        return Vec::new();
+    }
+
+    let body = normalize_methodology_body(sentence);
+    if body.len() < 16 || body.len() > 360 {
+        return Vec::new();
+    }
+
+    let mut candidates = Vec::new();
+    if has_principle {
+        candidates.push(Candidate {
+            title: title_from_body(&body),
+            body: body.clone(),
+            kind: "principle".to_string(),
+            scope: "global".to_string(),
+            memory_tier: crate::candidate::MemoryTier::CrossProjectPrinciple,
+            abstraction_of: None,
+            abstracted_from: None,
+            evidence: sentence.to_string(),
+            confidence: Some(0.8),
+            reason: Some("Matched reusable cross-project principle signal.".to_string()),
+            matched_template: Some("principle-signal".to_string()),
+        });
+    }
+    if should_emit_collaboration_candidate(&lower, has_principle, has_planning, has_collaboration) {
+        candidates.push(Candidate {
+            title: title_from_body(&body),
+            body,
+            kind: "procedure".to_string(),
+            scope: "global".to_string(),
+            memory_tier: crate::candidate::MemoryTier::CollaborationPreference,
+            abstraction_of: None,
+            abstracted_from: None,
+            evidence: sentence.to_string(),
+            confidence: Some(if has_principle { 0.79 } else { 0.78 }),
+            reason: Some(
+                "Matched durable planning or collaboration preference signal.".to_string(),
+            ),
+            matched_template: Some("principle-signal".to_string()),
+        });
+    }
+    candidates
+}
+
+pub(super) fn self_verification_candidate(sentence: &str) -> Option<Candidate> {
+    let lower = sentence.to_lowercase();
+    let markers = [
+        "真实结果",
+        "推理引擎",
+        "检查有没有问题",
+        "质量高不高",
+        "自检",
+        "dry-run",
+        "dry run",
+    ];
+    if markers
+        .iter()
+        .filter(|marker| lower.contains(**marker))
+        .count()
+        < 2
+    {
+        return None;
+    }
+    let body = "当准备提交最终代码、分析结论或复杂任务结果时，先用真实输入或 dry-run 自检输出质量；发现问题后再修正。"
+        .to_string();
+    if body.len() < 12 || body.len() > 260 {
+        return None;
+    }
+    Some(Candidate {
+        title: title_from_body(&body),
+        body,
+        kind: "procedure".to_string(),
+        scope: "global".to_string(),
+        memory_tier: crate::candidate::MemoryTier::CollaborationPreference,
+        abstraction_of: None,
+        abstracted_from: None,
+        evidence: sentence.to_string(),
+        confidence: Some(0.98),
+        reason: Some("Matched durable self-verification preference signal.".to_string()),
+        matched_template: Some("self-verification-signal".to_string()),
+    })
+}
+
+fn should_emit_collaboration_candidate(
+    lower: &str,
+    has_principle: bool,
+    has_planning: bool,
+    has_collaboration: bool,
+) -> bool {
+    if has_planning {
+        return true;
+    }
+    if !has_collaboration {
+        return false;
+    }
+    if !has_principle {
+        return true;
+    }
+    [
+        "审阅边界",
+        "先 review",
+        "先审阅",
+        "不要让 ai",
+        "小改快测",
+        "大改重测",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
 }
 
 pub(super) fn scored_signal_candidate(
@@ -44,7 +163,11 @@ pub(super) fn scored_signal_candidate(
         return None;
     }
 
-    let body = normalize_body(sentence);
+    let body = if sentence.contains("卡顿") || sentence.contains("不丝滑") {
+        normalize_project_improvement_body(sentence)
+    } else {
+        normalize_body(sentence)
+    };
     if body.len() < 12 || body.len() > 400 {
         return None;
     }
@@ -54,6 +177,9 @@ pub(super) fn scored_signal_candidate(
         body,
         kind: kind_from_scored_signal(&score.matched_signal).to_string(),
         scope: infer_scope(sentence).to_string(),
+        memory_tier: crate::candidate::MemoryTier::ProjectRule,
+        abstraction_of: None,
+        abstracted_from: None,
         evidence: sentence.to_string(),
         confidence: Some((score.score / 5.0).clamp(0.7, 0.94)),
         reason: Some(score.reason),
@@ -85,6 +211,9 @@ pub(super) fn atomic_exception_candidate(sentence: &str) -> Option<Candidate> {
         body,
         kind: "constraint".to_string(),
         scope: infer_scope(sentence).to_string(),
+        memory_tier: crate::candidate::MemoryTier::ProjectRule,
+        abstraction_of: None,
+        abstracted_from: None,
         evidence: sentence.to_string(),
         confidence: Some(0.82),
         reason: Some("Split atomic exception from a broader preference rule.".to_string()),
@@ -112,7 +241,12 @@ fn title_from_scored_signal(body: &str, signal: &str) -> String {
 
 pub(super) fn draft_id(candidate: &Candidate) -> String {
     let slug = textutil::slug(&candidate.title);
-    format!("project:{slug}")
+    let prefix = match candidate.scope.as_str() {
+        "global" => "global",
+        "agent" => "agent",
+        _ => "project",
+    };
+    format!("{prefix}:{slug}")
 }
 
 /// 从证据块和评分结果构建提取元数据，用于记录溯源信息。
@@ -140,6 +274,10 @@ pub(super) fn extraction_metadata_for_chunk(
             turn_id: None,
             surrounding_context: Vec::new(),
         }),
+        memory_tier: crate::candidate::MemoryTier::ProjectRule,
+        value_scores: Default::default(),
+        abstraction_of: None,
+        abstracted_from: None,
     }
 }
 
@@ -353,6 +491,11 @@ pub(super) fn normalize_body(sentence: &str) -> String {
 }
 
 pub(super) fn normalize_project_improvement_body(sentence: &str) -> String {
+    let lower = sentence.to_lowercase();
+    if lower.contains("卡顿") || lower.contains("不丝滑") || lower.contains("not smooth") {
+        return "保持使用过程流畅，避免每个操作都触发明显卡顿。".to_string();
+    }
+
     let mut body = normalize_body(sentence);
     let replacements = [
         ("这次", ""),
@@ -379,6 +522,59 @@ pub(super) fn normalize_high_value_prompt_body(sentence: &str) -> String {
         normalized = normalized.replace(from, to);
     }
     normalized.trim_matches(['，', ',', ' ']).trim().to_string()
+}
+
+fn normalize_methodology_body(sentence: &str) -> String {
+    let mut body = normalize_body(sentence);
+    for prefix in ["global:", "project:", "agent:"] {
+        if body.to_lowercase().starts_with(prefix) {
+            body = body[prefix.len()..].trim().to_string();
+        }
+    }
+    let lower = body.to_lowercase();
+
+    if (lower.contains("不要固定") || lower.contains("固定规则词") || lower.contains("规则词"))
+        && (lower.contains("always") || lower.contains("prefer") || lower.contains("必须"))
+        && (lower.contains("高价值") || lower.contains("prompt") || lower.contains("skilllet"))
+    {
+        return "提炼高价值 Skilllet 时不要只依赖固定规则词，要识别真实高价值表达。".to_string();
+    }
+    if lower.contains("你对用户视角") && lower.contains("体验") && lower.contains("核心功能")
+    {
+        return "开发评估优先关注核心功能、用户视角与体验质量。".to_string();
+    }
+    if lower.contains("希望结果能支持持续自我修正") || lower.contains("支持持续自我修正")
+    {
+        return "提炼结果应支持基于真实反馈持续自我修正。".to_string();
+    }
+    if lower.contains("更关心候选质量") || lower.contains("候选质量优先于数量") {
+        return "候选质量优先于候选数量。".to_string();
+    }
+    if lower.contains("真实历史回归比样例更重要")
+        || (lower.contains("重视真实历史回归") && lower.contains("不迷信"))
+    {
+        return "重视真实历史回归，不迷信静态样例。".to_string();
+    }
+    if lower.contains("审阅边界")
+        && (lower.contains("先 review") || lower.contains("先审阅") || lower.contains("review"))
+    {
+        return "先 review 再 merge，保留人工审阅边界，不要让 AI 直接固化规则。".to_string();
+    }
+    if (lower.contains("小改快测")
+        || lower.contains("小修改快测")
+        || lower.contains("小修改做快测"))
+        && (lower.contains("大改重测")
+            || lower.contains("大改详测")
+            || lower.contains("大修改做完整回归")
+            || lower.contains("大改再做完整回归"))
+    {
+        return "小改快测，大改重测。".to_string();
+    }
+    if lower.contains("核心功能优先") && lower.contains("体验优先") {
+        return "开发阶段优先做稳核心功能和用户体验，避免过度堆周边功能。".to_string();
+    }
+
+    body
 }
 
 pub(super) fn title_from_body(body: &str) -> String {

@@ -44,8 +44,14 @@ export function useProjectActions({
   const refreshAfterMutation = React.useCallback(async (projectPath: string, command: string) => {
     if (projectPath !== selectedProjectRef.current) return;
     const pages = readModelRefreshPagesForMutation(command);
-    const targetPage = pages.includes(page) ? page : pages[0] ?? page;
-    await loadReadModelsForPage(projectPath, targetPage);
+    const orderedPages = pages.includes(page)
+      ? [page, ...pages.filter((item) => item !== page)]
+      : pages.length > 0
+        ? pages
+        : [page];
+    for (const targetPage of orderedPages) {
+      await loadReadModelsForPage(projectPath, targetPage);
+    }
     await loadDashboard(projectPath);
   }, [loadDashboard, loadReadModelsForPage, page, selectedProjectRef]);
 
@@ -144,7 +150,7 @@ export function useProjectActions({
       }
       // 所有会改变 skilllet/draft/assignment 数据的命令成功执行后刷新读模型
       const mutationCommands = [
-        "promote_candidate", "hide_candidate", "reject_candidate",
+        "promote_candidate", "hide_candidate", "reject_candidate", "gc_candidates",
         "approve_draft", "reject_draft",
         "set_skilllet_targets", "update_skilllet",
         "set_agent_enabled", "merge_drafts", "merge_skilllets",
@@ -152,10 +158,7 @@ export function useProjectActions({
         "promote_skilllet_to_global", "install_global_skilllet_to_project",
       ];
       if (mutationCommands.includes(command)) {
-        void refreshAfterMutation(actionProjectPath, command).catch((error) => {
-          const message = error instanceof Error ? error.message : String(error);
-          setMessage(`后台刷新失败：${message}`);
-        });
+        void refreshAfterMutation(actionProjectPath, command);
       }
     }, () => {
       void refreshAfterMutation(actionProjectPath, command);

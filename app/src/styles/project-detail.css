@@ -117,7 +117,7 @@
   background: rgba(190, 139, 61, 0.14);
 }
 
-/* ===== 进化树 ===== */
+/* ===== 进化来源 ===== */
 .evolution-label {
   display: block;
   margin-bottom: 8px;
@@ -128,27 +128,21 @@
   letter-spacing: 0.04em;
 }
 
-.evolution-tree-section {
+.evolution-summary,
+.evolution-source {
   padding: 10px 12px;
   border-radius: var(--radius-md);
   background: var(--color-bg-secondary);
 }
 
-.evolution-tree {
+.evolution-summary {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.tree-node {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 0;
-}
-
-.tree-from,
-.tree-to {
+.evolution-summary span {
+  display: inline-flex;
   font-size: 12px;
   font-weight: 650;
   color: var(--color-text-primary);
@@ -156,39 +150,13 @@
   border-radius: 8px;
   background: var(--color-bg-glass);
   border: 1px solid var(--color-border-light);
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.tree-to {
-  color: var(--color-success);
-  border-color: rgba(63, 129, 72, 0.16);
-  background: rgba(63, 129, 72, 0.06);
-}
-
-.tree-arrow {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1px;
-  min-width: 40px;
-}
-
-.tree-line {
-  display: block;
-  width: 24px;
-  height: 2px;
-  border-radius: 1px;
-  background: linear-gradient(90deg, rgba(115, 123, 134, 0.3), rgba(63, 81, 72, 0.4));
-}
-
-.tree-label {
-  font-size: 10px;
-  color: var(--color-text-muted);
-  white-space: nowrap;
-  text-align: center;
+.evolution-source p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 /* ===== 置信度 / 稳定度 ===== */

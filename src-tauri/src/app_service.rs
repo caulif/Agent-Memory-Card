@@ -75,7 +75,7 @@ pub fn load_project_dashboard(
     Ok(ProjectDashboard {
         project_path: fsutil::path_to_slash(&root),
         candidate_count: candidate::list_visible_candidates(&root)?.len(),
-        draft_count: draft::load_drafts(&root)?.len(),
+        draft_count: draft::load_reviewable_drafts(&root)?.len(),
         skilllet_count: skilllet::load_skilllets(&root)?.len(),
         observation_count: observation::count_observations(&root)?,
         global_skilllet_count: skilllet::count_global_skilllets(home)?,
@@ -88,7 +88,7 @@ pub fn load_project_review_inbox(project_root: &Path) -> anyhow::Result<ProjectR
     let root = fsutil::normalize_project_root(project_root)?;
     Ok(ProjectReviewInbox {
         project_path: fsutil::path_to_slash(&root),
-        drafts: draft::load_drafts(&root)?,
+        drafts: draft::load_reviewable_drafts(&root)?,
     })
 }
 
@@ -123,6 +123,11 @@ pub fn reject_candidate(
 ) -> anyhow::Result<candidate::CandidateRecord> {
     let root = fsutil::normalize_project_root(project_root)?;
     candidate::reject_candidate(&root, id, reason)
+}
+
+pub fn gc_candidates(project_root: &Path) -> anyhow::Result<candidate::CandidateGcReport> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    candidate::gc_candidates(&root)
 }
 
 pub fn approve_draft(project_root: &Path, id: &str) -> anyhow::Result<()> {
@@ -767,8 +772,8 @@ mod tests {
         )
         .expect("install global");
 
-        assert_eq!(global.id, "project:review-before-sync");
-        assert_eq!(installed.id, "project:review-before-sync");
+        assert_eq!(global.id, "global:review-before-sync");
+        assert_eq!(installed.id, "global:review-before-sync");
         assert_eq!(skilllet::load_skilllets(target.path()).expect("skilllets").len(), 1);
         let config = config::load_or_default_project_config(target.path()).expect("config");
         assert_eq!(config.skilllets.include[0].targets, vec!["codex"]);

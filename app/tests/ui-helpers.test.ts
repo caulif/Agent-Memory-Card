@@ -14,7 +14,6 @@ import {
   createDemoProjectSkillletLibrary,
   createDemoProjectSnapshot,
   describeDraftForReview,
-  PACKAGE_MANAGER_EXPLANATION,
   describeSkillletPlainly,
   deriveSkillletEvolution,
   EDITABLE_AGENTS,
@@ -71,7 +70,7 @@ describe("UI helper labels", () => {
   });
 
   test("keeps page labels Chinese-first", () => {
-    expect(PAGES.map((page) => page.label)).toEqual(["审阅", "技能片段", "分配", "包管理", "设置"]);
+    expect(PAGES.map((page) => page.label)).toEqual(["审阅", "技能片段", "分配", "设置"]);
     expect(PAGES.every((page) => isChineseLabel(page.label))).toBe(true);
   });
 
@@ -455,12 +454,6 @@ describe("skilllet evolution helpers", () => {
     expect(mainSource).toContain("skillletLibrary");
     expect(mainSource).toContain("assignmentView");
     expect(mainSource).toContain("qualityView");
-  });
-
-  test("package manager explanation names reusable Skilllet packages and target agents", () => {
-    expect(PACKAGE_MANAGER_EXPLANATION).toContain("Skilllet 包");
-    expect(PACKAGE_MANAGER_EXPLANATION).toContain("Claude Code");
-    expect(PACKAGE_MANAGER_EXPLANATION).toContain("Codex");
   });
 
   test("removes approved or deleted drafts from the current snapshot immediately", () => {

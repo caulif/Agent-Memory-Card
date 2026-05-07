@@ -1,5 +1,5 @@
 import React from "react";
-import { ArrowUp, Check, PackagePlus, Pencil, Plus } from "lucide-react";
+import { ArrowUp, PackagePlus, Pencil } from "lucide-react";
 import { ActionButton, EmptyState } from "../common";
 import {
   buildEditFormFromSkilllet,
@@ -22,7 +22,14 @@ export function Skilllets({
   previewMode,
   projectPath,
   onRefresh,
-}: PanelPageProps & { library: ProjectSkillletLibrary | null; previewMode: boolean; projectPath: string; onRefresh: () => void }) {
+  onFusionStarted,
+}: PanelPageProps & {
+  library: ProjectSkillletLibrary | null;
+  previewMode: boolean;
+  projectPath: string;
+  onRefresh: () => void;
+  onFusionStarted: () => void;
+}) {
   const [activeTag, setActiveTag] = React.useState("all");
   const [selected, setSelected] = React.useState<string[]>([]);
   const [editingId, setEditingId] = React.useState<string | null>(null);
@@ -41,8 +48,7 @@ export function Skilllets({
   }
 
   const projectSkilllets = library?.skilllets ?? snapshot?.skilllets ?? [];
-  const globalSkilllets = library?.global_skilllets ?? snapshot?.global_skilllets ?? [];
-  const allSkilllets = [...projectSkilllets, ...globalSkilllets];
+  const allSkilllets = projectSkilllets;
 
   /** 从所有技能片段中收集唯一标签 */
   const allTags = React.useMemo(() => {
@@ -62,10 +68,6 @@ export function Skilllets({
   const filteredProject = React.useMemo(
     () => filterRecordsByTag(projectSkilllets, activeTag),
     [projectSkilllets, activeTag],
-  );
-  const filteredGlobal = React.useMemo(
-    () => filterRecordsByTag(globalSkilllets, activeTag),
-    [globalSkilllets, activeTag],
   );
   const canFuse = selected.length >= 2;
 
@@ -89,13 +91,16 @@ export function Skilllets({
         sources: selected,
         targets: ["codex", "claude-code"],
       },
-    }).then(() => setSelected([]));
+    }).then(() => {
+      setSelected([]);
+      onFusionStarted();
+    });
   }
 
   return (
     <div className="list">
       {allSkilllets.length === 0 ? (
-        <EmptyState title="暂无技能片段" description="批准草稿或安装包之后，项目内可复用的技能片段会显示在这里。" />
+        <EmptyState title="暂无技能片段" description="批准草稿后，当前项目内可复用的技能片段会显示在这里。" />
       ) : (
         <>
           {/* 标签快速筛选 */}
@@ -204,71 +209,6 @@ export function Skilllets({
             </section>
           ) : null}
 
-          {/* 全局 Skilllet Library */}
-          {filteredGlobal.length > 0 ? (
-            <section className="skilllet-section">
-              <div className="section-label">全局 Skilllet Library</div>
-              {filteredGlobal.map((skilllet) => {
-                const alreadyInstalled = projectSkilllets.some((ps) => ps.id === skilllet.id);
-                const installKey = `安装全局-${skilllet.id}`;
-                return (
-                <React.Fragment key={skilllet.id}>
-                <article className="record compact global-skilllet">
-                  <div className="record-main">
-                    <span className="tag global-tag">{translateKind(skilllet.kind)} · {translateScope(skilllet.scope)}</span>
-                    {skilllet.brief ? <p className="draft-brief">{skilllet.brief}</p> : null}
-                    <h3>{skilllet.title}</h3>
-                    <p>{skilllet.body}</p>
-                    {skilllet.tags && skilllet.tags.length > 0 ? (
-                      <div className="tag-row">
-                        {skilllet.tags.map((t) => (
-                          <span key={t}>{t}</span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="record-actions">
-                    <button
-                      className="secondary-action"
-                      disabled={disabled}
-                      onClick={() => startEdit(skilllet)}
-                    >
-                      <Pencil size={15} />
-                      编辑
-                    </button>
-                    {alreadyInstalled ? (
-                      <button className="secondary-action" disabled>
-                        <Check size={15} />
-                        已加入
-                      </button>
-                    ) : (
-                      <ActionButton
-                        icon={Plus}
-                        label="加入当前项目"
-                        busyLabel="加入中"
-                        busy={pendingAction === installKey}
-                        disabled={disabled}
-                        onClick={() => onAction(installKey, `已将"${skilllet.title}"加入当前项目`, "install_global_skilllet_to_project", { id: skilllet.id, targets: ["codex", "claude-code"] })}
-                      />
-                    )}
-                  </div>
-                </article>
-                {editingId === skilllet.id ? (
-                  <RecordEditor
-                    recordType="skilllet"
-                    initialForm={buildEditFormFromSkilllet(skilllet)}
-                    previewMode={previewMode}
-                    projectPath={projectPath}
-                    recordId={skilllet.id}
-                    onSaved={handleSaved}
-                    onCancel={cancelEdit}
-                  />
-                ) : null}
-                </React.Fragment>
-                );
-              })}
-            </section>
-          ) : null}
         </>
       )}
     </div>

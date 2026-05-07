@@ -61,7 +61,7 @@ export function useProjectReadModels({
       setCandidateInbox(createDemoProjectCandidateInbox(projectPath));
       setReviewInbox(createDemoProjectReviewInbox(projectPath));
     }
-    if (targetPage === "skilllets" || targetPage === "catalog" || targetPage === "agents" || targetPage === "settings") {
+    if (targetPage === "skilllets" || targetPage === "agents" || targetPage === "settings") {
       setSkillletLibrary(createDemoProjectSkillletLibrary(projectPath));
     }
     if (targetPage === "agents" || targetPage === "settings") {

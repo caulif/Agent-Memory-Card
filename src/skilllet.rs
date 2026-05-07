@@ -70,6 +70,7 @@ pub struct SkillletTargetMatrix {
 pub struct SkillletTargetMatrixRow {
     pub skilllet_id: String,
     pub title: String,
+    pub scope: String,
     pub targets: std::collections::BTreeMap<String, bool>,
 }
 
@@ -282,6 +283,42 @@ pub fn update_skilllet(
     Ok(record)
 }
 
+pub fn review_update_matches_existing(
+    existing: &SkillletRecord,
+    incoming_title: &str,
+    incoming_body: &str,
+) -> bool {
+    existing.title.trim() == incoming_title.trim()
+        || crate::textutil::jaccard_similarity(&existing.body, incoming_body) >= 0.45
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn update_skilllet_from_review(
+    project_root: &Path,
+    id: &str,
+    title: String,
+    body: String,
+    brief: String,
+    tags: Vec<String>,
+    language: String,
+    kind: String,
+    scope: String,
+) -> Result<SkillletRecord> {
+    update_skilllet(
+        project_root,
+        id,
+        SkillletUpdate {
+            title: Some(title),
+            body: Some(body),
+            brief: Some(brief),
+            tags: Some(tags),
+            language: Some(language),
+            kind: Some(kind),
+            scope: Some(scope),
+        },
+    )
+}
+
 pub fn load_skilllets(project_root: &Path) -> Result<Vec<SkillletRecord>> {
     let root = fsutil::normalize_project_root(project_root)?;
     let dir = config::kernel_dir(&root).join("skilllets");
@@ -367,19 +404,71 @@ pub fn promote_skilllet_to_global(
 ) -> Result<SkillletRecord> {
     validate_skilllet_id(id)?;
     let root = fsutil::normalize_project_root(project_root)?;
+    let mut project = config::load_or_default_project_config(&root)?;
     let Some(mut record) = skilllet_map(&root)?.remove(id) else {
         return Err(anyhow!("skilllet `{id}` does not exist"));
     };
+    let original_id = record.id.clone();
+    let promoted_id = global_skilllet_id(&record)?;
     record.scope = "global".to_string();
+    record.id = promoted_id.clone();
     record.source_project = Some(fsutil::path_to_slash(&root));
     record.updated_at = Utc::now().to_rfc3339();
 
-    let path = global_skilllet_path(home, id)?;
-    if let Some(parent) = path.parent() {
+    let global_path = global_skilllet_path(home, &promoted_id)?;
+    if let Some(parent) = global_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(&path, serde_yaml::to_string(&record)?)
-        .with_context(|| format!("write {}", path.display()))?;
+    fs::write(&global_path, serde_yaml::to_string(&record)?)
+        .with_context(|| format!("write {}", global_path.display()))?;
+
+    let project_global_path = skilllet_path(&root, &promoted_id)?;
+    if let Some(parent) = project_global_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&project_global_path, serde_yaml::to_string(&record)?)
+        .with_context(|| format!("write {}", project_global_path.display()))?;
+
+    let mut preserved_targets = None;
+    if let Some(existing) = project
+        .skilllets
+        .include
+        .iter_mut()
+        .find(|item| item.id == original_id || item.id == promoted_id)
+    {
+        if existing.id == original_id {
+            preserved_targets = Some(existing.targets.clone());
+        }
+        existing.id = promoted_id.clone();
+        existing.scope = Some("global".to_string());
+    } else {
+        let targets = enabled_agent_targets(&project);
+        preserved_targets = Some(targets.clone());
+        project.skilllets.include.push(SkillletRef {
+            id: promoted_id.clone(),
+            targets,
+            scope: Some("global".to_string()),
+        });
+    }
+    if let Some(targets) = preserved_targets {
+        if let Some(existing) = project
+            .skilllets
+            .include
+            .iter_mut()
+            .find(|item| item.id == promoted_id)
+        {
+            existing.targets = targets;
+        }
+    }
+    dedupe_skilllet_refs(&mut project.skilllets.include);
+    config::save_project_config(&root, &project)?;
+
+    if original_id != promoted_id {
+        let old_path = skilllet_path(&root, &original_id)?;
+        if old_path.exists() {
+            fs::remove_file(old_path)?;
+        }
+    }
     Ok(record)
 }
 
@@ -399,7 +488,7 @@ pub fn install_global_skilllet_to_project(
     };
 
     config::ensure_kernel_dir(&root)?;
-    record.scope = "project".to_string();
+    record.scope = "global".to_string();
     record.updated_at = Utc::now().to_rfc3339();
 
     let path = skilllet_path(&root, id)?;
@@ -417,12 +506,12 @@ pub fn install_global_skilllet_to_project(
         .find(|item| item.id == id)
     {
         existing.targets = targets;
-        existing.scope = Some("project".to_string());
+        existing.scope = Some("global".to_string());
     } else {
         project.skilllets.include.push(SkillletRef {
             id: id.to_string(),
             targets,
-            scope: Some("project".to_string()),
+            scope: Some("global".to_string()),
         });
     }
     config::save_project_config(&root, &project)?;
@@ -532,12 +621,48 @@ pub fn skilllet_target_matrix(project_root: &Path) -> Result<SkillletTargetMatri
             SkillletTargetMatrixRow {
                 skilllet_id: record.id,
                 title: record.title,
+                scope: record.scope,
                 targets,
             }
         })
         .collect();
 
     Ok(SkillletTargetMatrix { agents, rows })
+}
+
+fn global_skilllet_id(record: &SkillletRecord) -> Result<String> {
+    if record.id.starts_with("global:") {
+        return Ok(record.id.clone());
+    }
+    let raw_slug = record
+        .id
+        .split_once(':')
+        .map(|(_, slug)| slug)
+        .filter(|slug| !slug.trim().is_empty())
+        .unwrap_or(record.title.trim());
+    let mut id = format!("global:{}", raw_slug.trim());
+    while id.len() > MAX_SKILLLET_ID_LEN {
+        let Some((idx, _)) = id.char_indices().next_back() else {
+            break;
+        };
+        id.truncate(idx);
+    }
+    validate_skilllet_id(&id)?;
+    Ok(id)
+}
+
+fn enabled_agent_targets(project: &config::ProjectConfig) -> Vec<String> {
+    project
+        .agents
+        .iter()
+        .filter(|(_, agent)| agent.enabled)
+        .map(|(name, _)| name.clone())
+        .collect()
+}
+
+fn dedupe_skilllet_refs(refs: &mut Vec<SkillletRef>) {
+    let mut seen = std::collections::BTreeSet::new();
+    refs.retain(|item| seen.insert(item.id.clone()));
 }
 
 #[cfg(test)]
