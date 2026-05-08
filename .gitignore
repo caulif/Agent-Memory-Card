@@ -36,3 +36,4 @@
 /bun/*.test.js
 /src/**/tests.rs
 /src/**/*_tests.rs
+/src/**/*_regression.rs
