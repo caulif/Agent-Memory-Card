@@ -77,7 +77,7 @@ fn production_rust_sources_do_not_use_include_splices() {
 #[test]
 fn generated_agent_skills_follow_open_structure() {
     let temp = tempfile::tempdir().expect("tempdir");
-    agent_kernel::skilllet::add_skilllet(
+    agent_kernel::memory_card::add_memory_card(
         temp.path(),
         "project:frontend-workflow",
         "Frontend Workflow",
@@ -86,7 +86,7 @@ fn generated_agent_skills_follow_open_structure() {
         "project",
         vec!["claude-code".to_string()],
     )
-    .expect("add skilllet");
+    .expect("add memory_card");
 
     agent_kernel::build::sync_project(temp.path()).expect("build");
 

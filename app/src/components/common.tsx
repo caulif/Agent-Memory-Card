@@ -2,6 +2,7 @@ import React from "react";
 import { Check, Loader2 } from "lucide-react";
 import { resolveTaskProgress, type DesktopTaskStatus } from "../ui-helpers";
 
+/** 面板容器 */
 export function Panel({
   title,
   subtitle,
@@ -13,7 +14,7 @@ export function Panel({
       <div className="panel-title">
         <div>
           <h2>{title}</h2>
-          {subtitle ? <p>{subtitle}</p> : null}
+          {subtitle ? <p className="subtitle">{subtitle}</p> : null}
         </div>
         {Icon ? (
           <div className="panel-icon">
@@ -26,6 +27,7 @@ export function Panel({
   );
 }
 
+/** 指标数字卡 */
 export function Metric({ label, value }: { label: string; value: number }) {
   return (
     <div className="metric">
@@ -35,6 +37,7 @@ export function Metric({ label, value }: { label: string; value: number }) {
   );
 }
 
+/** 状态列表 */
 export function StatusList({ items, empty, tone }: { items: string[]; empty: string; tone?: "warning" }) {
   if (items.length === 0) {
     return <p className="empty">{empty}</p>;
@@ -51,6 +54,7 @@ export function StatusList({ items, empty, tone }: { items: string[]; empty: str
   );
 }
 
+/** 空状态占位 */
 export function EmptyState({ title, description }: { title: string; description: string }) {
   return (
     <div className="empty-state" role="status">
@@ -70,6 +74,7 @@ const VARIANT_CLASS: Record<ActionButtonVariant, string> = {
   ghost: "ghost-action",
 };
 
+/** 操作按钮 */
 export function ActionButton({
   variant,
   className,
@@ -100,12 +105,13 @@ export function ActionButton({
       aria-label={ariaLabel ?? label}
       aria-busy={busy}
     >
-      {busy ? <Loader2 className="spin" size={15} /> : <Icon size={15} />}
+      {busy ? <Loader2 className="spin" size={14} /> : <Icon size={14} />}
       {busy ? busyLabel : label}
     </button>
   );
 }
 
+/** 任务进度条 */
 export function TaskProgressBar({ pendingAction, message, backendStatus }: { pendingAction: string; message: string; backendStatus?: DesktopTaskStatus }) {
   const progress = resolveTaskProgress(pendingAction, backendStatus);
   const isBusy = pendingAction !== "" || Boolean(backendStatus?.running);
@@ -121,7 +127,7 @@ export function TaskProgressBar({ pendingAction, message, backendStatus }: { pen
   return (
     <div className="progress-area">
       <div className="status-pill" title={message} role="status" aria-live="polite">
-        {isBusy ? <Loader2 className="spin" size={15} /> : <Check size={15} />}
+        {isBusy ? <Loader2 className="spin" size={13} /> : <Check size={13} />}
         <span>{isBusy ? `${activeLabel}中...` : message}</span>
       </div>
       {isBusy ? (

@@ -68,6 +68,18 @@ fn looks_like_one_off_task(lower: &str) -> bool {
         || lower.contains("帮我看看")
         || lower.contains("修一下")
         || lower.contains("看一下页面")
+        || lower.contains("只读")
+        || lower.contains("不要写文件")
+        || lower.contains("不要编辑文件")
+        || lower.contains("不要提交")
+        || lower.contains("只输出")
+        || lower.contains("只修改")
+        || lower.contains("仅修改")
+        || lower.contains("本轮只允许")
+        || lower.contains("这次只审查")
+        || lower.contains("只审查 diff")
+        || lower.contains("modify only")
+        || lower.contains("read-only")
 }
 
 fn looks_like_generic_advice(lower: &str) -> bool {

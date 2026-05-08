@@ -91,7 +91,7 @@ cases:
     expected_tags: []
   - id: english-durable-decision
     origin: user
-    input: "Keep Agent-Kernel file-native for v1. Do not introduce a mandatory vector database; indexes must remain rebuildable caches."
+    input: "Keep Agent Memory Kernel file-native for v1. Do not introduce a mandatory vector database; indexes must remain rebuildable caches."
     expected: candidate
     expected_signal: decision
     expected_artifact_kind: always_on_rule
@@ -99,15 +99,15 @@ cases:
     expected_memory_tier: "project_rule"
     expected_terms: ["file-native", "rebuildable"]
     expected_tags: ["shape:decision", "domain:architecture", "hardness:high"]
-  - id: ai-skilllet-worthy-workflow
+  - id: ai-memory_card-worthy-workflow
     origin: assistant
-    input: "基于用户确认，项目应该把 AI 生成的高质量项目改善也送入 Candidate/Draft，而不是直接写 Skilllet；这能保留审阅边界。"
+    input: "基于用户确认，项目应该把 AI 生成的高质量项目改善也送入 Candidate/Draft，而不是直接写 Memory Card；这能保留审阅边界。"
     expected: candidate
     expected_signal: ai_project_improvement
     expected_artifact_kind: review_only
     expected_hardness: high
     expected_memory_tier: "project_rule"
-    expected_terms: ["Candidate/Draft", "Skilllet"]
+    expected_terms: ["Candidate/Draft", "Memory Card"]
     expected_tags: ["shape:constraint", "domain:governance", "evidence:accepted-ai", "hardness:high"]
   - id: durable-constraint-no-hard-reset
     origin: user
@@ -282,7 +282,7 @@ cases:
     expected_tags: []
   - id: project-real-006
     origin: user
-    input: "项目内 Skilllet 草稿必须先进入 Candidate/Draft，不要直接写入 AGENTS.md。"
+    input: "项目内 Memory Card 草稿必须先进入 Candidate/Draft，不要直接写入 AGENTS.md。"
     expected: candidate
     expected_signal: ""
     expected_artifact_kind: ""
@@ -382,7 +382,7 @@ cases:
     expected_tags: []
   - id: project-real-016
     origin: user
-    input: "不要把 assistant 自己的建议直接固化成 Skilllet，除非用户明确确认。"
+    input: "不要把 assistant 自己的建议直接固化成 Memory Card，除非用户明确确认。"
     expected: candidate
     expected_signal: ""
     expected_artifact_kind: ""
@@ -865,7 +865,7 @@ cases:
     must_be_extracted: true
   - id: collab-real-004
     origin: user
-    input: "先给我 review 边界，再决定是否写入 Skilllet。"
+    input: "先给我 review 边界，再决定是否写入 Memory Card。"
     expected: candidate
     expected_signal: ""
     expected_artifact_kind: ""

@@ -1,11 +1,11 @@
-use crate::candidate::ExtractionAction;
+﻿use crate::candidate::ExtractionAction;
 
 use super::Candidate;
-use super::lifecycle::SkillletOperation;
+use super::lifecycle::MemoryCardOperation;
 
 #[derive(Debug, Clone)]
 pub(crate) struct QualityGateDecision {
-    pub operation: SkillletOperation,
+    pub operation: MemoryCardOperation,
     pub disposition: QualityDisposition,
     pub reason: String,
     pub flags: Vec<String>,
@@ -33,7 +33,7 @@ pub(crate) fn evaluate_candidate_quality(
 
     if contains_internal_leak(&candidate_text) {
         return skip(
-            SkillletOperation::Noop,
+            MemoryCardOperation::Noop,
             "internal-leak",
             "Candidate contains internal observation/evidence metadata instead of a reusable rule.",
         );
@@ -41,7 +41,7 @@ pub(crate) fn evaluate_candidate_quality(
 
     if looks_like_generated_instruction_artifact(&lower) {
         return skip(
-            SkillletOperation::Noop,
+            MemoryCardOperation::Noop,
             "generated-instruction-artifact",
             "Candidate came from generated AGENTS/CLAUDE instructions rather than user-authored memory.",
         );
@@ -49,7 +49,7 @@ pub(crate) fn evaluate_candidate_quality(
 
     if looks_like_meta_discussion(&lower) {
         return skip(
-            SkillletOperation::Noop,
+            MemoryCardOperation::Noop,
             "meta-discussion",
             "Candidate is about planning or implementation status, not durable agent behavior.",
         );
@@ -57,7 +57,7 @@ pub(crate) fn evaluate_candidate_quality(
 
     if looks_like_temporary_task_constraint(&lower) {
         return skip(
-            SkillletOperation::Noop,
+            MemoryCardOperation::Noop,
             "temporary-task-constraint",
             "Candidate reflects a one-off task brief or write-scope boundary, not a durable project rule.",
         );
@@ -65,23 +65,23 @@ pub(crate) fn evaluate_candidate_quality(
 
     if looks_like_package_manager_preference(&lower) {
         return skip(
-            SkillletOperation::Noop,
+            MemoryCardOperation::Noop,
             "package-manager-preference",
-            "Package manager preferences are intentionally excluded from Skilllet extraction.",
+            "Package manager preferences are intentionally excluded from MemoryCard extraction.",
         );
     }
 
     if action.action == "merge_into_existing" && action.similarity.unwrap_or(0.0) >= 0.95 {
         return skip(
-            SkillletOperation::Noop,
+            MemoryCardOperation::Noop,
             "duplicate-existing",
-            "Equivalent Skilllet already exists; suppressing duplicate candidate.",
+            "Equivalent MemoryCard already exists; suppressing duplicate candidate.",
         );
     }
 
     if action.action == "noop" {
         return skip(
-            SkillletOperation::Noop,
+            MemoryCardOperation::Noop,
             "llm-noop",
             action.reason.as_deref().unwrap_or(
                 "LLM update phase marked this candidate as already covered or low value.",
@@ -91,7 +91,7 @@ pub(crate) fn evaluate_candidate_quality(
 
     if !is_known_high_value_template(candidate) && !looks_self_contained_rule(&candidate.body) {
         return skip(
-            SkillletOperation::Noop,
+            MemoryCardOperation::Noop,
             "not-self-contained-rule",
             "Candidate body is not a self-contained future rule.",
         );
@@ -123,7 +123,7 @@ pub(crate) fn quality_skip_message(id: &str, decision: &QualityGateDecision) -> 
     format!("{id}: {} ({})", decision.flags.join(","), decision.reason)
 }
 
-fn skip(operation: SkillletOperation, flag: &str, reason: &str) -> QualityGateDecision {
+fn skip(operation: MemoryCardOperation, flag: &str, reason: &str) -> QualityGateDecision {
     QualityGateDecision {
         operation,
         disposition: QualityDisposition::Skip,
@@ -173,6 +173,11 @@ fn looks_like_meta_discussion(lower: &str) -> bool {
         || lower.contains("signal")
         || lower.contains("信号")
         || lower.contains("candidate")
+        || lower.contains("候选")
+        || lower.contains("候选记忆")
+        || lower.contains("记忆")
+        || lower.contains("抽取")
+        || lower.contains("筛选")
         || lower.contains("classification")
         || lower.contains("classify")
         || lower.contains("prompt"))
@@ -184,23 +189,55 @@ fn looks_like_meta_discussion(lower: &str) -> bool {
             || lower.contains("方法论")
             || lower.contains("当前"));
     let pipeline_terms = [
-        "skilllet",
+        "memory_card",
         "candidate",
+        "候选",
+        "候选记忆",
+        "记忆",
         "draft",
         "hook",
         "compile",
         "编译",
         "提炼",
+        "抽取",
+        "筛选",
         "规划",
         "计划",
         "实现",
     ];
-    (question_like && pipeline_terms.iter().any(|term| lower.contains(term))) || system_analysis
+    let candidate_pipeline_rule = (lower.contains("候选记忆")
+        || (lower.contains("候选质量") && lower.contains("候选数量"))
+        || lower.contains("候选被判定为无长期价值")
+        || lower.contains("真正值得固化的记忆")
+        || (lower.contains("生成") && lower.contains("筛选") && lower.contains("候选")))
+        && (lower.contains("只保留")
+            || lower.contains("高置信度")
+            || lower.contains("可执行")
+            || lower.contains("过滤")
+            || lower.contains("质量优先"));
+    let generic_planning_principle = (lower.contains("当规划或评估开发工作时")
+        || (lower.contains("核心功能链路") && lower.contains("周边功能")))
+        && !lower.contains("所有项目")
+        && !lower.contains("每次");
+    let current_product_feedback = (lower.contains("残留")
+        || lower.contains("现有bug")
+        || lower.contains("现有 bug")
+        || lower.contains("重复这个问题")
+        || lower.contains("图片中这几个完全是不对")
+        || lower.contains("分配页面")
+        || lower.contains("调用claude code")
+        || lower.contains("调用 claude code"))
+        && (lower.contains("我希望") || lower.contains("想办法") || lower.contains("需要实现"));
+    (question_like && pipeline_terms.iter().any(|term| lower.contains(term)))
+        || system_analysis
+        || candidate_pipeline_rule
+        || generic_planning_principle
+        || current_product_feedback
 }
 
 fn looks_like_generated_instruction_artifact(lower: &str) -> bool {
     let generated_markers = [
-        "enabled skilllets",
+        "enabled memory cards",
         "enabled skills",
         "generated by agent-kernel",
         "do not edit directly",
@@ -247,7 +284,7 @@ fn looks_like_generated_instruction_artifact(lower: &str) -> bool {
         "import artifact drifts",
         "大段生成内容漂移",
         "误导成新增",
-        "fuse skilllets",
+        "fuse memory_cards",
         "medium/high risk commands",
         "medium high risk commands",
         "backend issued decision tokens",
@@ -471,13 +508,13 @@ fn looks_self_contained_rule(body: &str) -> bool {
         && durable_markers.iter().any(|marker| lower.contains(marker))
 }
 
-fn operation_from_action(action: &ExtractionAction) -> SkillletOperation {
+fn operation_from_action(action: &ExtractionAction) -> MemoryCardOperation {
     match action.action.as_str() {
-        "merge_into_existing" => SkillletOperation::Update,
-        "conflict" => SkillletOperation::Conflict,
-        "supersede" => SkillletOperation::Supersede,
-        "noop" => SkillletOperation::Noop,
-        _ => SkillletOperation::Add,
+        "merge_into_existing" => MemoryCardOperation::Update,
+        "conflict" => MemoryCardOperation::Conflict,
+        "supersede" => MemoryCardOperation::Supersede,
+        "noop" => MemoryCardOperation::Noop,
+        _ => MemoryCardOperation::Add,
     }
 }
 
@@ -519,8 +556,8 @@ mod tests {
     fn rejects_meta_discussion_questions() {
         let decision = evaluate_candidate_quality(
             &candidate(
-                "是否已经把 Skilllet 编译为 hook",
-                "是否已经把 Skilllet 编译为 hook，例如 git commit 前运行 cargo clippy？",
+                "是否已经把 MemoryCard 编译为 hook",
+                "是否已经把 MemoryCard 编译为 hook，例如 git commit 前运行 cargo clippy？",
             ),
             &ExtractionAction::new_candidate(),
         );
@@ -544,11 +581,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_enabled_skilllet_artifact_blocks() {
+    fn rejects_enabled_memory_card_artifact_blocks() {
         let decision = evaluate_candidate_quality(
             &candidate(
                 "Use Axios",
-                "## Enabled Skilllets\n\n### Use Axios\n\nUse Axios for frontend HTTP requests",
+                "## Enabled Memory Cards\n\n### Use Axios\n\nUse Axios for frontend HTTP requests",
             ),
             &ExtractionAction::new_candidate(),
         );
@@ -723,7 +760,7 @@ mod tests {
         for body in [
             "Acceptance criteria: non-dry-run compile must write candidates before approving.",
             "global install promote fixtures with the same id must fail or require review.",
-            "n: fuse skilllets to draft 去重 source ids 禁止 source id 重复写入。",
+            "n: fuse memory_cards to draft 去重 source ids 禁止 source id 重复写入。",
             "n: import artifact drifts 对删除、重排、大段生成内容漂移不要误导成新增。",
             "n import artifact drifts 对删除、重排、大段生成内容漂移不要误导成新增。",
             "Medium/high risk commands do not require backend policy approval in this fixture.",
@@ -798,14 +835,14 @@ mod tests {
     }
 
     #[test]
-    fn suppresses_near_exact_duplicate_existing_skilllets() {
+    fn suppresses_near_exact_duplicate_existing_memory_cards() {
         let decision = evaluate_candidate_quality(
             &candidate("Use Axios", "Use Axios for frontend HTTP requests."),
             &ExtractionAction::merge_into_existing("project:use-axios".to_string(), 0.99),
         );
 
         assert_eq!(decision.disposition, QualityDisposition::Skip);
-        assert_eq!(decision.operation, SkillletOperation::Noop);
+        assert_eq!(decision.operation, MemoryCardOperation::Noop);
         assert_eq!(decision.flags, vec!["duplicate-existing"]);
     }
 }

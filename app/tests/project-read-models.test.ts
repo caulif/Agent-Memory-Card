@@ -16,33 +16,33 @@ describe("project read model loading strategy", () => {
   });
 
   test("loads only the read models each secondary page needs", () => {
-    expect(readModelCommandsForPage("skilllets")).toEqual(["get_project_skilllet_library"]);
+    expect(readModelCommandsForPage("memory-cards")).toEqual(["get_project_memory_card_library"]);
     expect(readModelCommandsForPage("agents")).toEqual([
       "get_project_assignment_view",
-      "get_project_skilllet_library",
+      "get_project_memory_card_library",
     ]);
   });
 
   test("does not expose the catalog as a top-level page", () => {
-    expect(PAGES.map((page) => page.id)).toEqual(["drafts", "skilllets", "agents", "settings"]);
+    expect(PAGES.map((page) => page.id)).toEqual(["drafts", "memory-cards", "agents", "settings"]);
   });
 
   test("refreshes draft inbox after candidate gc", () => {
     expect(readModelRefreshPagesForMutation("gc_candidates")).toEqual(["drafts"]);
   });
 
-  test("refreshes draft, skilllet, and assignment models after skilllet fusion", () => {
-    expect(readModelRefreshPagesForMutation("fuse_skilllets_to_draft")).toEqual([
+  test("refreshes draft, memory_card, and assignment models after memory_card fusion", () => {
+    expect(readModelRefreshPagesForMutation("fuse_memory_cards_to_draft")).toEqual([
       "drafts",
-      "skilllets",
+      "memory-cards",
       "agents",
     ]);
   });
 
-  test("refreshes draft, skilllet, and assignment models after draft approval", () => {
+  test("refreshes draft, memory_card, and assignment models after draft approval", () => {
     expect(readModelRefreshPagesForMutation("approve_draft")).toEqual([
       "drafts",
-      "skilllets",
+      "memory-cards",
       "agents",
     ]);
   });

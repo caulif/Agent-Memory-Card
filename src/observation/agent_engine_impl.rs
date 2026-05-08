@@ -1,4 +1,4 @@
-use std::io::Write;
+﻿use std::io::Write;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -80,9 +80,9 @@ fn codex_binary() -> &'static str {
     "codex"
 }
 
-pub(super) fn parse_agent_candidates(output: &str) -> Result<Vec<AgentSkillletCandidate>> {
+pub(super) fn parse_agent_candidates(output: &str) -> Result<Vec<AgentMemoryCardCandidate>> {
     let trimmed = output.trim();
-    if let Ok(candidates) = serde_json::from_str::<Vec<AgentSkillletCandidate>>(trimmed) {
+    if let Ok(candidates) = serde_json::from_str::<Vec<AgentMemoryCardCandidate>>(trimmed) {
         return Ok(candidates);
     }
     let Some(start) = trimmed.find('[') else {
@@ -94,7 +94,7 @@ pub(super) fn parse_agent_candidates(output: &str) -> Result<Vec<AgentSkillletCa
     serde_json::from_str(&trimmed[start..=end]).context("parse agent JSON candidates")
 }
 
-pub(super) fn is_usable_agent_candidate(candidate: &AgentSkillletCandidate) -> bool {
+pub(super) fn is_usable_agent_candidate(candidate: &AgentMemoryCardCandidate) -> bool {
     let confidence = candidate.confidence.unwrap_or(0.0);
     !candidate.title.trim().is_empty()
         && !candidate.body.trim().is_empty()

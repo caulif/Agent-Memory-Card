@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+﻿import { invoke } from "@tauri-apps/api/core";
 import type {
   CandidateRecord,
   DraftRecord,
@@ -7,14 +7,15 @@ import type {
   DesktopTaskStatus,
   KernelPlanRequest,
   KernelPolicyPayload,
+  CustomProviderConfig,
   ProjectAssignmentView,
   ProjectCandidateInbox,
   ProjectDashboard,
   ProjectQualityView,
   ProjectReviewInbox,
-  ProjectSkillletLibrary,
+  ProjectMemoryCardLibrary,
   ProjectSnapshot,
-  SkillletRecord,
+  MemoryCardRecord,
 } from "./ui-helpers";
 
 export type ProjectMutationAck = {
@@ -37,8 +38,8 @@ export function getProjectReviewInbox(projectPath: string) {
   return invoke<ProjectReviewInbox>("get_project_review_inbox", { projectPath });
 }
 
-export function getProjectSkillletLibrary(projectPath: string) {
-  return invoke<ProjectSkillletLibrary>("get_project_skilllet_library", { projectPath });
+export function getProjectMemoryCardLibrary(projectPath: string) {
+  return invoke<ProjectMemoryCardLibrary>("get_project_memory_card_library", { projectPath });
 }
 
 export function getProjectAssignmentView(projectPath: string) {
@@ -47,6 +48,19 @@ export function getProjectAssignmentView(projectPath: string) {
 
 export function getProjectQualityView(projectPath: string) {
   return invoke<ProjectQualityView>("get_project_quality_view", { projectPath });
+}
+
+export function getCustomProviderConfig(projectPath: string) {
+  return invoke<CustomProviderConfig>("get_custom_provider_config", { projectPath });
+}
+
+export function saveCustomProviderConfig(args: {
+  projectPath: string;
+  input: CustomProviderConfig;
+  confirmedPolicy: KernelPolicyPayload;
+  decisionToken?: string;
+}) {
+  return invoke<CustomProviderConfig>("save_custom_provider_config", args);
 }
 
 export function getProjectSnapshot(projectPath: string) {
@@ -73,6 +87,14 @@ export function retryJobCommand(command: string, args: Record<string, unknown>) 
   return invoke<DesktopJobStart>(command, args);
 }
 
+export function clearProjectHistory(args: {
+  projectPath: string;
+  confirmedPolicy: KernelPolicyPayload;
+  decisionToken?: string;
+}) {
+  return invoke<ProjectMutationAck>("clear_project_history", args);
+}
+
 export function updateDraft(args: {
   projectPath: string;
   id: string;
@@ -83,14 +105,14 @@ export function updateDraft(args: {
   return invoke<DraftRecord>("update_draft", args);
 }
 
-export function updateSkilllet(args: {
+export function updateMemoryCard(args: {
   projectPath: string;
   id: string;
   input: Record<string, unknown>;
   confirmedPolicy: KernelPolicyPayload;
   decisionToken?: string;
 }) {
-  return invoke<SkillletRecord>("update_skilllet", args);
+  return invoke<MemoryCardRecord>("update_memory_card", args);
 }
 
 export function promoteCandidate(args: {
@@ -98,7 +120,7 @@ export function promoteCandidate(args: {
   id: string;
   confirmedPolicy: KernelPolicyPayload;
 }) {
-  return invoke<SkillletRecord>("promote_candidate", args);
+  return invoke<MemoryCardRecord>("promote_candidate", args);
 }
 
 export function hideCandidate(args: {

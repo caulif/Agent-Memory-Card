@@ -42,7 +42,7 @@ pub struct RuleTestRow {
 impl RuleTestReport {
     pub fn render(&self) -> String {
         let mut out = String::new();
-        out.push_str("Agent-Kernel Rule CI\n\n");
+        out.push_str("Agent Memory Kernel Rule CI\n\n");
         for row in &self.rows {
             out.push_str(&format!("- {}: {}\n", row.name, row.status));
             for detail in &row.details {

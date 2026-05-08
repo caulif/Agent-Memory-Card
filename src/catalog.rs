@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config;
 use crate::fsutil;
-use crate::skilllet;
+use crate::memory_card;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Catalog {
@@ -59,7 +59,7 @@ pub struct CatalogValidationRow {
 impl CatalogValidationReport {
     pub fn render(&self) -> String {
         let mut out = String::new();
-        out.push_str("Agent-Kernel Catalog Validation\n\n");
+        out.push_str("Agent Memory Kernel Catalog Validation\n\n");
         if self.rows.is_empty() {
             out.push_str("No issues found.\n");
         } else {
@@ -145,7 +145,7 @@ pub fn validate_catalog(catalog: &Catalog) -> CatalogValidationReport {
 
 pub fn catalog_status(project_root: &Path) -> Result<CatalogStatus> {
     let catalog = load_or_default_catalog(project_root)?;
-    let installed = skilllet::load_skilllets(project_root)?
+    let installed = memory_card::load_memory_cards(project_root)?
         .into_iter()
         .map(|record| record.id)
         .collect::<std::collections::BTreeSet<_>>();
@@ -181,7 +181,7 @@ pub fn install_catalog_package(
         .find(|package| package.id == id)
         .ok_or_else(|| anyhow!("catalog package `{id}` was not found"))?;
 
-    skilllet::add_skilllet(
+    memory_card::add_memory_card(
         project_root,
         &package.id,
         &package.title,
@@ -239,7 +239,7 @@ fn default_catalog() -> Catalog {
                 tags: vec!["build".to_string(), "agents".to_string(), "safety".to_string()],
                 kind: "constraint".to_string(),
                 scope: "project".to_string(),
-                body: "Treat Agent instruction files as generated artifacts. Edit Skilllets or project.yml, then rebuild generated Agent files.".to_string(),
+                body: "Treat Agent instruction files as generated artifacts. Edit MemoryCards or project.yml, then rebuild generated Agent files.".to_string(),
             },
         ],
     }
@@ -250,7 +250,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn installs_catalog_package_as_owned_skilllet() {
+    fn installs_catalog_package_as_owned_memory_card() {
         let temp = tempfile::tempdir().expect("tempdir");
 
         let result = install_catalog_package(
@@ -261,11 +261,12 @@ mod tests {
         .expect("install package");
 
         assert_eq!(result.id, "core:rust-quality-gate");
-        let skilllets = crate::skilllet::load_skilllets(temp.path()).expect("skilllets");
-        assert_eq!(skilllets[0].id, "core:rust-quality-gate");
+        let memory_cards =
+            crate::memory_card::load_memory_cards(temp.path()).expect("memory_cards");
+        assert_eq!(memory_cards[0].id, "core:rust-quality-gate");
 
         let project = crate::config::load_or_default_project_config(temp.path()).expect("project");
-        assert_eq!(project.skilllets.include[0].targets, vec!["codex"]);
+        assert_eq!(project.memory_cards.include[0].targets, vec!["codex"]);
     }
 
     #[test]

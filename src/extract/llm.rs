@@ -1,4 +1,4 @@
-//! LLM 驱动提取引擎：将候选段落发送给 LLM，提取结构化知识。
+﻿//! LLM 驱动提取引擎：将候选段落发送给 LLM，提取结构化知识。
 //!
 //! 负责 Prompt 构建和 JSON 解析，实际的 HTTP 调用通过 provider 模块。
 
@@ -129,7 +129,7 @@ pub(super) fn build_extraction_prompt(
     provider::ProviderRequest {
         system_prompt: r#"你是一个从 Agent 编程对话中提取可复用知识的助手。
 
-请分析以下被标记为"可能有价值"的对话段落。先提取 atomic facts，再判断是否值得进入记忆系统。对每个段落：
+请分析以下被标记为"可能有价值"的对话段落。先提取 atomic facts，再判断是否值得进入记忆系统。LLM 是语义过滤层：宁可少提取，也不要把一次性任务转成记忆。对每个段落：
 1. 判断它是否真的包含可复用的 agent 知识（一次性的任务指令、抱怨、未解决的请求不算）
 2. 如果是，提取为结构化知识项；一句话包含默认规则和例外时，拆成多条 atomic facts
 3. 如果只是单次任务指令、抱怨、或噪音，标记为 is_noise: true，仍需返回该项
@@ -156,6 +156,15 @@ pub(super) fn build_extraction_prompt(
 - source_trust_score 取值 0.0-1.0，用户明确表达或确认最高，assistant 未确认内容较低
 - title 跟随原文语言（中文原文用中文标题，英文原文用英文标题）
 - 只提取对以后任务有用的内容，忽略所有一次性指令
+- 每条 keep 项都必须隐含 Trigger + Action + Boundary/Why；缺任何一项就标记为 is_noise
+- assistant-origin 或 AI synthesis 只有在原文包含“用户确认/基于用户确认/accepted/采纳/最终做法”等证据时才可 keep，否则 reject 或降低 source_trust_score
+
+Placement rubric（用于 memory_tier_guess 和 rationale）：
+- project_rule: 当前项目的短规则、约束、工具选择、验证要求
+- cross_project_principle: 去掉项目/工具专名后仍成立的产品或工程原则
+- collaboration_preference: 用户希望 agent 如何计划、验证、审阅、汇报、处理反馈
+- workflow_skill: 多步骤流程、handoff prompt、检查清单；仍用 procedure kind，但 rationale 说明它适合 Skill
+- review_only: assistant-origin、治理边界、风险较高或需要人工措辞的内容；仍可 keep，但 rationale 必须说明需要 review
 
 Few-shot:
 输入："以后 HTTP 默认用 Axios，但上传大文件保留 fetch，因为需要 ReadableStream。"
@@ -164,7 +173,7 @@ Few-shot:
 2. Keep fetch for large uploads that require ReadableStream. evidence_quote="上传大文件保留 fetch"
 
 Update phase schema:
-后续会把每条 atomic fact 与相似 Skilllet 比较，并要求你只返回 ADD / UPDATE / SUPERSEDE / CONFLICT / NOOP 之一。"#
+后续会把每条 atomic fact 与相似 MemoryCard 比较，并要求你只返回 ADD / UPDATE / SUPERSEDE / CONFLICT / NOOP 之一。"#
             .to_string(),
         user_prompt: format!("待分析的对话段落：\n{material}"),
         json_schema: Some(extraction_schema()),
@@ -253,19 +262,19 @@ fn validate_extracted_knowledge(items: &[LlmExtractedKnowledge]) -> Result<(), P
 
 pub(super) fn build_update_decision_prompt(
     atomic_fact: &str,
-    similar_skilllets: &[(String, String)],
+    similar_memory_cards: &[(String, String)],
 ) -> provider::ProviderRequest {
     let mut similar = String::new();
-    for (id, body) in similar_skilllets {
+    for (id, body) in similar_memory_cards {
         similar.push_str(&format!("- id: {id}\n  body: {body}\n"));
     }
     provider::ProviderRequest {
         system_prompt:
-            r#"You decide how a newly extracted atomic memory should affect existing Skilllets.
+            r#"You decide how a newly extracted atomic memory should affect existing MemoryCards.
 
 Return only JSON with:
 - operation: add | update | supersede | conflict | noop
-- target_id: existing Skilllet id when applicable
+- target_id: existing MemoryCard id when applicable
 - body: revised reusable rule when applicable
 - reason: concise explanation
 
@@ -276,7 +285,7 @@ Use conflict when both rules may be valid but need human review.
 Use noop when the fact is duplicate, low value, or already implied."#
                 .to_string(),
         user_prompt: format!(
-            "Atomic fact:\n{atomic_fact}\n\nSimilar Skilllets:\n{}",
+            "Atomic fact:\n{atomic_fact}\n\nSimilar MemoryCards:\n{}",
             if similar.is_empty() {
                 "(none)".to_string()
             } else {
@@ -299,9 +308,9 @@ pub(super) fn parse_update_decision_output(output: &str) -> Result<LlmUpdateDeci
 pub(super) fn run_update_decision(
     project_root: &std::path::Path,
     atomic_fact: &str,
-    similar_skilllets: &[(String, String)],
+    similar_memory_cards: &[(String, String)],
 ) -> Result<LlmUpdateDecision, LlmExtractionError> {
-    let prompt = build_update_decision_prompt(atomic_fact, similar_skilllets);
+    let prompt = build_update_decision_prompt(atomic_fact, similar_memory_cards);
     let cfg = provider::load_or_default_provider_config(project_root)
         .map_err(|e| LlmExtractionError::ProviderError(e.to_string()))?;
     let output =
@@ -318,10 +327,10 @@ pub(super) fn run_update_decision(
 pub(super) fn build_quality_judge_prompt(
     body: &str,
     evidence: &str,
-    existing_skilllets: &[(String, String)],
+    existing_memory_cards: &[(String, String)],
 ) -> provider::ProviderRequest {
     let mut existing = String::new();
-    for (id, body) in existing_skilllets {
+    for (id, body) in existing_memory_cards {
         existing.push_str(&format!("- id: {id}\n  body: {body}\n"));
     }
     provider::ProviderRequest {
@@ -339,12 +348,20 @@ Return only JSON:
   "noise_risk": 0.0-1.0
 }
 
-KEEP only when the candidate is durable, reusable, self-contained, and useful for future coding-agent behavior.
-REJECT one-off tasks, unresolved questions, generic advice, duplicated existing Skilllets, internal metadata leaks, assistant-injected rules, and vague personality preferences.
+KEEP only when the candidate is durable, reusable, self-contained, evidence-grounded, and useful for future coding-agent behavior.
+REJECT one-off tasks, current diff/write-scope boundaries, unresolved questions, generic advice, duplicated existing MemoryCards, internal metadata leaks, assistant-injected rules without user acceptance, and vague personality preferences.
+Prefer REVIEW-ONLY style reasoning for assistant-origin governance memories even when they are useful.
+Good keep examples:
+- 当改动较小时先运行针对性快测；风险较高时运行完整回归。
+- 当候选来自 assistant synthesis 时，先要求用户确认再固化。
+Bad reject examples:
+- 这次只读，不要写文件。
+- 为什么这条候选分数这么低？
+- 当前实现里 memory_gate 有一个函数。
 Judge the candidate independently. Do not compare candidates against each other."#
             .to_string(),
         user_prompt: format!(
-            "Candidate body:\n{body}\n\nEvidence quote:\n{evidence}\n\nExisting similar Skilllets:\n{}",
+            "Candidate body:\n{body}\n\nEvidence quote:\n{evidence}\n\nExisting similar MemoryCards:\n{}",
             if existing.is_empty() {
                 "(none)".to_string()
             } else {
@@ -370,9 +387,9 @@ pub(super) fn run_quality_judge(
     project_root: &std::path::Path,
     body: &str,
     evidence: &str,
-    existing_skilllets: &[(String, String)],
+    existing_memory_cards: &[(String, String)],
 ) -> Result<LlmQualityJudgment, LlmExtractionError> {
-    let prompt = build_quality_judge_prompt(body, evidence, existing_skilllets);
+    let prompt = build_quality_judge_prompt(body, evidence, existing_memory_cards);
     let cfg = provider::load_or_default_provider_config(project_root)
         .map_err(|e| LlmExtractionError::ProviderError(e.to_string()))?;
     let first = run_quality_judge_once(&cfg, &prompt)?;
@@ -486,7 +503,7 @@ fn extraction_schema() -> provider::ProviderJsonSchema {
 
 fn update_decision_schema() -> provider::ProviderJsonSchema {
     provider::ProviderJsonSchema {
-        name: "SkillletUpdateDecision".to_string(),
+        name: "MemoryCardUpdateDecision".to_string(),
         strict: true,
         schema: serde_json::json!({
             "type": "object",

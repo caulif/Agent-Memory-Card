@@ -6,7 +6,7 @@
 
 **Architecture:** Add a deterministic quality layer around the existing extraction code. Introduce focused modules for chunks, noise classification, signal scoring, quality fixtures, and Candidate metadata while preserving the current file-native YAML model and local-first default.
 
-**Tech Stack:** Rust 2024, serde YAML/JSON, existing Agent-Kernel Rust core, Bun/Tauri read models, local deterministic extraction with optional provider-assisted refinement kept behind existing provider configuration.
+**Tech Stack:** Rust 2024, serde YAML/JSON, existing Agent Memory Kernel Rust core, Bun/Tauri read models, local deterministic extraction with optional provider-assisted refinement kept behind existing provider configuration.
 
 ---
 
@@ -95,7 +95,7 @@ cases:
     expected_terms: []
   - id: english-durable-decision
     origin: user
-    input: "Keep Agent-Kernel file-native for v1. Do not introduce a mandatory vector database; indexes must remain rebuildable caches."
+    input: "Keep Agent Memory Kernel file-native for v1. Do not introduce a mandatory vector database; indexes must remain rebuildable caches."
     expected: candidate
     expected_signal: decision
     expected_terms: ["file-native", "rebuildable"]
@@ -409,7 +409,7 @@ fn actionability_score(text: &str) -> f32 {
 }
 
 fn specificity_score(text: &str) -> f32 {
-    let named_terms = ["Bun", "AGENTS.md", "CLAUDE.md", "Claude Code", "Codex", "Draft", "Skilllet"];
+    let named_terms = ["Bun", "AGENTS.md", "CLAUDE.md", "Claude Code", "Codex", "Draft", "Memory Card"];
     if named_terms.iter().any(|term| text.contains(term)) {
         0.8
     } else {
@@ -720,7 +720,7 @@ In `candidate::promote_candidate_to_draft`, set:
 extraction: candidate.extraction.clone(),
 ```
 
-In direct candidate approval, keep metadata out of `SkillletRecord` for now. The approved Skilllet remains clean source knowledge; provenance stays available in the promoted/review history.
+In direct candidate approval, keep metadata out of `Memory CardRecord` for now. The approved Memory Card remains clean source knowledge; provenance stays available in the promoted/review history.
 
 - [ ] **Step 4: Run candidate and draft tests**
 
@@ -853,12 +853,12 @@ git commit -m "feat: gate extraction through quality scoring"
 Append to `tests/fixtures/extract_quality_v2.yml`:
 
 ```yaml
-  - id: ai-skilllet-worthy-workflow
+  - id: ai-memory_card-worthy-workflow
     origin: assistant
-    input: "基于用户确认，项目应该把 AI 生成的高质量项目改善也送入 Candidate/Draft，而不是直接写 Skilllet；这能保留审阅边界。"
+    input: "基于用户确认，项目应该把 AI 生成的高质量项目改善也送入 Candidate/Draft，而不是直接写 Memory Card；这能保留审阅边界。"
     expected: candidate
     expected_signal: ai_project_improvement
-    expected_terms: ["Candidate/Draft", "Skilllet"]
+    expected_terms: ["Candidate/Draft", "Memory Card"]
 ```
 
 - [ ] **Step 2: Update AI improvement detection**
@@ -873,7 +873,7 @@ fn looks_like_ai_project_improvement(text: &str) -> bool {
         || text.contains("基于用户确认");
     let project_terms = text.contains("Candidate")
         || text.contains("Draft")
-        || text.contains("Skilllet")
+        || text.contains("Memory Card")
         || text.contains("EvidenceChunk")
         || text.contains("项目");
     let governance_terms = text.contains("审阅")

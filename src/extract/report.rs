@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 impl ExtractReport {
     pub fn render(&self) -> String {
         let mut out = String::new();
-        out.push_str("Agent-Kernel extract report\n\n");
+        out.push_str("Agent Memory Kernel extract report\n\n");
         out.push_str(&format!("Provider: {}\n\n", self.provider));
         if self.redacted {
             out.push_str("Secrets: redacted\n\n");
@@ -16,6 +16,12 @@ impl ExtractReport {
                 "  tier_mix: {}\n",
                 format_counts(&metrics.tier_mix)
             ));
+            if !metrics.placement_mix.is_empty() {
+                out.push_str(&format!(
+                    "  placement_mix: {}\n",
+                    format_counts(&metrics.placement_mix)
+                ));
+            }
             out.push_str(&format!("  fallback_count: {}\n", metrics.fallback_count));
             out.push_str(&format!(
                 "  feedback_penalty_count: {}\n\n",
@@ -73,11 +79,17 @@ impl ExtractReport {
 
     pub fn metrics(&self) -> ExtractReportMetrics {
         let mut tier_mix = BTreeMap::new();
+        let mut placement_mix = BTreeMap::new();
         let mut fallback_count = 0usize;
         for candidate in &self.candidates {
             *tier_mix
                 .entry(candidate.memory_tier.as_str().to_string())
                 .or_insert(0) += 1;
+            if let Some(classification) = candidate.classification.as_ref() {
+                *placement_mix
+                    .entry(classification.artifact_kind.clone())
+                    .or_insert(0) += 1;
+            }
             if candidate
                 .matched_template
                 .as_deref()
@@ -103,6 +115,7 @@ impl ExtractReport {
                 .count();
         ExtractReportMetrics {
             tier_mix,
+            placement_mix,
             fallback_count,
             feedback_penalty_count,
         }
@@ -112,6 +125,7 @@ impl ExtractReport {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtractReportMetrics {
     pub tier_mix: BTreeMap<String, usize>,
+    pub placement_mix: BTreeMap<String, usize>,
     pub fallback_count: usize,
     pub feedback_penalty_count: usize,
 }

@@ -11,6 +11,9 @@ use serde::{Deserialize, Serialize};
 use crate::config;
 use crate::fsutil;
 
+mod custom;
+pub use custom::save_custom_openai_compatible_provider;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfig {
     pub default: String,
@@ -818,8 +821,10 @@ mod tests {
 
     #[test]
     fn role_provider_overrides_legacy_extraction_provider() {
-        let mut cfg = ProviderConfig::default();
-        cfg.extraction_provider = "anthropic".to_string();
+        let mut cfg = ProviderConfig {
+            extraction_provider: "anthropic".to_string(),
+            ..ProviderConfig::default()
+        };
         cfg.role_providers.extract = Some("openai-compatible".to_string());
         cfg.role_providers.abstract_ = Some("claude-cli".to_string());
 

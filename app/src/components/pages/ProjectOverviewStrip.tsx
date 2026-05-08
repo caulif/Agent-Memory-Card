@@ -15,7 +15,7 @@ export function ProjectOverviewStrip({
     <section className="overview-strip" aria-label="项目概览">
       <Metric label="待审草稿" value={metrics.draftCount} />
       <Metric label="系统建议" value={metrics.candidateCount} />
-      <Metric label="技能片段" value={metrics.skillletCount} />
+      <Metric label="技能片段" value={metrics.memory_cardCount} />
       <Metric label="历史观察" value={metrics.observationCount} />
       <Metric label="已装包" value={metrics.installedCount} />
     </section>

@@ -40,18 +40,36 @@ export function buildKernelPlanForInvoke(commandName: string, args: Record<strin
   if (commandName === "sync_project") {
     return { command: { type: "compile-project", dry_run: false }, payload: { dry_run: false } };
   }
-  if (commandName === "set_skilllet_targets") {
+  if (commandName === "save_custom_provider_config") {
+    return { command: { type: "configure-provider" }, payload: { input: args.input ?? {} } };
+  }
+  if (commandName === "set_memory_card_targets") {
     return {
-      command: { type: "assign-skilllet", id: args.id, targets: args.targets ?? [] },
+      command: { type: "assign-memory-card", id: args.id, targets: args.targets ?? [] },
       payload: { id: args.id, targets: args.targets ?? [] },
     };
   }
-  if (commandName === "promote_skilllet_to_global") {
-    return { command: { type: "promote-skilllet-to-global", id: args.id }, payload: { id: args.id } };
-  }
-  if (commandName === "install_global_skilllet_to_project") {
+  if (commandName === "delete_memory_card") {
     return {
-      command: { type: "install-global-skilllet", id: args.id, targets: args.targets ?? [] },
+      command: { type: "delete-memory-card", id: args.id },
+      payload: { id: args.id },
+    };
+  }
+  if (commandName === "clear_memory_card_targets") {
+    return {
+      command: { type: "clear-memory-card-targets", agent: args.agent ?? null },
+      payload: { agent: args.agent ?? null },
+    };
+  }
+  if (commandName === "clear_project_history") {
+    return { command: { type: "clear-project-history" }, payload: {} };
+  }
+  if (commandName === "promote_memory_card_to_global") {
+    return { command: { type: "promote-memory-card-to-global", id: args.id }, payload: { id: args.id } };
+  }
+  if (commandName === "install_global_memory_card_to_project") {
+    return {
+      command: { type: "install-global-memory-card", id: args.id, targets: args.targets ?? [] },
       payload: { id: args.id, targets: args.targets ?? [] },
     };
   }
@@ -61,10 +79,10 @@ export function buildKernelPlanForInvoke(commandName: string, args: Record<strin
       payload: { package_id: args.packageId, targets: args.targets ?? [] },
     };
   }
-  if (commandName === "fuse_skilllets_to_draft") {
+  if (commandName === "fuse_memory_cards_to_draft") {
     const input = (args.input ?? {}) as Record<string, unknown>;
     return {
-      command: { type: "fuse-skilllets", ids: input.sources ?? [], engine: "local" },
+      command: { type: "fuse-memory-cards", ids: input.sources ?? [], engine: "local" },
       payload: { input },
     };
   }
@@ -79,7 +97,7 @@ export function buildKernelPlanForInvoke(commandName: string, args: Record<strin
   return null;
 }
 
-export function buildKernelPlanForEditor(recordType: "draft" | "skilllet", recordId: string, input: Record<string, unknown>): KernelPlanRequest {
+export function buildKernelPlanForEditor(recordType: "draft" | "memory_card", recordId: string, input: Record<string, unknown>): KernelPlanRequest {
   if (recordType === "draft") {
     return {
       command: { type: "update-draft", id: recordId },
@@ -87,7 +105,7 @@ export function buildKernelPlanForEditor(recordType: "draft" | "skilllet", recor
     };
   }
   return {
-    command: { type: "update-skilllet", id: recordId },
+    command: { type: "update-memory-card", id: recordId },
     payload: { id: recordId, input },
   };
 }

@@ -1,6 +1,6 @@
-import React from "react";
+﻿import React from "react";
 import { Check, Loader2, ShieldAlert, ShieldCheck, X } from "lucide-react";
-import { planKernelCommand, updateDraft, updateSkilllet } from "../../tauri-client";
+import { planKernelCommand, updateDraft, updateMemoryCard } from "../../tauri-client";
 import {
   buildKernelPlanForEditor,
   confirmedAgentManagedPolicy,
@@ -20,7 +20,7 @@ import {
 } from "../../ui-helpers";
 
 type RecordEditorProps = {
-  recordType: "draft" | "skilllet";
+  recordType: "draft" | "memory_card";
   initialForm: EditFormData;
   extraction?: ExtractionMetadata;
   previewMode: boolean;
@@ -100,7 +100,7 @@ export function RecordEditor({ recordType, initialForm, extraction, previewMode,
     }
   }
 
-  /** 保存变更：草稿调用 update_draft，技能片段调用 update_skilllet */
+  /** 保存变更：草稿调用 update_draft，技能片段调用 update_memory_card */
   async function handleSave() {
     setSaving(true);
     setMessage("");
@@ -123,7 +123,7 @@ export function RecordEditor({ recordType, initialForm, extraction, previewMode,
           decisionToken: planResult?.decisionToken,
         });
       } else {
-        await updateSkilllet({
+        await updateMemoryCard({
           projectPath,
           id: recordId,
           input: mutationInput,

@@ -36,7 +36,7 @@ pub struct ImportSummary {
 impl ScanReport {
     pub fn render(&self) -> String {
         let mut out = String::new();
-        out.push_str("Agent-Kernel Scan Report\n\n");
+        out.push_str("Agent Memory Kernel Scan Report\n\n");
         out.push_str(&format!("Project: {}\n", self.project_root));
         out.push_str(&format!("Rules: {}\n", self.rules.len()));
         for rule in &self.rules {
@@ -56,7 +56,7 @@ impl ScanReport {
 impl ImportSummary {
     pub fn render(&self) -> String {
         format!(
-            "Agent-Kernel import complete\n\nProject: {}\nRules indexed: {}\nSkills indexed: {}\nConfig: {}\nSkill index: {}\n\nNext:\n- Run `agent-kernel ui`\n- Or add a mirror: `agent-kernel mirror --skill <id> --agent codex`\n- Preview build: `agent-kernel build --preview`\n",
+            "Agent Memory Kernel import complete\n\nProject: {}\nRules indexed: {}\nSkills indexed: {}\nConfig: {}\nSkill index: {}\n\nNext:\n- Run `agent-kernel ui`\n- Or add a mirror: `agent-kernel mirror --skill <id> --agent codex`\n- Preview build: `agent-kernel build --preview`\n",
             self.project_root,
             self.rule_count,
             self.skill_count,

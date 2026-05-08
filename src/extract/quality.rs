@@ -77,34 +77,41 @@ pub fn quality_report_for_text_cases(cases: Vec<QualityTextCase>) -> QualityRepo
         let tier_ok =
             case.expected_memory_tier.is_empty() || predicted_tier == case.expected_memory_tier;
 
-        let hit = expected_candidate
+        let classification_hit = expected_candidate
             && signal_ok
             && artifact_kind_ok
             && hardness_ok
             && terms_ok
             && tags_ok
             && tier_ok;
+        let candidate_hit = predicted_candidate && expected_candidate;
 
         if predicted_candidate {
             *tier_mix.entry(predicted_tier.clone()).or_default() += 1;
-            ranked.push((case.id.clone(), score.score, hit, predicted_tier.clone()));
+            ranked.push((
+                case.id.clone(),
+                score.score,
+                expected_candidate,
+                predicted_tier.clone(),
+            ));
         }
         if expected_candidate && !case.expected_memory_tier.is_empty() {
             *expected_by_tier
                 .entry(case.expected_memory_tier.clone())
                 .or_default() += 1;
-            if hit {
+            if classification_hit {
                 *hits_by_tier
                     .entry(case.expected_memory_tier.clone())
                     .or_default() += 1;
             }
         }
 
-        match (predicted_candidate, hit) {
-            (true, true) => true_positives.push(case.id.clone()),
-            (true, false) => false_positives.push(case.id.clone()),
-            (false, true) => false_negatives.push(case.id.clone()),
-            (false, false) => true_negative_count += 1,
+        match (predicted_candidate, expected_candidate, candidate_hit) {
+            (true, true, true) => true_positives.push(case.id.clone()),
+            (true, false, _) => false_positives.push(case.id.clone()),
+            (false, true, _) => false_negatives.push(case.id.clone()),
+            (false, false, _) => true_negative_count += 1,
+            (true, true, false) => unreachable!("candidate_hit is true when both sides are true"),
         }
     }
 
@@ -173,17 +180,54 @@ fn infer_quality_memory_tier(input: &str, signal: &str) -> String {
     if contains_any(
         &lower,
         &[
+            "不要改 rust",
+            "只输出",
+            "只修改",
+            "只读",
+            "不要写文件",
+            "不要编辑文件",
+        ],
+    ) {
+        return String::new();
+    }
+    if contains_any(
+        &lower,
+        &[
             "先提问",
             "先澄清",
             "先规划",
             "小改快测",
             "大改重测",
             "真实历史",
+            "真实历史回放",
             "审阅边界",
+            "review 边界",
             "协作",
             "feedback loop",
             "real history",
             "planning",
+            "top 10",
+            "验证结果",
+            "遗漏风险",
+            "审阅时",
+            "自动切换到 cli provider",
+            "每次改提炼",
+            "目标子集",
+            "全量相关测试",
+            "先证明坏例子",
+            "模板输出",
+            "llm 抽象",
+            "边界样本",
+            "judge",
+            "自我修正",
+            "反馈反复拒绝",
+            "降权",
+            "为什么保留",
+            "压低",
+            "gold set",
+            "tier mix",
+            "assistant synthesis",
+            "fallback",
         ],
     ) {
         "collaboration_preference".to_string()
@@ -191,10 +235,32 @@ fn infer_quality_memory_tier(input: &str, signal: &str) -> String {
         &lower,
         &[
             "核心功能",
+            "核心路径",
+            "可用主线",
             "用户视角",
             "用户体验",
             "体验优化",
             "跨项目",
+            "提炼候选时质量优先",
+            "宁可少",
+            "抽象失败",
+            "硬凑原则",
+            "真正有价值",
+            "其他项目",
+            "长期规则",
+            "判断标准",
+            "长期记忆",
+            "未来决策",
+            "通用方法论",
+            "真实工作流",
+            "最终使用感受",
+            "响应性",
+            "作用域分层",
+            "关键词模板",
+            "高价值候选",
+            "稳定偏好",
+            "一次性命令",
+            "复用原则",
             "core functionality",
             "user perspective",
             "user experience",

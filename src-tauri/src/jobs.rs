@@ -277,6 +277,20 @@ impl DesktopTaskStore {
             .unwrap_or_default()
     }
 
+    pub fn clear_history(&self) {
+        if let Ok(mut jobs) = self.history.lock() {
+            jobs.clear();
+        }
+        if let Some(path) = self.job_history_path.as_deref() {
+            let _ = std::fs::remove_file(path);
+        }
+        if let Ok(mut status) = self.inner.lock()
+            && !status.running
+        {
+            *status = DesktopTaskStatus::default();
+        }
+    }
+
     pub fn request_cancel(&self, job_id: &str) -> Option<DesktopTaskStatus> {
         let mut updated = None;
         if let Ok(mut status) = self.inner.lock()

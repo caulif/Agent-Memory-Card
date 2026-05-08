@@ -4,20 +4,21 @@ import {
   planKernelCommand,
   scanProjectsJob,
   updateDraft,
-  updateSkilllet,
+  updateMemoryCard,
 } from "./tauri-client";
 import { useJobCenter } from "./hooks/useJobCenter";
 import { useProjectActions } from "./hooks/useProjectActions";
 import { useProjectReadModels } from "./hooks/useProjectReadModels";
 import { useProjectSelection } from "./hooks/useProjectSelection";
 import { JobCenter } from "./components/JobCenter";
-import { Agents, Drafts, ProjectOverviewStrip, Settings, Skilllets } from "./components/project-pages";
+import { Agents, Drafts, ProjectOverviewStrip, Settings, MemoryCards } from "./components/project-pages";
 import { ActionButton, EmptyState, Panel, StatusList, TaskProgressBar } from "./components/common";
 import {
   AppWindow,
   ArrowUp,
   Bell,
   Check,
+  ChevronDown,
   ChevronRight,
   Circle,
   CloudCog,
@@ -31,6 +32,9 @@ import {
   ShieldAlert,
   ShieldCheck,
   X,
+  Boxes,
+  HardDrive,
+  Activity,
 } from "lucide-react";
 import "./styles.css";
 import "./styles/jobs-progress.css";
@@ -38,13 +42,13 @@ import "./styles/project-detail.css";
 import "./styles/themes.css";
 import {
   buildEditFormFromDraft,
-  buildEditFormFromSkilllet,
+  buildEditFormFromMemoryCard,
   buildKernelPlanForEditor,
   confirmedAgentManagedPolicy,
   createDemoProjectSnapshot,
-  deriveSkillletEvolution,
+  deriveMemoryCardEvolution,
   describeDraftForReview,
-  describeSkillletPlainly,
+  describeMemoryCardPlainly,
   EDITABLE_AGENTS,
   filterRecordsByTag,
   formatJobLifecycle,
@@ -58,7 +62,7 @@ import {
   KIND_OPTIONS,
   manualReviewPolicy,
   normalizePlanReviewResult,
-  nextSkillletTargets,
+  nextMemoryCardTargets,
   PAGES,
   projectOverviewMetrics,
   parseCommaTags,
@@ -79,19 +83,28 @@ import {
   type ProjectCandidateInbox,
   type ProjectReviewInbox,
   type ProjectAssignmentView,
-  type ProjectSkillletLibrary,
+  type ProjectMemoryCardLibrary,
   type ProjectSnapshot,
 } from "./ui-helpers";
 
 const tauriRuntimeHint = "未连接到 Tauri 运行时。请在项目根目录使用 bun run app:dev 启动桌面应用。";
+
+/** 侧边栏导航使用的英文页面标签（大视图标题用） */
+const PAGE_DISPLAY: Record<PageId, { label: string; enLabel: string }> = {
+  drafts: { label: "审阅", enLabel: "Draft Review" },
+  "memory-cards": { label: "记忆卡", enLabel: "Memory Card Library" },
+  agents: { label: "分配", enLabel: "Memory Card Loadout" },
+  settings: { label: "设置", enLabel: "Settings" },
+};
 
 function App() {
   const [page, setPage] = React.useState<PageId>("drafts");
   const [pendingAction, setPendingAction] = React.useState("");
   const [message, setMessage] = React.useState("就绪。选择项目后可手动提炼历史对话。");
   const [previewMode, setPreviewMode] = React.useState(false);
-  const [synthesisEngine, setSynthesisEngine] = React.useState<"claude-code" | "codex" | "local">("local");
+  const [synthesisEngine, setSynthesisEngine] = React.useState<"claude-code" | "codex" | "local" | "llm">("claude-code");
   const [theme, setTheme] = React.useState<"light" | "dark" | "system">("system");
+  const [projectMenuOpen, setProjectMenuOpen] = React.useState(false);
   const selectedProjectRef = React.useRef("");
   const readModels = useProjectReadModels({ page, previewMode, selectedProjectRef, setMessage });
   const {
@@ -101,7 +114,7 @@ function App() {
     setCandidateInbox,
     reviewInbox,
     setReviewInbox,
-    skillletLibrary,
+    memory_cardLibrary,
     assignmentView,
     qualityView,
     clearProjectReadModels,
@@ -166,7 +179,7 @@ function App() {
       .catch((error) => setMessage(formatErrorMessage(error)));
   }, [refreshAppState, setMessage]);
 
-  // 系统主题监听
+  /** 系统主题监听 */
   React.useEffect(() => {
     if (theme !== "system") return;
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -176,7 +189,7 @@ function App() {
     return () => mq.removeEventListener("change", apply);
   }, [theme]);
 
-  // 手动主题切换
+  /** 手动主题切换 */
   React.useEffect(() => {
     if (theme === "system") return;
     document.documentElement.setAttribute("data-theme", theme);
@@ -194,10 +207,28 @@ function App() {
     [previewMode, selectedProject],
   );
   const installedCount =
-    skillletLibrary?.catalog_status.items.filter((item) => item.installed).length ??
+    memory_cardLibrary?.catalog_status.items.filter((item) => item.installed).length ??
     snapshot?.catalog_status.items.filter((item) => item.installed).length ??
     0;
   const actionableJobCount = jobHistory.filter((job) => job.running || job.lifecycle === "failed").length;
+  const memory_cardCount = memory_cardLibrary?.memory_cards.length ?? snapshot?.memory_cards.length ?? 0;
+  const observationCount = snapshot?.observations.length ?? 0;
+
+  /** 分配影响力数据 — 用于 Agents 页面右侧检查器 */
+  const agentsMatrix = assignmentView?.target_matrix ?? snapshot?.target_matrix;
+  const agentRows = agentsMatrix?.rows ?? [];
+  const agentList = agentsMatrix?.agents ?? [];
+  const allMemoryCardsForAssignment = React.useMemo(() => {
+    const projectItems = memory_cardLibrary?.memory_cards ?? snapshot?.memory_cards ?? [];
+    const globalItems = memory_cardLibrary?.global_memory_cards ?? snapshot?.global_memory_cards ?? [];
+    return [...projectItems, ...globalItems];
+  }, [memory_cardLibrary, snapshot]);
+  const totalForAssignment = allMemoryCardsForAssignment.length;
+  const assignedCount = agentRows.filter((row) => Object.values(row.targets).some(Boolean)).length;
+  const coveragePct = totalForAssignment > 0 ? Math.round((assignedCount / totalForAssignment) * 100) : 0;
+  const missingCount = totalForAssignment - assignedCount;
+  const conflictCount = (qualityView?.status.warnings ?? snapshot?.status.warnings ?? []).length +
+    (qualityView?.build_preview.warnings ?? snapshot?.build_preview.warnings ?? []).length;
 
   async function scanProjects() {
     if (previewMode) {
@@ -212,54 +243,44 @@ function App() {
     });
   }
 
+  function handleNavClick(targetPage: PageId) {
+    setPage(targetPage);
+    setProjectMenuOpen(false);
+  }
+
   return (
     <main className="shell">
-      <aside className="sidebar" aria-label="本地项目">
-        <div className="traffic-lights" aria-hidden="true">
-          <span className="close" />
-          <span className="minimize" />
-          <span className="zoom" />
-        </div>
-
+      {/* ===== 左侧导航 ===== */}
+      <aside className="sidebar" aria-label="导航">
         <div className="brand">
           <div className="brand-mark">
-            <AppWindow size={18} />
+            <Activity size={17} />
           </div>
           <div>
-            <strong>智能体内核</strong>
+            <strong>Agent Memory Kernel</strong>
             <span>本地技能工作台</span>
           </div>
         </div>
 
-        <ActionButton
-          className="primary-action"
-          icon={ScanLine}
-          label="扫描本地项目"
-          busyLabel="正在扫描"
-          busy={pendingAction === "扫描"}
-          disabled={pendingAction === "扫描"}
-          onClick={scanProjects}
-        />
-
-        <section className="project-list">
-          <div className="section-label">本地项目</div>
-          {projects.length === 0 ? (
-            <p className="empty">还没有发现项目。扫描后会读取常用目录和当前工作区附近的项目。</p>
-          ) : (
-            projects.map((project) => (
+        <nav className="sidebar-nav" aria-label="功能导航">
+          {PAGES.map((item) => {
+            const Icon = item.icon;
+            return (
               <button
-                key={project.path}
-                className={`project-item ${project.path === selectedProject ? "active" : ""}`}
-                onClick={() => void chooseProject(project.path)}
+                key={item.id}
+                className={`nav-item ${page === item.id ? "active" : ""}`}
+                onClick={() => handleNavClick(item.id)}
               >
-                <span>{project.name}</span>
-                <small>{formatAgents(project.agents)}</small>
+                <Icon size={17} />
+                {item.label}
               </button>
-            ))
-          )}
-        </section>
+            );
+          })}
+        </nav>
+
       </aside>
 
+      {/* ===== 右侧工作区 ===== */}
       <section className="workspace" aria-label="工作区">
         {previewMode ? (
           <div className="preview-banner" role="status">
@@ -271,35 +292,99 @@ function App() {
           </div>
         ) : null}
 
+        {/* ===== Topbar ===== */}
         <header className="topbar">
-          <div className="title-block">
-            <p className="eyebrow">本地优先 · 人工审核 · 多智能体同步</p>
-            <h1>{activeProject?.name ?? "选择一个项目开始"}</h1>
-            <span className="path">{activeProject?.path ?? state?.home ?? "正在读取本机目录"}</span>
+          <div className="topbar-left">
+            <div className="title-block">
+              <h1>{activeProject ? PAGE_DISPLAY[page]?.enLabel ?? "工作台" : "Agent Memory Kernel"}</h1>
+              {activeProject ? (
+                <span className="path">{activeProject.path}</span>
+              ) : null}
+            </div>
           </div>
-          <div className="topbar-actions">
-            <TaskProgressBar pendingAction={pendingAction} message={message} backendStatus={backendTaskStatus} />
-            <button className="job-center-trigger" onClick={() => setJobCenterOpen(true)}>
-              任务中心
-              {actionableJobCount > 0 ? <span>{actionableJobCount}</span> : null}
+
+          <div className="topbar-right">
+            {/* 项目选择器 */}
+            <div className="project-selector">
+              <button
+                className="project-select-trigger"
+                onClick={() => setProjectMenuOpen(!projectMenuOpen)}
+                title={activeProject ? activeProject.name : "选择项目"}
+              >
+                {activeProject ? (
+                  <>
+                    <HardDrive size={14} />
+                    <span>{activeProject.name}</span>
+                  </>
+                ) : (
+                  <>
+                    <HardDrive size={14} />
+                    <span>选择项目</span>
+                  </>
+                )}
+                <ChevronDown size={13} />
+              </button>
+              {projectMenuOpen ? (
+                <div className="project-select-menu">
+                  {projects.length === 0 ? (
+                    <p className="empty">还没有发现项目。扫描后会读取常用目录。</p>
+                  ) : (
+                    projects.map((project) => (
+                      <button
+                        key={project.path}
+                        className={`project-item ${project.path === selectedProject ? "active" : ""}`}
+                        onClick={() => {
+                          void chooseProject(project.path);
+                          setProjectMenuOpen(false);
+                        }}
+                      >
+                        <span>{project.name}</span>
+                        <small>{formatAgents(project.agents)}</small>
+                      </button>
+                    ))
+                  )}
+                </div>
+              ) : null}
+            </div>
+
+            {/* 扫描按钮 */}
+            <button
+              className="icon-button"
+              title="扫描本地项目"
+              disabled={pendingAction === "扫描"}
+              onClick={() => void scanProjects()}
+            >
+              {pendingAction === "扫描" ? <Loader2 className="spin" size={15} /> : <ScanLine size={15} />}
             </button>
+
+            {/* 任务中心 */}
+            <button
+              className={`icon-button ${actionableJobCount > 0 ? "has-badge" : ""}`}
+              title="任务中心"
+              onClick={() => setJobCenterOpen(true)}
+            >
+              <Bell size={15} />
+              {actionableJobCount > 0 ? <span className="badge">{actionableJobCount}</span> : null}
+            </button>
+
+            {/* 状态指示 */}
+            <div className="status-pill" title={message} role="status" aria-live="polite">
+              {pendingAction || backendTaskStatus?.running ? (
+                <Loader2 className="spin" size={13} />
+              ) : (
+                <Check size={13} />
+              )}
+              <span>{pendingAction ? `${pendingAction}中...` : message}</span>
+            </div>
           </div>
         </header>
 
-        <nav className="tabs" aria-label="功能切换">
-          {PAGES.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button key={item.id} className={page === item.id ? "active" : ""} onClick={() => setPage(item.id)}>
-                <Icon size={15} />
-                {item.label}
-              </button>
-            );
-          })}
-        </nav>
+        {/* 概览指标条 — 仅审阅页显示 */}
+        {page === "drafts" ? (
+          <ProjectOverviewStrip snapshot={snapshot} dashboard={dashboard} installedCount={installedCount} />
+        ) : null}
 
-        <ProjectOverviewStrip snapshot={snapshot} dashboard={dashboard} installedCount={installedCount} />
-
+        {/* 内容区 */}
         <section className="content">
           <div className="workspace-layout">
             <section className="primary-pane">
@@ -325,61 +410,122 @@ function App() {
                       }}
                     />
                   )}
-                  {page === "skilllets" && (
-                    <Skilllets
+                  {page === "memory-cards" && (
+                    <MemoryCards
                       snapshot={snapshot}
-                      library={skillletLibrary}
+                      library={memory_cardLibrary}
                       pendingAction={pendingAction}
-                      disabled={!skillletLibrary && !snapshot}
+                      disabled={!memory_cardLibrary && !snapshot}
                       onAction={projectAction}
                       previewMode={previewMode}
                       projectPath={selectedProject}
                       onRefresh={() => {
-                        void loadReadModelsForPage(selectedProject, "skilllets");
+                        void loadReadModelsForPage(selectedProject, "memory-cards");
                       }}
-                      onFusionStarted={() => setPage("drafts")}
                     />
                   )}
                   {page === "agents" && (
                     <Agents
                       snapshot={snapshot}
                       assignment={assignmentView}
-                      library={skillletLibrary}
+                      library={memory_cardLibrary}
                       pendingAction={pendingAction}
                       disabled={!assignmentView && !snapshot}
                       onAction={projectAction}
+                      projects={projects}
                     />
                   )}
-                  {page === "settings" && <Settings state={state} snapshot={snapshot} synthesisEngine={synthesisEngine} theme={theme} onThemeChange={setTheme} />}
+                  {page === "settings" && <Settings state={state} snapshot={snapshot} projectPath={selectedProject} previewMode={previewMode} synthesisEngine={synthesisEngine} theme={theme} onThemeChange={setTheme} />}
                 </>
               )}
             </section>
 
-            <aside className="inspector" aria-label="项目辅助信息">
-              <Panel title="质量状态" icon={ShieldCheck}>
-                <div className="quality">
-                  <span>通过 {qualityView?.rule_ci.passed ?? snapshot?.rule_ci.passed ?? 0}</span>
-                  <span>失败 {qualityView?.rule_ci.failed ?? snapshot?.rule_ci.failed ?? 0}</span>
-                </div>
-                <StatusList
-                  empty="暂无质量警告。"
-                  items={[
-                    ...(qualityView?.status.warnings ?? snapshot?.status.warnings ?? []),
-                    ...(qualityView?.build_preview.warnings ?? snapshot?.build_preview.warnings ?? []),
-                  ]}
-                  tone="warning"
-                />
-              </Panel>
-            </aside>
+            {/* 右侧检查器 — 按页面显示不同内容 */}
+            <div className="inspector">
+              {page === "drafts" ? (
+                <Panel title="质量状态" icon={ShieldCheck}>
+                  <div className="quality">
+                    <span>通过 {qualityView?.rule_ci.passed ?? snapshot?.rule_ci.passed ?? 0}</span>
+                    <span>失败 {qualityView?.rule_ci.failed ?? snapshot?.rule_ci.failed ?? 0}</span>
+                  </div>
+                  <StatusList
+                    empty="暂无质量警告。"
+                    items={[
+                      ...(qualityView?.status.warnings ?? snapshot?.status.warnings ?? []),
+                      ...(qualityView?.build_preview.warnings ?? snapshot?.build_preview.warnings ?? []),
+                    ]}
+                    tone="warning"
+                  />
+                </Panel>
+              ) : page === "agents" ? (
+                <Panel title="分配影响力" icon={GitBranch}>
+                  <div className="assignment-impact">
+                    <div className="impact-ring-wrap">
+                      <svg width="100" height="100" viewBox="0 0 100 100">
+                        <circle cx="50" cy="50" r="42" fill="none" stroke="var(--color-border)" strokeWidth="6" />
+                        <circle
+                          cx="50"
+                          cy="50"
+                          r="42"
+                          fill="none"
+                          stroke="var(--color-accent)"
+                          strokeWidth="6"
+                          strokeDasharray={`${(coveragePct / 100) * 263.9} 263.9`}
+                          strokeLinecap="round"
+                          transform="rotate(-90 50 50)"
+                        />
+                      </svg>
+                      <div className="impact-ring-text">
+                        <strong>{coveragePct}%</strong>
+                        <span>覆盖率</span>
+                      </div>
+                    </div>
+                    <div className="impact-stats">
+                      <div className="impact-stat">
+                        <strong>{missingCount}</strong>
+                        <span>未分配</span>
+                      </div>
+                      <div className="impact-stat">
+                        <strong>{conflictCount}</strong>
+                        <span>冲突</span>
+                      </div>
+                    </div>
+                    <button className="secondary-action" style={{ width: "100%" }} disabled>
+                      查看详情
+                    </button>
+                  </div>
+                </Panel>
+              ) : page === "memory-cards" ? (
+                <Panel title="演化摘要" icon={Boxes}>
+                  <div className="quality">
+                    <span>片段 {memory_cardCount}</span>
+                    <span>已装 {installedCount}</span>
+                  </div>
+                  <StatusList
+                    empty="暂无演化信号。"
+                    items={[
+                      ...(qualityView?.status.warnings ?? snapshot?.status.warnings ?? []).slice(0, 4),
+                    ]}
+                    tone="warning"
+                  />
+                </Panel>
+              ) : null}
+            </div>
           </div>
         </section>
       </section>
+
+      {/* 任务中心浮层 */}
       {jobCenterOpen ? (
         <JobCenter
           jobs={jobHistory}
           currentJob={backendTaskStatus}
           onCancel={cancelJob}
           onRetry={retryJob}
+          onClearHistory={() => {
+            if (!selectedProject) return;
+            void projectAction("清除历史", "已清除所有历史记录", "clear_project_history");
+          }}
           onClose={() => setJobCenterOpen(false)}
         />
       ) : null}

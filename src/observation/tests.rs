@@ -1,4 +1,4 @@
-use super::chunked::synthesis_material;
+﻿use super::chunked::synthesis_material;
 use super::*;
 use crate::draft;
 use std::fs;
@@ -625,20 +625,20 @@ fn sparse_agent_report_falls_back_to_prefiltered_recall() {
 }
 
 #[test]
-fn agent_gate_rejects_generated_enabled_skilllet_candidates() {
+fn agent_gate_rejects_generated_enabled_memory_card_candidates() {
     let temp = tempfile::tempdir().expect("tempdir");
     let retained = filter_agent_candidates_through_local_gate(
         temp.path(),
-        vec![AgentSkillletCandidate {
+        vec![AgentMemoryCardCandidate {
             title: "Use Axios".to_string(),
             body: "Use Axios for frontend HTTP requests.".to_string(),
-            brief: Some("generated skilllet".to_string()),
+            brief: Some("generated memory_card".to_string()),
             tags: vec!["axios".to_string()],
             language: None,
             kind: "procedure".to_string(),
             scope: "project".to_string(),
             confidence: Some(0.95),
-            reason: Some("From enabled skilllets block.".to_string()),
+            reason: Some("From enabled memory_cards block.".to_string()),
         }],
         "observation synthesis",
     )
@@ -781,7 +781,7 @@ fn parses_agent_json_candidates_from_plain_or_fenced_output() {
 
 #[test]
 fn rejects_low_confidence_agent_candidates() {
-    let candidate = AgentSkillletCandidate {
+    let candidate = AgentMemoryCardCandidate {
         title: "Maybe".to_string(),
         body: "Maybe do this once.".to_string(),
         brief: None,
@@ -799,7 +799,7 @@ fn rejects_low_confidence_agent_candidates() {
 #[test]
 fn agent_synthesis_candidates_must_pass_local_future_value_gate() {
     let candidates = vec![
-        AgentSkillletCandidate {
+        AgentMemoryCardCandidate {
             title: "Warm Personality".to_string(),
             body: "以后保持热情积极、有自己的品味，让用户感觉更舒服。".to_string(),
             brief: None,
@@ -810,7 +810,7 @@ fn agent_synthesis_candidates_must_pass_local_future_value_gate() {
             confidence: Some(0.95),
             reason: Some("Sounds nice but has no operational trigger.".to_string()),
         },
-        AgentSkillletCandidate {
+        AgentMemoryCardCandidate {
             title: "Run Cargo Test Before Commit".to_string(),
             body: "以后所有 Rust 项目必须先运行 cargo test 再提交。".to_string(),
             brief: None,

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add the first reusable Kernel layer so UI, CLI, future MCP tools, and AI agents can evaluate Agent-Kernel actions through one policy and rule model.
+**Goal:** Add the first reusable Kernel layer so UI, CLI, future MCP tools, and AI agents can evaluate Agent Memory Kernel actions through one policy and rule model.
 
 **Architecture:** Keep existing business modules intact and add `src/kernel/` as a thin command/planning layer. The first version evaluates command risk and automation policy; later versions can route actual execution through the same layer.
 

@@ -1,6 +1,6 @@
 # Platform Support
 
-Agent-Kernel is a Rust binary distributed through a Bun wrapper. The goal is to support the three mainstream desktop operating systems:
+Agent Memory Kernel is a Rust binary distributed through a Bun wrapper. The goal is to support the three mainstream desktop operating systems:
 
 - Windows
 - macOS
@@ -23,11 +23,31 @@ If no packaged binary exists for the current platform, the wrapper falls back to
 2. `target/debug/agent-kernel[.exe]`
 3. development fallback through `cargo build`
 
-## Native App
+## Desktop App
 
-`agent-kernel app` uses Rust `eframe/egui`, so it is a compiled native desktop UI rather than a WebView, browser page, or localhost web app.
+The desktop workspace is built with Tauri v2. The frontend lives in `app/` and the Tauri shell lives in `src-tauri/`.
 
-Linux CI installs the native desktop build dependencies needed by the egui/winit stack:
+Run it during development:
+
+```bash
+bun run app:dev
+```
+
+Build release bundles:
+
+```bash
+bun run tauri:build
+```
+
+On Windows, Tauri release artifacts are written under:
+
+```text
+src-tauri/target/release/bundle/
+```
+
+Depending on the installed Tauri bundler toolchain, this directory can contain installer formats such as MSI or NSIS EXE bundles.
+
+Linux CI installs the native desktop build dependencies needed by Tauri/WebKit and windowing backends:
 
 ```bash
 sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
@@ -41,6 +61,8 @@ Every push and pull request runs:
 - Bun wrapper tests on Windows, Linux, and macOS
 
 Release builds package the four official binary targets listed above.
+
+Tagged releases also build the Windows Tauri desktop bundle so users can install the app without running the development toolchain.
 
 ## Current Development Host
 

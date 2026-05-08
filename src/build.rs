@@ -11,15 +11,15 @@ use crate::candidate::ExtractionMetadata;
 use crate::config::{self, ArtifactState, MirrorState, ProjectLock, SkillRecord};
 use crate::draft;
 use crate::fsutil;
-use crate::skilllet::{self, SkillletRecord};
+use crate::memory_card::{self, MemoryCardRecord};
 
 mod agent_skills;
 mod hook_artifacts;
 #[cfg(test)]
 mod tests;
 
-use agent_skills::{compile_skilllets_as_agent_skills, skilllet_compiles_to_agent_skill};
-use hook_artifacts::{compile_skilllet_hooks, expected_hook_artifact};
+use agent_skills::{compile_memory_cards_as_agent_skills, memory_card_compiles_to_agent_skill};
+use hook_artifacts::{compile_memory_card_hooks, expected_hook_artifact};
 
 const INSTRUCTION_ARTIFACT_BUDGET_BYTES: usize = 32 * 1024;
 
@@ -47,7 +47,7 @@ pub struct ArtifactImportReport {
 impl ArtifactImportReport {
     pub fn render(&self) -> String {
         let mut out = String::new();
-        out.push_str("Agent-Kernel artifact import\n\n");
+        out.push_str("Agent Memory Kernel artifact import\n\n");
         out.push_str(&format!("Created drafts: {}\n", self.created));
         out.push_str(&format!("Skipped artifacts: {}\n", self.skipped));
         if !self.drafts.is_empty() {
@@ -90,9 +90,9 @@ impl BuildReport {
     pub fn render(&self) -> String {
         let mut out = String::new();
         if self.preview {
-            out.push_str("Agent-Kernel build preview\n\n");
+            out.push_str("Agent Memory Kernel build preview\n\n");
         } else {
-            out.push_str("Agent-Kernel build complete\n\n");
+            out.push_str("Agent Memory Kernel build complete\n\n");
         }
 
         if self.actions.is_empty() {
@@ -127,7 +127,7 @@ impl StatusReport {
 
     pub fn render(&self) -> String {
         let mut out = String::new();
-        out.push_str("Agent-Kernel status\n\n");
+        out.push_str("Agent Memory Kernel status\n\n");
         if self.rows.is_empty() {
             out.push_str("No mirrors declared.\n");
         } else {
@@ -158,7 +158,7 @@ pub fn build_project(project_root: &Path, preview: bool) -> Result<BuildReport> 
     let root = fsutil::normalize_project_root(project_root)?;
     let config = config::load_or_default_project_config(&root)?;
     let index = config::load_skill_index(&root)?;
-    let skilllets = skilllet::skilllet_map(&root)?;
+    let memory_cards = memory_card::memory_card_map(&root)?;
     let skill_by_id = index
         .skills
         .iter()
@@ -222,11 +222,11 @@ pub fn build_project(project_root: &Path, preview: bool) -> Result<BuildReport> 
                     &target_dir,
                     &skill.id,
                     &config.skills.supplements,
-                    &skilllets,
+                    &memory_cards,
                 )?;
                 let target_hash = fsutil::sha256_dir_excluding(
                     &target_dir,
-                    &[".agent-kernel-mirror.yml", "AGENT_KERNEL_SKILLLETS.md"],
+                    &[".agent-kernel-mirror.yml", "AGENT_KERNEL_MEMORY_CARDS.md"],
                 )?;
                 lock.mirrors.push(MirrorState {
                     source: skill.source_path.clone(),
@@ -249,8 +249,8 @@ pub fn build_project(project_root: &Path, preview: bool) -> Result<BuildReport> 
             let content = render_instructions(
                 agent_name,
                 &config.skills.mirrors,
-                &config.skilllets.include,
-                &skilllets,
+                &config.memory_cards.include,
+                &memory_cards,
             );
             let content_bytes = content.len();
             actions.push(format!(
@@ -284,7 +284,8 @@ pub fn build_project(project_root: &Path, preview: bool) -> Result<BuildReport> 
             let path = root
                 .join(rules_dir)
                 .join(rules_artifact_file_name(agent_name));
-            let content = render_rules_artifact(agent_name, &config.skilllets.include, &skilllets);
+            let content =
+                render_rules_artifact(agent_name, &config.memory_cards.include, &memory_cards);
             actions.push(format!(
                 "{} {}",
                 if preview { "Would write" } else { "Wrote" },
@@ -305,12 +306,12 @@ pub fn build_project(project_root: &Path, preview: bool) -> Result<BuildReport> 
         }
 
         if let Some(skills_dir) = &agent.exports.skills_dir {
-            let compiled = compile_skilllets_as_agent_skills(
+            let compiled = compile_memory_cards_as_agent_skills(
                 &root,
                 agent_name,
                 skills_dir,
-                &config.skilllets.include,
-                &skilllets,
+                &config.memory_cards.include,
+                &memory_cards,
                 preview,
                 &previous_lock,
             )?;
@@ -319,11 +320,11 @@ pub fn build_project(project_root: &Path, preview: bool) -> Result<BuildReport> 
             lock.artifacts.extend(compiled.artifacts);
         }
 
-        let compiled_hooks = compile_skilllet_hooks(
+        let compiled_hooks = compile_memory_card_hooks(
             &root,
             agent_name,
-            &config.skilllets.include,
-            &skilllets,
+            &config.memory_cards.include,
+            &memory_cards,
             preview,
             &previous_lock,
         )?;
@@ -349,21 +350,21 @@ fn rules_artifact_file_name(_agent_name: &str) -> &'static str {
 
 fn render_rules_artifact(
     agent_name: &str,
-    skilllet_refs: &[config::SkillletRef],
-    skilllets: &BTreeMap<String, SkillletRecord>,
+    memory_card_refs: &[config::MemoryCardRef],
+    memory_cards: &BTreeMap<String, MemoryCardRecord>,
 ) -> String {
     let mut out = String::new();
-    out.push_str("<!-- Generated by Agent-Kernel. Do not edit directly. Run `agent-kernel import` to ingest manual changes. -->\n\n");
-    out.push_str("# Agent Kernel Rules\n\n");
+    out.push_str("<!-- Generated by Agent Memory Kernel. Do not edit directly. Run `agent-kernel import` to ingest manual changes. -->\n\n");
+    out.push_str("# Agent Memory Kernel Rules\n\n");
     out.push_str("This file is a build artifact for the current project.\n\n");
 
     let mut rendered = 0;
-    for item in skilllet_refs {
+    for item in memory_card_refs {
         if !item.targets.iter().any(|target| target == agent_name) {
             continue;
         }
-        if let Some(record) = skilllets.get(&item.id) {
-            if !skilllet_compiles_to_always_on(record) {
+        if let Some(record) = memory_cards.get(&item.id) {
+            if !memory_card_compiles_to_always_on(record) {
                 continue;
             }
             out.push_str(&format!("## {}\n\n{}\n\n", record.title, record.body));
@@ -372,7 +373,7 @@ fn render_rules_artifact(
     }
 
     if rendered == 0 {
-        out.push_str("- No skilllets are declared for this agent yet.\n");
+        out.push_str("- No Memory Cards are declared for this agent yet.\n");
     }
 
     out
@@ -381,12 +382,12 @@ fn render_rules_artifact(
 fn render_instructions(
     agent_name: &str,
     mirrors: &[config::MirrorDecl],
-    skilllet_refs: &[config::SkillletRef],
-    skilllets: &BTreeMap<String, SkillletRecord>,
+    memory_card_refs: &[config::MemoryCardRef],
+    memory_cards: &BTreeMap<String, MemoryCardRecord>,
 ) -> String {
     let mut out = String::new();
-    out.push_str("<!-- Generated by Agent-Kernel. Do not edit directly. Run `agent-kernel import` to ingest manual changes. -->\n\n");
-    out.push_str("# Agent Kernel Instructions\n\n");
+    out.push_str("<!-- Generated by Agent Memory Kernel. Do not edit directly. Run `agent-kernel import` to ingest manual changes. -->\n\n");
+    out.push_str("# Agent Memory Kernel Instructions\n\n");
     out.push_str("This file is a build artifact for the current project.\n\n");
     out.push_str("## Enabled Skills\n\n");
 
@@ -403,14 +404,14 @@ fn render_instructions(
         }
     }
 
-    out.push_str("\n## Enabled Skilllets\n\n");
+    out.push_str("\n## Enabled Memory Cards\n\n");
     let mut rendered = 0;
-    for item in skilllet_refs {
+    for item in memory_card_refs {
         if !item.targets.iter().any(|target| target == agent_name) {
             continue;
         }
-        if let Some(record) = skilllets.get(&item.id) {
-            if !skilllet_compiles_to_always_on(record) {
+        if let Some(record) = memory_cards.get(&item.id) {
+            if !memory_card_compiles_to_always_on(record) {
                 continue;
             }
             out.push_str(&format!("### {}\n\n{}\n\n", record.title, record.body));
@@ -418,14 +419,14 @@ fn render_instructions(
         }
     }
     if rendered == 0 {
-        out.push_str("- No skilllets are declared for this agent yet.\n");
+        out.push_str("- No Memory Cards are declared for this agent yet.\n");
     }
 
     out
 }
 
-fn skilllet_compiles_to_always_on(record: &SkillletRecord) -> bool {
-    if skilllet_compiles_to_agent_skill(record) {
+fn memory_card_compiles_to_always_on(record: &MemoryCardRecord) -> bool {
+    if memory_card_compiles_to_agent_skill(record) {
         return false;
     }
     if record.activation == "always-on" {
@@ -458,22 +459,24 @@ fn write_skill_supplement(
     target_dir: &Path,
     skill_id: &str,
     supplements: &[config::SkillSupplementDecl],
-    skilllets: &BTreeMap<String, SkillletRecord>,
+    memory_cards: &BTreeMap<String, MemoryCardRecord>,
 ) -> Result<()> {
     let Some(decl) = supplements.iter().find(|item| item.skill == skill_id) else {
         return Ok(());
     };
 
     let mut out = String::new();
-    out.push_str("# Agent-Kernel Skilllet Supplements\n\n");
-    out.push_str("This file is generated by Agent-Kernel and supplements the mirrored Skill.\n\n");
-    for skilllet_id in &decl.skilllets {
-        if let Some(record) = skilllets.get(skilllet_id) {
+    out.push_str("# Agent Memory Kernel Memory Card Supplements\n\n");
+    out.push_str(
+        "This file is generated by Agent Memory Kernel and supplements the mirrored Skill.\n\n",
+    );
+    for memory_card_id in &decl.memory_cards {
+        if let Some(record) = memory_cards.get(memory_card_id) {
             out.push_str(&format!("## {}\n\n{}\n\n", record.title, record.body));
         }
     }
 
-    fs::write(target_dir.join("AGENT_KERNEL_SKILLLETS.md"), out)?;
+    fs::write(target_dir.join("AGENT_KERNEL_MEMORY_CARDS.md"), out)?;
     Ok(())
 }
 
@@ -499,8 +502,10 @@ pub fn preview_as_json(project_root: &Path) -> Result<serde_json::Value> {
 pub fn import_artifact_drifts(project_root: &Path) -> Result<ArtifactImportReport> {
     let root = fsutil::normalize_project_root(project_root)?;
     let config = config::load_or_default_project_config(&root)?;
-    let skilllets = skilllet::skilllet_map(&root)?;
-    let expected = expected_artifacts(&root, &config, &skilllets)?;
+    let memory_cards = memory_card::memory_card_map(&root)?;
+    let expected = expected_artifacts(&root, &config, &memory_cards)?;
+    let mut lock = config::load_lock(&root)?;
+    let mut lock_changed = false;
 
     let mut created = 0;
     let mut skipped = 0;
@@ -550,8 +555,28 @@ pub fn import_artifact_drifts(project_root: &Path) -> Result<ArtifactImportRepor
                 extraction: ExtractionMetadata::default(),
             },
         )?;
+        let path_label = fsutil::path_to_slash(&artifact.path);
+        let current_hash = fsutil::sha256_text(&actual);
+        if let Some(previous) = lock
+            .artifacts
+            .iter_mut()
+            .find(|previous| previous.path == path_label)
+        {
+            previous.hash = current_hash;
+        } else {
+            lock.artifacts.push(ArtifactState {
+                path: path_label,
+                hash: current_hash,
+                kind: format!("{}:imported-artifact", artifact.agent),
+            });
+        }
+        lock_changed = true;
         drafts.push(id);
         created += 1;
+    }
+
+    if lock_changed {
+        config::save_lock(&root, &lock)?;
     }
 
     Ok(ArtifactImportReport {
@@ -595,7 +620,7 @@ pub fn status_project(project_root: &Path) -> Result<StatusReport> {
             } else {
                 let target_hash = fsutil::sha256_dir_excluding(
                     &target_dir,
-                    &[".agent-kernel-mirror.yml", "AGENT_KERNEL_SKILLLETS.md"],
+                    &[".agent-kernel-mirror.yml", "AGENT_KERNEL_MEMORY_CARDS.md"],
                 )?;
                 let current_source_hash = fsutil::sha256_dir(Path::new(&skill.source_path))?;
                 let marker = read_marker(&target_dir)?;
@@ -661,7 +686,7 @@ struct ExpectedArtifact {
 fn expected_artifacts(
     root: &Path,
     config: &config::ProjectConfig,
-    skilllets: &BTreeMap<String, SkillletRecord>,
+    memory_cards: &BTreeMap<String, MemoryCardRecord>,
 ) -> Result<Vec<ExpectedArtifact>> {
     let mut artifacts = Vec::new();
     for (agent_name, agent) in &config.agents {
@@ -675,8 +700,8 @@ fn expected_artifacts(
                 expected_content: render_instructions(
                     agent_name,
                     &config.skills.mirrors,
-                    &config.skilllets.include,
-                    skilllets,
+                    &config.memory_cards.include,
+                    memory_cards,
                 ),
             });
         }
@@ -688,13 +713,13 @@ fn expected_artifacts(
                     .join(rules_artifact_file_name(agent_name)),
                 expected_content: render_rules_artifact(
                     agent_name,
-                    &config.skilllets.include,
-                    skilllets,
+                    &config.memory_cards.include,
+                    memory_cards,
                 ),
             });
         }
         if let Some((path, content)) =
-            expected_hook_artifact(root, agent_name, &config.skilllets.include, skilllets)?
+            expected_hook_artifact(root, agent_name, &config.memory_cards.include, memory_cards)?
         {
             artifacts.push(ExpectedArtifact {
                 agent: agent_name.clone(),

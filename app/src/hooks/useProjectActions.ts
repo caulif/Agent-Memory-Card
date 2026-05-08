@@ -100,7 +100,7 @@ export function useProjectActions({
         return {
           ...current,
           candidate_count: Math.max(current.candidate_count - 1, 0),
-          skilllet_count: command === "promote_candidate" ? current.skilllet_count + 1 : current.skilllet_count,
+          memory_card_count: command === "promote_candidate" ? current.memory_card_count + 1 : current.memory_card_count,
         };
       });
     };
@@ -148,14 +148,16 @@ export function useProjectActions({
       if (command === "evolve_project") {
         return "已开始后台整理。你可以继续删除、编辑或切换页面。";
       }
-      // 所有会改变 skilllet/draft/assignment 数据的命令成功执行后刷新读模型
+      // 所有会改变 memory_card/draft/assignment 数据的命令成功执行后刷新读模型
       const mutationCommands = [
         "promote_candidate", "hide_candidate", "reject_candidate", "gc_candidates",
         "approve_draft", "reject_draft",
-        "set_skilllet_targets", "update_skilllet",
-        "set_agent_enabled", "merge_drafts", "merge_skilllets",
-        "fuse_skilllets_to_draft",
-        "promote_skilllet_to_global", "install_global_skilllet_to_project",
+        "set_memory_card_targets", "clear_memory_card_targets", "update_memory_card", "delete_memory_card",
+        "set_agent_enabled", "merge_drafts", "merge_memory_cards",
+        "fuse_memory_cards_to_draft",
+        "promote_memory_card_to_global", "install_global_memory_card_to_project",
+        "sync_project",
+        "clear_project_history",
       ];
       if (mutationCommands.includes(command)) {
         void refreshAfterMutation(actionProjectPath, command);

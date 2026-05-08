@@ -6,11 +6,11 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::candidate::ExtractionMetadata;
-use crate::config::{self, SkillletRef};
+use crate::config::{self, MemoryCardRef};
 use crate::fsutil;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SkillletRecord {
+pub struct MemoryCardRecord {
     #[serde(default = "current_schema_version")]
     pub schema_version: u32,
     pub id: String,
@@ -50,7 +50,7 @@ pub struct MergeEvent {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SkillletUpdate {
+pub struct MemoryCardUpdate {
     pub title: Option<String>,
     pub body: Option<String>,
     pub brief: Option<String>,
@@ -61,28 +61,28 @@ pub struct SkillletUpdate {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SkillletTargetMatrix {
+pub struct MemoryCardTargetMatrix {
     pub agents: Vec<String>,
-    pub rows: Vec<SkillletTargetMatrixRow>,
+    pub rows: Vec<MemoryCardTargetMatrixRow>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SkillletTargetMatrixRow {
-    pub skilllet_id: String,
+pub struct MemoryCardTargetMatrixRow {
+    pub memory_card_id: String,
     pub title: String,
     pub scope: String,
     pub targets: std::collections::BTreeMap<String, bool>,
 }
 
-impl SkillletTargetMatrix {
+impl MemoryCardTargetMatrix {
     pub fn render(&self) -> String {
         let mut out = String::new();
-        out.push_str("Agent-Kernel Skilllet Target Matrix\n\n");
+        out.push_str("Agent Memory Kernel Memory Card Target Matrix\n\n");
         if self.rows.is_empty() {
-            out.push_str("No skilllets found.\n");
+            out.push_str("No Memory Cards found.\n");
             return out;
         }
-        out.push_str(&format!("Skilllet | {}\n", self.agents.join(" | ")));
+        out.push_str(&format!("Memory Card | {}\n", self.agents.join(" | ")));
         out.push_str(&format!(
             "{}\n",
             std::iter::repeat_n("---", self.agents.len() + 1)
@@ -101,13 +101,13 @@ impl SkillletTargetMatrix {
                     }
                 })
                 .collect::<Vec<_>>();
-            out.push_str(&format!("{} | {}\n", row.skilllet_id, cells.join(" | ")));
+            out.push_str(&format!("{} | {}\n", row.memory_card_id, cells.join(" | ")));
         }
         out
     }
 }
 
-pub fn add_skilllet(
+pub fn add_memory_card(
     project_root: &Path,
     id: &str,
     title: &str,
@@ -116,7 +116,7 @@ pub fn add_skilllet(
     scope: &str,
     targets: Vec<String>,
 ) -> Result<()> {
-    add_skilllet_with_provenance(
+    add_memory_card_with_provenance(
         project_root,
         id,
         title,
@@ -131,7 +131,7 @@ pub fn add_skilllet(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn add_skilllet_with_provenance(
+pub fn add_memory_card_with_provenance(
     project_root: &Path,
     id: &str,
     title: &str,
@@ -144,10 +144,10 @@ pub fn add_skilllet_with_provenance(
     evidence: Option<String>,
 ) -> Result<()> {
     let root = fsutil::normalize_project_root(project_root)?;
-    validate_skilllet_fields(&root, title, body, kind, scope, &targets)?;
+    validate_memory_card_fields(&root, title, body, kind, scope, &targets)?;
     config::ensure_kernel_dir(&root)?;
     let now = Utc::now().to_rfc3339();
-    let path = skilllet_path(&root, id)?;
+    let path = memory_card_path(&root, id)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -155,13 +155,13 @@ pub fn add_skilllet_with_provenance(
     let existing = if path.exists() {
         fs::read_to_string(&path)
             .ok()
-            .and_then(|text| serde_yaml::from_str::<SkillletRecord>(&text).ok())
+            .and_then(|text| serde_yaml::from_str::<MemoryCardRecord>(&text).ok())
     } else {
         None
     };
-    let metadata = infer_skilllet_metadata(title, body, kind);
+    let metadata = infer_memory_card_metadata(title, body, kind);
 
-    let record = SkillletRecord {
+    let record = MemoryCardRecord {
         schema_version: existing
             .as_ref()
             .map(|record| record.schema_version)
@@ -210,7 +210,7 @@ pub fn add_skilllet_with_provenance(
 
     let mut project = config::load_or_default_project_config(&root)?;
     if let Some(existing) = project
-        .skilllets
+        .memory_cards
         .include
         .iter_mut()
         .find(|item| item.id == id)
@@ -218,7 +218,7 @@ pub fn add_skilllet_with_provenance(
         existing.targets = targets;
         existing.scope = Some(scope.to_string());
     } else {
-        project.skilllets.include.push(SkillletRef {
+        project.memory_cards.include.push(MemoryCardRef {
             id: id.to_string(),
             targets,
             scope: Some(scope.to_string()),
@@ -229,20 +229,20 @@ pub fn add_skilllet_with_provenance(
     Ok(())
 }
 
-pub fn update_skilllet(
+pub fn update_memory_card(
     project_root: &Path,
     id: &str,
-    update: SkillletUpdate,
-) -> Result<SkillletRecord> {
+    update: MemoryCardUpdate,
+) -> Result<MemoryCardRecord> {
     let root = fsutil::normalize_project_root(project_root)?;
-    let path = skilllet_path(&root, id)?;
+    let path = memory_card_path(&root, id)?;
     if !path.exists() {
-        return Err(anyhow!("skilllet `{id}` does not exist"));
+        return Err(anyhow!("Memory Card `{id}` does not exist"));
     }
 
     let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-    let mut record: SkillletRecord = serde_yaml::from_str(&text)
-        .with_context(|| format!("parse skilllet {}", path.display()))?;
+    let mut record: MemoryCardRecord = serde_yaml::from_str(&text)
+        .with_context(|| format!("parse Memory Card {}", path.display()))?;
 
     if let Some(title) = update.title {
         record.title = title;
@@ -268,7 +268,7 @@ pub fn update_skilllet(
     if record.activation == "model-decision" {
         record.activation = infer_activation(&record.kind).to_string();
     }
-    validate_skilllet_fields(
+    validate_memory_card_fields(
         &root,
         &record.title,
         &record.body,
@@ -284,7 +284,7 @@ pub fn update_skilllet(
 }
 
 pub fn review_update_matches_existing(
-    existing: &SkillletRecord,
+    existing: &MemoryCardRecord,
     incoming_title: &str,
     incoming_body: &str,
 ) -> bool {
@@ -293,7 +293,7 @@ pub fn review_update_matches_existing(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn update_skilllet_from_review(
+pub fn update_memory_card_from_review(
     project_root: &Path,
     id: &str,
     title: String,
@@ -303,11 +303,11 @@ pub fn update_skilllet_from_review(
     language: String,
     kind: String,
     scope: String,
-) -> Result<SkillletRecord> {
-    update_skilllet(
+) -> Result<MemoryCardRecord> {
+    update_memory_card(
         project_root,
         id,
-        SkillletUpdate {
+        MemoryCardUpdate {
             title: Some(title),
             body: Some(body),
             brief: Some(brief),
@@ -319,21 +319,21 @@ pub fn update_skilllet_from_review(
     )
 }
 
-pub fn load_skilllets(project_root: &Path) -> Result<Vec<SkillletRecord>> {
+pub fn load_memory_cards(project_root: &Path) -> Result<Vec<MemoryCardRecord>> {
     let root = fsutil::normalize_project_root(project_root)?;
-    let dir = config::kernel_dir(&root).join("skilllets");
-    load_skilllets_from_dir(&dir)
+    let dir = config::kernel_dir(&root).join("memory-cards");
+    load_memory_cards_from_dir(&dir)
 }
 
-pub fn load_global_skilllets(home: &Path) -> Result<Vec<SkillletRecord>> {
-    load_skilllets_from_dir(&home.join(".agent-kernel").join("skilllets"))
+pub fn load_global_memory_cards(home: &Path) -> Result<Vec<MemoryCardRecord>> {
+    load_memory_cards_from_dir(&home.join(".agent-kernel").join("memory-cards"))
 }
 
-pub fn count_global_skilllets(home: &Path) -> Result<usize> {
-    count_skilllets_in_dir(&home.join(".agent-kernel").join("skilllets"))
+pub fn count_global_memory_cards(home: &Path) -> Result<usize> {
+    count_memory_cards_in_dir(&home.join(".agent-kernel").join("memory-cards"))
 }
 
-fn load_skilllets_from_dir(dir: &Path) -> Result<Vec<SkillletRecord>> {
+fn load_memory_cards_from_dir(dir: &Path) -> Result<Vec<MemoryCardRecord>> {
     if !dir.exists() {
         return Ok(Vec::new());
     }
@@ -348,13 +348,16 @@ fn load_skilllets_from_dir(dir: &Path) -> Result<Vec<SkillletRecord>> {
             continue;
         }
         let text = fs::read_to_string(entry.path())?;
-        records.push(serde_yaml::from_str::<SkillletRecord>(&text)?);
+        records.push(
+            serde_yaml::from_str::<MemoryCardRecord>(&text)
+                .with_context(|| format!("parse Memory Card {}", entry.path().display()))?,
+        );
     }
     records.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(records)
 }
 
-fn count_skilllets_in_dir(dir: &Path) -> Result<usize> {
+fn count_memory_cards_in_dir(dir: &Path) -> Result<usize> {
     if !dir.exists() {
         return Ok(0);
     }
@@ -370,17 +373,17 @@ fn count_skilllets_in_dir(dir: &Path) -> Result<usize> {
     Ok(count)
 }
 
-pub fn set_skilllet_targets(project_root: &Path, id: &str, targets: Vec<String>) -> Result<()> {
-    validate_skilllet_id(id)?;
+pub fn set_memory_card_targets(project_root: &Path, id: &str, targets: Vec<String>) -> Result<()> {
+    validate_memory_card_id(id)?;
     let root = fsutil::normalize_project_root(project_root)?;
     validate_targets(&root, &targets)?;
-    let skilllets = load_skilllets(&root)?;
-    let Some(record) = skilllets.iter().find(|record| record.id == id) else {
-        return Err(anyhow!("skilllet `{id}` does not exist"));
+    let memory_cards = load_memory_cards(&root)?;
+    let Some(record) = memory_cards.iter().find(|record| record.id == id) else {
+        return Err(anyhow!("Memory Card `{id}` does not exist"));
     };
     let mut project = config::load_or_default_project_config(&root)?;
     if let Some(existing) = project
-        .skilllets
+        .memory_cards
         .include
         .iter_mut()
         .find(|item| item.id == id)
@@ -388,7 +391,7 @@ pub fn set_skilllet_targets(project_root: &Path, id: &str, targets: Vec<String>)
         existing.targets = targets;
         existing.scope = Some(record.scope.clone());
     } else {
-        project.skilllets.include.push(SkillletRef {
+        project.memory_cards.include.push(MemoryCardRef {
             id: id.to_string(),
             targets,
             scope: Some(record.scope.clone()),
@@ -397,32 +400,85 @@ pub fn set_skilllet_targets(project_root: &Path, id: &str, targets: Vec<String>)
     config::save_project_config(&root, &project)
 }
 
-pub fn promote_skilllet_to_global(
+pub fn clear_memory_card_targets(project_root: &Path, agent: Option<String>) -> Result<usize> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    let mut project = config::load_or_default_project_config(&root)?;
+    if let Some(agent) = agent.as_ref() {
+        validate_targets(&root, std::slice::from_ref(agent))?;
+    }
+    let memory_cards = load_memory_cards(&root)?;
+    let default_targets = enabled_agent_targets(&project);
+    let mut changed = 0usize;
+
+    for record in memory_cards {
+        let existing_index = project
+            .memory_cards
+            .include
+            .iter()
+            .position(|item| item.id == record.id);
+        let current_targets = existing_index
+            .and_then(|index| project.memory_cards.include.get(index))
+            .map(|item| item.targets.clone())
+            .unwrap_or_else(|| default_targets.clone());
+        let next_targets = match agent.as_ref() {
+            Some(agent) => current_targets
+                .into_iter()
+                .filter(|target| target != agent)
+                .collect::<Vec<_>>(),
+            None => Vec::new(),
+        };
+        if existing_index
+            .and_then(|index| project.memory_cards.include.get(index))
+            .map(|item| item.targets.as_slice() == next_targets.as_slice())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        changed += 1;
+        if let Some(index) = existing_index {
+            if let Some(existing) = project.memory_cards.include.get_mut(index) {
+                existing.targets = next_targets;
+                existing.scope = Some(record.scope);
+            }
+        } else {
+            project.memory_cards.include.push(MemoryCardRef {
+                id: record.id,
+                targets: next_targets,
+                scope: Some(record.scope),
+            });
+        }
+    }
+    dedupe_memory_card_refs(&mut project.memory_cards.include);
+    config::save_project_config(&root, &project)?;
+    Ok(changed)
+}
+
+pub fn promote_memory_card_to_global(
     project_root: &Path,
     home: &Path,
     id: &str,
-) -> Result<SkillletRecord> {
-    validate_skilllet_id(id)?;
+) -> Result<MemoryCardRecord> {
+    validate_memory_card_id(id)?;
     let root = fsutil::normalize_project_root(project_root)?;
     let mut project = config::load_or_default_project_config(&root)?;
-    let Some(mut record) = skilllet_map(&root)?.remove(id) else {
-        return Err(anyhow!("skilllet `{id}` does not exist"));
+    let Some(mut record) = memory_card_map(&root)?.remove(id) else {
+        return Err(anyhow!("Memory Card `{id}` does not exist"));
     };
     let original_id = record.id.clone();
-    let promoted_id = global_skilllet_id(&record)?;
+    let promoted_id = global_memory_card_id(&record)?;
     record.scope = "global".to_string();
     record.id = promoted_id.clone();
     record.source_project = Some(fsutil::path_to_slash(&root));
     record.updated_at = Utc::now().to_rfc3339();
 
-    let global_path = global_skilllet_path(home, &promoted_id)?;
+    let global_path = global_memory_card_path(home, &promoted_id)?;
     if let Some(parent) = global_path.parent() {
         fs::create_dir_all(parent)?;
     }
     fs::write(&global_path, serde_yaml::to_string(&record)?)
         .with_context(|| format!("write {}", global_path.display()))?;
 
-    let project_global_path = skilllet_path(&root, &promoted_id)?;
+    let project_global_path = memory_card_path(&root, &promoted_id)?;
     if let Some(parent) = project_global_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -431,7 +487,7 @@ pub fn promote_skilllet_to_global(
 
     let mut preserved_targets = None;
     if let Some(existing) = project
-        .skilllets
+        .memory_cards
         .include
         .iter_mut()
         .find(|item| item.id == original_id || item.id == promoted_id)
@@ -444,7 +500,7 @@ pub fn promote_skilllet_to_global(
     } else {
         let targets = enabled_agent_targets(&project);
         preserved_targets = Some(targets.clone());
-        project.skilllets.include.push(SkillletRef {
+        project.memory_cards.include.push(MemoryCardRef {
             id: promoted_id.clone(),
             targets,
             scope: Some("global".to_string()),
@@ -452,7 +508,7 @@ pub fn promote_skilllet_to_global(
     }
     if let Some(targets) = preserved_targets {
         if let Some(existing) = project
-            .skilllets
+            .memory_cards
             .include
             .iter_mut()
             .find(|item| item.id == promoted_id)
@@ -460,11 +516,11 @@ pub fn promote_skilllet_to_global(
             existing.targets = targets;
         }
     }
-    dedupe_skilllet_refs(&mut project.skilllets.include);
+    dedupe_memory_card_refs(&mut project.memory_cards.include);
     config::save_project_config(&root, &project)?;
 
     if original_id != promoted_id {
-        let old_path = skilllet_path(&root, &original_id)?;
+        let old_path = memory_card_path(&root, &original_id)?;
         if old_path.exists() {
             fs::remove_file(old_path)?;
         }
@@ -472,26 +528,26 @@ pub fn promote_skilllet_to_global(
     Ok(record)
 }
 
-pub fn install_global_skilllet_to_project(
+pub fn install_global_memory_card_to_project(
     project_root: &Path,
     home: &Path,
     id: &str,
     targets: Vec<String>,
-) -> Result<SkillletRecord> {
-    validate_skilllet_id(id)?;
+) -> Result<MemoryCardRecord> {
+    validate_memory_card_id(id)?;
     let root = fsutil::normalize_project_root(project_root)?;
-    let Some(mut record) = load_global_skilllets(home)?
+    let Some(mut record) = load_global_memory_cards(home)?
         .into_iter()
         .find(|record| record.id == id)
     else {
-        return Err(anyhow!("global skilllet `{id}` does not exist"));
+        return Err(anyhow!("global Memory Card `{id}` does not exist"));
     };
 
     config::ensure_kernel_dir(&root)?;
     record.scope = "global".to_string();
     record.updated_at = Utc::now().to_rfc3339();
 
-    let path = skilllet_path(&root, id)?;
+    let path = memory_card_path(&root, id)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -500,7 +556,7 @@ pub fn install_global_skilllet_to_project(
 
     let mut project = config::load_or_default_project_config(&root)?;
     if let Some(existing) = project
-        .skilllets
+        .memory_cards
         .include
         .iter_mut()
         .find(|item| item.id == id)
@@ -508,7 +564,7 @@ pub fn install_global_skilllet_to_project(
         existing.targets = targets;
         existing.scope = Some("global".to_string());
     } else {
-        project.skilllets.include.push(SkillletRef {
+        project.memory_cards.include.push(MemoryCardRef {
             id: id.to_string(),
             targets,
             scope: Some("global".to_string()),
@@ -519,21 +575,21 @@ pub fn install_global_skilllet_to_project(
     Ok(record)
 }
 
-pub fn merge_skilllets(
+pub fn merge_memory_cards(
     project_root: &Path,
     id: &str,
     title: &str,
     source_ids: Vec<String>,
     targets: Vec<String>,
 ) -> Result<()> {
-    validate_skilllet_id(id)?;
+    validate_memory_card_id(id)?;
     let root = fsutil::normalize_project_root(project_root)?;
-    let skilllets = skilllet_map(&root)?;
+    let memory_cards = memory_card_map(&root)?;
     let mut body = String::new();
     let mut missing = Vec::new();
 
     for source_id in &source_ids {
-        let Some(record) = skilllets.get(source_id) else {
+        let Some(record) = memory_cards.get(source_id) else {
             missing.push(source_id.clone());
             continue;
         };
@@ -541,13 +597,16 @@ pub fn merge_skilllets(
     }
 
     if !missing.is_empty() {
-        return Err(anyhow!("missing source skilllets: {}", missing.join(", ")));
+        return Err(anyhow!(
+            "missing source Memory Cards: {}",
+            missing.join(", ")
+        ));
     }
     if source_ids.is_empty() {
-        return Err(anyhow!("at least one source skilllet is required"));
+        return Err(anyhow!("at least one source Memory Card is required"));
     }
 
-    add_skilllet(
+    add_memory_card(
         &root,
         id,
         title,
@@ -557,9 +616,9 @@ pub fn merge_skilllets(
         targets,
     )?;
 
-    // 合并后删除源 skilllet，只保留合并结果
+    // 合并后删除源 Memory Card，只保留合并结果
     for source_id in &source_ids {
-        let path = skilllet_path(&root, source_id)?;
+        let path = memory_card_path(&root, source_id)?;
         if path.exists() {
             fs::remove_file(&path)?;
         }
@@ -568,38 +627,49 @@ pub fn merge_skilllets(
     Ok(())
 }
 
-/// 删除指定 skilllet 文件
-pub fn delete_skilllet(project_root: &Path, id: &str) -> Result<()> {
+/// 删除指定 Memory Card 文件
+pub fn delete_memory_card(project_root: &Path, id: &str) -> Result<()> {
     let root = fsutil::normalize_project_root(project_root)?;
-    let path = skilllet_path(&root, id)?;
+    let path = memory_card_path(&root, id)?;
     if path.exists() {
         fs::remove_file(&path)?;
     }
-    Ok(())
+    let mut project = config::load_or_default_project_config(&root)?;
+    project.memory_cards.include.retain(|item| item.id != id);
+    for supplement in &mut project.skills.supplements {
+        supplement
+            .memory_cards
+            .retain(|memory_card_id| memory_card_id != id);
+    }
+    project
+        .skills
+        .supplements
+        .retain(|supplement| !supplement.memory_cards.is_empty());
+    config::save_project_config(&root, &project)
 }
 
-pub fn skilllet_map(
+pub fn memory_card_map(
     project_root: &Path,
-) -> Result<std::collections::BTreeMap<String, SkillletRecord>> {
-    Ok(load_skilllets(project_root)?
+) -> Result<std::collections::BTreeMap<String, MemoryCardRecord>> {
+    Ok(load_memory_cards(project_root)?
         .into_iter()
         .map(|record| (record.id.clone(), record))
         .collect())
 }
 
-pub fn skilllet_target_matrix(project_root: &Path) -> Result<SkillletTargetMatrix> {
+pub fn memory_card_target_matrix(project_root: &Path) -> Result<MemoryCardTargetMatrix> {
     let root = fsutil::normalize_project_root(project_root)?;
     let project = config::load_or_default_project_config(&root)?;
-    let skilllets = load_skilllets(&root)?;
+    let memory_cards = load_memory_cards(&root)?;
     let agents = project.agents.keys().cloned().collect::<Vec<_>>();
     let refs = project
-        .skilllets
+        .memory_cards
         .include
         .iter()
         .map(|item| (item.id.clone(), item.targets.clone()))
         .collect::<std::collections::BTreeMap<_, _>>();
 
-    let rows = skilllets
+    let rows = memory_cards
         .into_iter()
         .map(|record| {
             let explicit_targets = refs.get(&record.id);
@@ -618,8 +688,8 @@ pub fn skilllet_target_matrix(project_root: &Path) -> Result<SkillletTargetMatri
                     (agent.clone(), assigned)
                 })
                 .collect();
-            SkillletTargetMatrixRow {
-                skilllet_id: record.id,
+            MemoryCardTargetMatrixRow {
+                memory_card_id: record.id,
                 title: record.title,
                 scope: record.scope,
                 targets,
@@ -627,10 +697,10 @@ pub fn skilllet_target_matrix(project_root: &Path) -> Result<SkillletTargetMatri
         })
         .collect();
 
-    Ok(SkillletTargetMatrix { agents, rows })
+    Ok(MemoryCardTargetMatrix { agents, rows })
 }
 
-fn global_skilllet_id(record: &SkillletRecord) -> Result<String> {
+fn global_memory_card_id(record: &MemoryCardRecord) -> Result<String> {
     if record.id.starts_with("global:") {
         return Ok(record.id.clone());
     }
@@ -641,13 +711,13 @@ fn global_skilllet_id(record: &SkillletRecord) -> Result<String> {
         .filter(|slug| !slug.trim().is_empty())
         .unwrap_or(record.title.trim());
     let mut id = format!("global:{}", raw_slug.trim());
-    while id.len() > MAX_SKILLLET_ID_LEN {
+    while id.len() > MAX_MEMORY_CARD_ID_LEN {
         let Some((idx, _)) = id.char_indices().next_back() else {
             break;
         };
         id.truncate(idx);
     }
-    validate_skilllet_id(&id)?;
+    validate_memory_card_id(&id)?;
     Ok(id)
 }
 
@@ -660,7 +730,7 @@ fn enabled_agent_targets(project: &config::ProjectConfig) -> Vec<String> {
         .collect()
 }
 
-fn dedupe_skilllet_refs(refs: &mut Vec<SkillletRef>) {
+fn dedupe_memory_card_refs(refs: &mut Vec<MemoryCardRef>) {
     let mut seen = std::collections::BTreeSet::new();
     refs.retain(|item| seen.insert(item.id.clone()));
 }
@@ -668,50 +738,52 @@ fn dedupe_skilllet_refs(refs: &mut Vec<SkillletRef>) {
 #[cfg(test)]
 mod tests;
 
-const MAX_SKILLLET_ID_LEN: usize = 128;
+const MAX_MEMORY_CARD_ID_LEN: usize = 128;
 
-fn skilllet_path(project_root: &Path, id: &str) -> Result<PathBuf> {
-    skilllet_file_path(&config::kernel_dir(project_root).join("skilllets"), id)
+fn memory_card_path(project_root: &Path, id: &str) -> Result<PathBuf> {
+    memory_card_file_path(&config::kernel_dir(project_root).join("memory-cards"), id)
 }
 
-fn global_skilllet_path(home: &Path, id: &str) -> Result<PathBuf> {
-    skilllet_file_path(&home.join(".agent-kernel").join("skilllets"), id)
+fn global_memory_card_path(home: &Path, id: &str) -> Result<PathBuf> {
+    memory_card_file_path(&home.join(".agent-kernel").join("memory-cards"), id)
 }
 
-fn skilllet_file_path(dir: &Path, id: &str) -> Result<PathBuf> {
-    validate_skilllet_id(id)?;
+fn memory_card_file_path(dir: &Path, id: &str) -> Result<PathBuf> {
+    validate_memory_card_id(id)?;
     let safe = id.replace(':', "/").replace(['\\', ' '], "-");
     let path = dir.join(format!("{safe}.yml"));
-    ensure_skilllet_path_stays_in_dir(dir, &path)?;
+    ensure_memory_card_path_stays_in_dir(dir, &path)?;
     Ok(path)
 }
 
-fn validate_skilllet_id(id: &str) -> Result<()> {
+fn validate_memory_card_id(id: &str) -> Result<()> {
     if id.trim().is_empty() {
-        return Err(anyhow!("skilllet id must not be empty"));
+        return Err(anyhow!("Memory Card id must not be empty"));
     }
-    if id.len() > MAX_SKILLLET_ID_LEN {
+    if id.len() > MAX_MEMORY_CARD_ID_LEN {
         return Err(anyhow!(
-            "skilllet id must be at most {MAX_SKILLLET_ID_LEN} bytes"
+            "Memory Card id must be at most {MAX_MEMORY_CARD_ID_LEN} bytes"
         ));
     }
     if id.contains("..") {
-        return Err(anyhow!("skilllet id must not contain `..`"));
+        return Err(anyhow!("Memory Card id must not contain `..`"));
     }
     if id.contains('/') || id.contains('\\') {
-        return Err(anyhow!("skilllet id must not contain path separators"));
+        return Err(anyhow!("Memory Card id must not contain path separators"));
     }
     let bytes = id.as_bytes();
     if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
-        return Err(anyhow!("skilllet id must not look like an absolute path"));
+        return Err(anyhow!(
+            "Memory Card id must not look like an absolute path"
+        ));
     }
     if Path::new(id).is_absolute() {
-        return Err(anyhow!("skilllet id must not be an absolute path"));
+        return Err(anyhow!("Memory Card id must not be an absolute path"));
     }
     Ok(())
 }
 
-fn validate_skilllet_fields(
+fn validate_memory_card_fields(
     project_root: &Path,
     title: &str,
     body: &str,
@@ -719,8 +791,8 @@ fn validate_skilllet_fields(
     scope: &str,
     targets: &[String],
 ) -> Result<()> {
-    validate_non_empty("skilllet title", title)?;
-    validate_non_empty("skilllet body", body)?;
+    validate_non_empty("Memory Card title", title)?;
+    validate_non_empty("Memory Card body", body)?;
     validate_kind(kind)?;
     validate_scope(scope)?;
     validate_targets(project_root, targets)
@@ -736,7 +808,7 @@ fn validate_non_empty(label: &str, value: &str) -> Result<()> {
 fn validate_kind(kind: &str) -> Result<()> {
     const KINDS: &[&str] = &[
         "rule",
-        "skilllet",
+        "memory-card",
         "observation",
         "package",
         "preference",
@@ -749,7 +821,7 @@ fn validate_kind(kind: &str) -> Result<()> {
         "anti-pattern",
     ];
     if !KINDS.contains(&kind) {
-        return Err(anyhow!("unknown skilllet kind `{kind}`"));
+        return Err(anyhow!("unknown Memory Card kind `{kind}`"));
     }
     Ok(())
 }
@@ -757,7 +829,7 @@ fn validate_kind(kind: &str) -> Result<()> {
 fn validate_scope(scope: &str) -> Result<()> {
     const SCOPES: &[&str] = &["project", "global", "agent", "directory", "agent-specific"];
     if !SCOPES.contains(&scope) {
-        return Err(anyhow!("unknown skilllet scope `{scope}`"));
+        return Err(anyhow!("unknown Memory Card scope `{scope}`"));
     }
     Ok(())
 }
@@ -766,16 +838,16 @@ fn validate_targets(project_root: &Path, targets: &[String]) -> Result<()> {
     let project = config::load_or_default_project_config(project_root)?;
     for target in targets {
         if !project.agents.contains_key(target) {
-            return Err(anyhow!("unknown skilllet target agent `{target}`"));
+            return Err(anyhow!("unknown Memory Card target agent `{target}`"));
         }
     }
     Ok(())
 }
 
-fn ensure_skilllet_path_stays_in_dir(dir: &Path, path: &Path) -> Result<()> {
+fn ensure_memory_card_path_stays_in_dir(dir: &Path, path: &Path) -> Result<()> {
     path.strip_prefix(dir)
         .map(|_| ())
-        .with_context(|| format!("skilllet path escaped {}", dir.display()))
+        .with_context(|| format!("Memory Card path escaped {}", dir.display()))
 }
 
 fn normalize_tags(mut tags: Vec<String>) -> Vec<String> {
@@ -785,13 +857,13 @@ fn normalize_tags(mut tags: Vec<String>) -> Vec<String> {
 }
 
 #[derive(Debug, Clone)]
-struct SkillletMetadata {
+struct MemoryCardMetadata {
     brief: String,
     tags: Vec<String>,
     language: String,
 }
 
-fn infer_skilllet_metadata(title: &str, body: &str, kind: &str) -> SkillletMetadata {
+fn infer_memory_card_metadata(title: &str, body: &str, kind: &str) -> MemoryCardMetadata {
     let language = infer_language(title, body);
     let tags = infer_tags(title, body, kind);
     let brief = if language == "zh" {
@@ -807,7 +879,7 @@ fn infer_skilllet_metadata(title: &str, body: &str, kind: &str) -> SkillletMetad
             concise_en_summary(body)
         )
     };
-    SkillletMetadata {
+    MemoryCardMetadata {
         brief,
         tags,
         language,

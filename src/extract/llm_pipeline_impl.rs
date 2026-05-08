@@ -53,7 +53,7 @@ pub(super) fn extract_llm_text_to_drafts(
 
     let usable = llm::filter_usable_knowledge(all_knowledge, min_confidence);
 
-    let skilllets = skilllet::load_skilllets(project_root)?;
+    let memory_cards = memory_card::load_memory_cards(project_root)?;
     let deduper = embedding::SemanticDeduper::new(0.75, 0.65);
     let mut deduped_items: Vec<embedding::LlmKnowledgeItem> = Vec::new();
     let mut skipped = Vec::new();
@@ -67,20 +67,20 @@ pub(super) fn extract_llm_text_to_drafts(
         } else {
             "global".to_string()
         };
-        let scope_skilllets = scoped_skilllets(&skilllets, &scope);
+        let scope_memory_cards = scoped_memory_cards(&memory_cards, &scope);
         let mut suggested_action =
-            match deduper.dedup_against_existing(&item.body, &scope_skilllets) {
+            match deduper.dedup_against_existing(&item.body, &scope_memory_cards) {
                 embedding::DedupResult::Duplicate {
                     similar_id,
                     similarity,
                 } => candidate::ExtractionAction::merge_into_existing(similar_id, similarity),
                 embedding::DedupResult::Unique => candidate::ExtractionAction::new_candidate(),
             };
-        let similar_skilllets =
-            deduper.top_similar_skilllets(&item.body, &scope_skilllets, 5, 0.35);
-        if !similar_skilllets.is_empty()
+        let similar_memory_cards =
+            deduper.top_similar_memory_cards(&item.body, &scope_memory_cards, 5, 0.35);
+        if !similar_memory_cards.is_empty()
             && let Ok(decision) =
-                llm::run_update_decision(project_root, &item.body, &similar_skilllets)
+                llm::run_update_decision(project_root, &item.body, &similar_memory_cards)
         {
             suggested_action = llm::action_from_update_decision(&decision, suggested_action);
         }
@@ -259,12 +259,15 @@ pub(super) fn extract_llm_text_to_drafts(
                 item.suggested_action.clone()
             };
         let decision = quality_decision;
-        let scope_skilllets = scoped_skilllets(&skilllets, &item.scope);
-        let similar_skilllets =
-            deduper.top_similar_skilllets(&item.body, &scope_skilllets, 5, 0.35);
-        if let Ok(judgment) =
-            llm::run_quality_judge(project_root, &item.body, &item.evidence, &similar_skilllets)
-        {
+        let scope_memory_cards = scoped_memory_cards(&memory_cards, &item.scope);
+        let similar_memory_cards =
+            deduper.top_similar_memory_cards(&item.body, &scope_memory_cards, 5, 0.35);
+        if let Ok(judgment) = llm::run_quality_judge(
+            project_root,
+            &item.body,
+            &item.evidence,
+            &similar_memory_cards,
+        ) {
             let weak_grounding = item.memory_tier != MemoryTier::ProjectRule
                 && judgment.evidence_grounded.unwrap_or(1.0)
                     < provider_cfg.judge.evidence_grounded_min_non_project;
@@ -288,6 +291,7 @@ pub(super) fn extract_llm_text_to_drafts(
         let score = scoring::score_chunk(&chunk);
         if score.disposition == scoring::ExtractionDisposition::Candidate
             || item.matched_signal.starts_with("methodology-")
+            || llm_value_scores_pass(item)
         {
             scored_items.push((item, score, decision, suggested_action));
         }
@@ -313,7 +317,7 @@ pub(super) fn extract_llm_text_to_drafts(
         .into_iter()
         .filter_map(|index| slots.get_mut(index).and_then(Option::take))
         .collect::<Vec<_>>();
-    let scored_items = if should_refine_final_memory(source) {
+    let scored_items = {
         let originals = scored_items
             .iter()
             .map(|(item, _, _, _)| Candidate {
@@ -330,33 +334,38 @@ pub(super) fn extract_llm_text_to_drafts(
                 matched_template: Some(item.matched_signal.clone()),
             })
             .collect::<Vec<_>>();
-        let (refined, refine_messages) = refine::refine_candidates(project_root, &originals);
+        let (refined, refine_messages) =
+            refine::refine_candidates_with_llm_required(project_root, &originals);
         skipped.extend(refine_messages);
         scored_items
             .into_iter()
             .zip(refined)
-            .filter_map(|((item, score, decision, action), refined)| {
-                refined.map(|candidate| (item, candidate, score, decision, action))
-            })
-            .collect::<Vec<_>>()
-    } else {
-        scored_items
-            .into_iter()
-            .map(|(item, score, decision, action)| {
-                let candidate = Candidate {
-                    title: item.title.clone(),
-                    body: item.body.clone(),
-                    kind: item.kind.clone(),
-                    scope: item.scope.clone(),
-                    memory_tier: item.memory_tier.clone(),
-                    abstraction_of: item.abstraction_of.clone(),
-                    abstracted_from: item.abstracted_from.clone(),
-                    evidence: item.evidence.clone(),
-                    confidence: Some(item.confidence),
-                    reason: Some(item.reason.clone()),
-                    matched_template: Some(item.matched_signal.clone()),
-                };
-                (item, candidate, score, decision, action)
+            .filter_map(|((item, score, _decision, action), refined)| {
+                let candidate = refined?;
+                let quality_decision = evaluate_candidate_quality(&candidate, &action);
+                if quality_decision.disposition == QualityDisposition::Skip {
+                    skipped.push(quality_skip_message(
+                        &candidate_id_from_scope_and_title(&candidate.scope, &candidate.title),
+                        &quality_decision,
+                    ));
+                    return None;
+                }
+                let memory_decision = memory_gate::evaluate_memory_candidate(
+                    &candidate.title,
+                    &candidate.body,
+                    &candidate.evidence,
+                    &candidate.kind,
+                    &candidate.scope,
+                );
+                if memory_decision.disposition == memory_gate::MemoryGateDisposition::Reject {
+                    skipped.push(format!(
+                        "{}: memory-gate ({})",
+                        candidate_id_from_scope_and_title(&candidate.scope, &candidate.title),
+                        memory_decision.flags.join(",")
+                    ));
+                    return None;
+                }
+                Some((item, candidate, score, quality_decision, action))
             })
             .collect::<Vec<_>>()
     };
@@ -463,4 +472,13 @@ pub(super) fn extract_llm_text_to_drafts(
         provider: provider_name.to_string(),
         redacted,
     })
+}
+
+fn llm_value_scores_pass(item: &embedding::LlmKnowledgeItem) -> bool {
+    item.confidence >= 0.75
+        && item.durability_score.unwrap_or(0.0) >= 0.75
+        && item.specificity_score.unwrap_or(0.0) >= 0.70
+        && item.source_trust_score.unwrap_or(0.0) >= 0.70
+        && (item.reusability_score.unwrap_or(0.0) >= 0.55
+            || item.memory_tier != MemoryTier::ProjectRule)
 }

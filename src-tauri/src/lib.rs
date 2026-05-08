@@ -4,10 +4,11 @@ use std::thread;
 mod app_service;
 mod commands;
 mod jobs;
+mod provider_config;
 
 use agent_kernel::{
     build, catalog, config, draft, fsutil, kernel, observation, project_registry, rule_test,
-    skilllet,
+    memory_card,
 };
 use jobs::{job_start_from_status, DesktopJobReplay, DesktopJobStart, DesktopTaskStore};
 use serde::{Deserialize, Serialize};
@@ -24,15 +25,15 @@ pub struct ProjectSnapshot {
     pub project_path: String,
     pub config: config::ProjectConfig,
     pub candidates: Vec<agent_kernel::candidate::CandidateRecord>,
-    pub skilllets: Vec<skilllet::SkillletRecord>,
-    pub global_skilllets: Vec<skilllet::SkillletRecord>,
+    pub memory_cards: Vec<memory_card::MemoryCardRecord>,
+    pub global_memory_cards: Vec<memory_card::MemoryCardRecord>,
     pub drafts: Vec<draft::DraftRecord>,
     pub observations: Vec<observation::ObservationRecord>,
     pub skill_index: config::SkillIndex,
     pub lock: config::ProjectLock,
     pub catalog_status: catalog::CatalogStatus,
     pub catalog_validation: catalog::CatalogValidationReport,
-    pub target_matrix: skilllet::SkillletTargetMatrix,
+    pub target_matrix: memory_card::MemoryCardTargetMatrix,
     pub rule_ci: rule_test::RuleTestReport,
     pub build_preview: build::BuildReport,
     pub status: build::StatusReport,
@@ -51,7 +52,7 @@ pub struct DraftUpdateInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SkillletUpdateInput {
+pub struct MemoryCardUpdateInput {
     pub title: Option<String>,
     pub body: Option<String>,
     pub brief: Option<String>,
@@ -71,7 +72,7 @@ pub struct DraftMergeInput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SkillletMergeInput {
+pub struct MemoryCardMergeInput {
     pub id: String,
     pub title: String,
     pub sources: Vec<String>,
@@ -112,7 +113,7 @@ pub fn run() {
                 setup_store.job_step(
                     &job_id,
                     "等待用户操作",
-                    "点击“提炼高价值 Skilllet”后才会读取历史；删除、编辑和切换页面保持可用",
+                    "点击“提炼高价值 Memory Card”后才会读取历史；删除、编辑和切换页面保持可用",
                     80,
                 );
                 setup_store.finish_job(&job_id, "工作台已就绪");
@@ -127,9 +128,11 @@ pub fn run() {
             commands::core::get_project_dashboard,
             commands::core::get_project_candidate_inbox,
             commands::core::get_project_review_inbox,
-            commands::core::get_project_skilllet_library,
+            commands::core::get_project_memory_card_library,
             commands::core::get_project_assignment_view,
             commands::core::get_project_quality_view,
+            commands::core::get_custom_provider_config,
+            commands::core::save_custom_provider_config,
             commands::core::get_project_snapshot,
             commands::core::import_project,
             commands::core::review_project,
@@ -142,13 +145,16 @@ pub fn run() {
             commands::core::update_draft,
             commands::core::merge_drafts,
             commands::core::set_agent_enabled,
-            commands::core::set_skilllet_targets,
-            commands::core::update_skilllet,
-            commands::core::promote_skilllet_to_global,
-            commands::core::install_global_skilllet_to_project,
-            commands::core::merge_skilllets,
-            commands::core::fuse_skilllets_to_draft,
-            commands::core::attach_skilllet_to_skill,
+            commands::core::set_memory_card_targets,
+            commands::core::clear_memory_card_targets,
+            commands::core::clear_project_history,
+            commands::core::update_memory_card,
+            commands::core::delete_memory_card,
+            commands::core::promote_memory_card_to_global,
+            commands::core::install_global_memory_card_to_project,
+            commands::core::merge_memory_cards,
+            commands::core::fuse_memory_cards_to_draft,
+            commands::core::attach_memory_card_to_skill,
             commands::core::install_catalog_package,
             commands::core::evolve_project,
             commands::core::import_artifact_drifts,
@@ -159,7 +165,7 @@ pub fn run() {
             commands::jobs::cancel_job
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Agent-Kernel desktop app");
+        .expect("error while running Agent Memory Kernel desktop app");
 }
 
 pub(crate) fn app_state_for_home(home: &Path) -> anyhow::Result<DesktopAppState> {
@@ -183,15 +189,15 @@ pub(crate) fn load_project_snapshot(project_root: &Path) -> anyhow::Result<Proje
         project_path: fsutil::path_to_slash(&root),
         config: config::load_or_default_project_config(&root)?,
         candidates: agent_kernel::candidate::load_candidates(&root)?,
-        skilllets: skilllet::load_skilllets(&root)?,
-        global_skilllets: skilllet::load_global_skilllets(&default_home_dir())?,
+        memory_cards: memory_card::load_memory_cards(&root)?,
+        global_memory_cards: memory_card::load_global_memory_cards(&default_home_dir())?,
         drafts: draft::load_drafts(&root)?,
         observations: observation::load_observations(&root)?,
         skill_index: config::load_skill_index(&root)?,
         lock: config::load_lock(&root)?,
         catalog_status: catalog::catalog_status(&root)?,
         catalog_validation: catalog::validate_catalog(&catalog),
-        target_matrix: skilllet::skilllet_target_matrix(&root)?,
+        target_matrix: memory_card::memory_card_target_matrix(&root)?,
         rule_ci: rule_test::run_rule_tests(&root)?,
         build_preview: build::build_project(&root, true)?,
         status: build::status_project(&root)?,
@@ -214,8 +220,8 @@ mod tests {
     use super::*;
     use crate::commands::core::{
         add_project, approve_draft, enforce_tauri_kernel_policy,
-        enforce_tauri_kernel_policy_for_project, gc_candidates, plan_kernel_command_input, reject_draft,
-        sync_project_for_test,
+        enforce_tauri_kernel_policy_for_project, gc_candidates, plan_kernel_command_input,
+        reject_draft, sync_project_for_test,
     };
 
     #[test]
@@ -300,7 +306,7 @@ mod tests {
             },
         )
         .expect("draft");
-        skilllet::add_skilllet(
+        memory_card::add_memory_card(
             project.path(),
             "project:use-axios",
             "Use Axios",
@@ -309,8 +315,8 @@ mod tests {
             "project",
             vec!["codex".to_string()],
         )
-        .expect("skilllet");
-        skilllet::add_skilllet(
+        .expect("memory_card");
+        memory_card::add_memory_card(
             home.path(),
             "global:prefer-bun",
             "Prefer Bun",
@@ -319,7 +325,7 @@ mod tests {
             "global",
             vec!["codex".to_string()],
         )
-        .expect("global skilllet");
+        .expect("global memory_card");
         let transcript = project.path().join("session.jsonl");
         std::fs::write(
             &transcript,
@@ -343,9 +349,9 @@ mod tests {
         );
         assert_eq!(dashboard.candidate_count, 1);
         assert_eq!(dashboard.draft_count, 1);
-        assert_eq!(dashboard.skilllet_count, 1);
+        assert_eq!(dashboard.memory_card_count, 1);
         assert_eq!(dashboard.observation_count, 1);
-        assert_eq!(dashboard.global_skilllet_count, 1);
+        assert_eq!(dashboard.global_memory_card_count, 1);
         assert_eq!(dashboard.enabled_agents, vec!["claude-code", "codex"]);
         assert_eq!(dashboard.warning_count, 0);
 
@@ -353,10 +359,10 @@ mod tests {
         assert_eq!(inbox.project_path, dashboard.project_path);
         assert_eq!(inbox.drafts.len(), 1);
 
-        let library = app_service::load_project_skilllet_library(project.path(), home.path())
+        let library = app_service::load_project_memory_card_library(project.path(), home.path())
             .expect("library");
-        assert_eq!(library.skilllets.len(), 1);
-        assert_eq!(library.global_skilllets.len(), 1);
+        assert_eq!(library.memory_cards.len(), 1);
+        assert_eq!(library.global_memory_cards.len(), 1);
 
         let assignment =
             app_service::load_project_assignment_view(project.path()).expect("assignment");
@@ -585,20 +591,20 @@ mod tests {
     }
 
     #[test]
-    fn task_store_can_describe_replayable_skilllet_fusion_jobs() {
+    fn task_store_can_describe_replayable_memory_card_fusion_jobs() {
         let home = tempfile::tempdir().expect("home");
         let store = DesktopTaskStore::with_job_history(home.path());
 
         let job_id = store.begin_job(
-            "融合Skilllet",
+            "融合 Memory Card",
             "创建融合草稿",
-            "正在准备可重试的 Skilllet 融合任务",
+            "正在准备可重试的 Memory Card 融合任务",
             15,
         );
         store.attach_replay(
             &job_id,
             DesktopJobReplay {
-                command: "fuse_skilllets_to_draft".to_string(),
+                command: "fuse_memory_cards_to_draft".to_string(),
                 args: serde_json::json!({
                     "projectPath": "C:/repo/demo",
                     "input": {
@@ -614,8 +620,8 @@ mod tests {
 
         let job = store.recent_jobs().first().cloned().expect("job history");
         let replay = job.replay.expect("replay payload");
-        assert_eq!(job.key, "融合Skilllet");
-        assert_eq!(replay.command, "fuse_skilllets_to_draft");
+        assert_eq!(job.key, "融合 Memory Card");
+        assert_eq!(replay.command, "fuse_memory_cards_to_draft");
         assert_eq!(replay.args["input"]["sources"][1], "project:ui-polish");
     }
 
@@ -726,8 +732,8 @@ mod tests {
         assert!(err.contains("approve-draft"));
         assert_eq!(draft::load_drafts(temp.path()).expect("drafts").len(), 1);
         assert_eq!(
-            skilllet::load_skilllets(temp.path())
-                .expect("skilllets")
+            memory_card::load_memory_cards(temp.path())
+                .expect("memory_cards")
                 .len(),
             0
         );
@@ -771,7 +777,7 @@ mod tests {
 
         assert!(err.contains("decision token is required"));
         assert_eq!(draft::load_drafts(temp.path()).expect("drafts").len(), 1);
-        assert_eq!(skilllet::load_skilllets(temp.path()).expect("skilllets").len(), 0);
+        assert_eq!(memory_card::load_memory_cards(temp.path()).expect("memory_cards").len(), 0);
         let audit = agent_kernel::kernel::load_audit_entries(temp.path()).expect("audit");
         assert_eq!(audit.len(), 1);
         assert_eq!(
@@ -849,7 +855,7 @@ mod tests {
 
         assert_eq!(ack.project_path, fsutil::path_to_slash(temp.path()));
         assert_eq!(draft::load_drafts(temp.path()).expect("drafts").len(), 0);
-        assert_eq!(skilllet::load_skilllets(temp.path()).expect("skilllets").len(), 1);
+        assert_eq!(memory_card::load_memory_cards(temp.path()).expect("memory_cards").len(), 1);
         let audit = agent_kernel::kernel::load_audit_entries(temp.path()).expect("audit");
         assert_eq!(audit.len(), 1);
         assert_eq!(audit[0].command, "approve-draft");

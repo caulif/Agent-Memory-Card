@@ -1,4 +1,4 @@
-use crate::candidate::{self, EvidenceSpan};
+﻿use crate::candidate::{self, EvidenceSpan};
 use crate::textutil;
 
 use super::{Candidate, chunk, classify, scoring, signals};
@@ -50,7 +50,7 @@ pub(super) fn principle_candidates(sentence: &str) -> Vec<Candidate> {
         candidates.push(Candidate {
             title: title_from_body(&body),
             body: body.clone(),
-            kind: "principle".to_string(),
+            kind: "procedure".to_string(),
             scope: "global".to_string(),
             memory_tier: crate::candidate::MemoryTier::CrossProjectPrinciple,
             abstraction_of: None,
@@ -311,7 +311,7 @@ pub(super) fn looks_like_rule(sentence: &str) -> bool {
     markers.iter().any(|marker| lower.contains(marker))
 }
 
-pub(super) fn looks_like_skilllet_signal(sentence: &str) -> bool {
+pub(super) fn looks_like_memory_card_signal(sentence: &str) -> bool {
     let lower = sentence.to_lowercase();
     if signals::is_low_value_task_sentence(&lower) {
         return false;
@@ -347,7 +347,7 @@ pub(super) fn looks_like_skilllet_signal(sentence: &str) -> bool {
     let domain_markers = [
         "agent",
         "skill",
-        "skilllet",
+        "memory_card",
         "claude",
         "codex",
         "cursor",
@@ -424,7 +424,7 @@ fn looks_like_high_value_prompt_signal(sentence: &str) -> bool {
         "claude",
         "codex",
         "agent",
-        "skilllet",
+        "memory_card",
         "skill",
         "ui",
         "组件",
@@ -535,9 +535,9 @@ fn normalize_methodology_body(sentence: &str) -> String {
 
     if (lower.contains("不要固定") || lower.contains("固定规则词") || lower.contains("规则词"))
         && (lower.contains("always") || lower.contains("prefer") || lower.contains("必须"))
-        && (lower.contains("高价值") || lower.contains("prompt") || lower.contains("skilllet"))
+        && (lower.contains("高价值") || lower.contains("prompt") || lower.contains("memory_card"))
     {
-        return "提炼高价值 Skilllet 时不要只依赖固定规则词，要识别真实高价值表达。".to_string();
+        return "提炼高价值 MemoryCard 时不要只依赖固定规则词，要识别真实高价值表达。".to_string();
     }
     if lower.contains("你对用户视角") && lower.contains("体验") && lower.contains("核心功能")
     {

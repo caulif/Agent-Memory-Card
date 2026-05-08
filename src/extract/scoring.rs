@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+﻿use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -209,7 +209,7 @@ fn specificity_score(text: &str) -> f32 {
         "Claude Code",
         "Codex",
         "Draft",
-        "Skilllet",
+        "MemoryCard",
         "cargo",
         "Rust",
         "Bun",
@@ -229,12 +229,27 @@ fn specificity_score(text: &str) -> f32 {
         "用户体验",
         "体验",
         "真实历史",
+        "真实工作流",
         "回归",
         "小改快测",
         "规划",
         "提问",
         "澄清目标",
         "审阅边界",
+        "长期规则",
+        "长期记忆",
+        "通用方法论",
+        "高价值候选",
+        "稳定偏好",
+        "复用原则",
+        "候选质量",
+        "作用域分层",
+        "未来决策",
+        "响应性",
+        "自我修正",
+        "gold set",
+        "tier mix",
+        "assistant synthesis",
         "cross-project",
         "core functionality",
         "user perspective",

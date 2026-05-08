@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+﻿use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::candidate::MemoryTier;
@@ -48,6 +48,32 @@ pub(super) fn refine_candidates(
         .map(|candidate| refine_deterministic(candidate, &mut messages))
         .collect::<Vec<_>>();
     (refined, messages)
+}
+
+pub(super) fn refine_candidates_with_llm_required(
+    project_root: &Path,
+    candidates: &[Candidate],
+) -> (Vec<Option<Candidate>>, Vec<String>) {
+    if candidates.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+
+    match refine_with_provider(project_root, candidates) {
+        Ok(Some(refined)) => (refined, Vec::new()),
+        Ok(None) => (
+            vec![None; candidates.len()],
+            vec![
+                "LLM final rewrite failed: refine provider unavailable; suppressing unrefined candidates."
+                    .to_string(),
+            ],
+        ),
+        Err(error) => (
+            vec![None; candidates.len()],
+            vec![format!(
+                "LLM final rewrite failed: {error}; suppressing unrefined candidates."
+            )],
+        ),
+    }
 }
 
 fn refine_with_provider(
@@ -135,7 +161,7 @@ fn build_refine_prompt(candidates: &[Candidate]) -> ProviderRequest {
     ProviderRequest {
         system_prompt: r#"你是 Agent 长期记忆的最终质检与改写器。
 
-目标：把已经筛选出的候选转写成高质量 agent memory/skilllet，或剔除低质量候选。
+目标：把已经筛选出的候选转写成高质量 agent memory/memory_card，或剔除低质量候选。
 
 高质量 memory 必须包含：
 - When：什么场景触发
@@ -145,10 +171,14 @@ fn build_refine_prompt(candidates: &[Candidate]) -> ProviderRequest {
 规则：
 - 如果候选只是一次性任务、半截句、内部 ID、列表标题或无长期价值，decision=reject
 - 如果候选有长期价值，decision=keep，并把 body 改写成“当……时，……；目标是……”这类可执行规则
+- body 必须是最终可审阅 MemoryCard 格式：当/When <触发场景>，<agent 动作>；目标/边界是 <原因、限制或人工确认点>
+- 不要只复述事实；必须写成未来 agent 能执行的规则
 - 不要保留 project:/global: 这类候选 ID 前缀
-- 涉及 Skilllet、候选规则固化、review/merge 边界的治理规则，默认 memory_tier=project_rule，除非证据明确说适用于所有项目
+- 涉及 MemoryCard、候选规则固化、review/merge 边界的治理规则，默认 memory_tier=project_rule，除非证据明确说适用于所有项目
 - 不要编造原文没有支持的工具、路径、数字 SLA
 - 中文原文默认输出中文
+- assistant synthesis 相关内容必须保留“先确认用户接受/真实历史证据/人工审阅边界”
+- 明显一次性边界如“这次只读”“不要写文件”“只改 CSS”必须 reject
 - 只返回 JSON"#
             .to_string(),
         user_prompt: serde_json::json!({ "candidates": items }).to_string(),
@@ -174,7 +204,7 @@ fn refine_schema() -> ProviderJsonSchema {
                             "decision": { "type": "string", "enum": ["keep", "reject"] },
                             "title": { "type": ["string", "null"] },
                             "body": { "type": ["string", "null"] },
-                            "kind": { "type": ["string", "null"], "enum": ["preference", "constraint", "procedure", "correction", "decision", "supplement", "principle", null] },
+                            "kind": { "type": ["string", "null"], "enum": ["preference", "constraint", "procedure", "correction", "decision", "supplement", null] },
                             "memory_tier": { "type": ["string", "null"], "enum": ["project_rule", "cross_project_principle", "collaboration_preference", null] },
                             "confidence": { "type": ["number", "null"] },
                             "reason": { "type": "string" }
@@ -196,7 +226,7 @@ fn refine_deterministic(candidate: &Candidate, messages: &mut Vec<String>) -> Op
     let body = if lower.contains("候选质量") && (lower.contains("数量") || lower.contains("候选"))
     {
         tier = MemoryTier::CrossProjectPrinciple;
-        kind = "principle".to_string();
+        kind = "procedure".to_string();
         "当生成、筛选或展示候选记忆时，只保留高置信度且可执行的少量候选；目标是让候选质量优先于数量。"
             .to_string()
     } else if lower.contains("do not return more than 3")
@@ -224,7 +254,7 @@ fn refine_deterministic(candidate: &Candidate, messages: &mut Vec<String>) -> Op
     } else if lower.contains("审阅边界") || lower.contains("review") {
         tier = MemoryTier::ProjectRule;
         kind = "constraint".to_string();
-        "当候选规则、Skilllet 或关键变更准备固化时，先交给人类 review 再 merge；Agent 只提出建议，不越过人工审阅边界。"
+        "当候选规则、MemoryCard 或关键变更准备固化时，先交给人类 review 再 merge；Agent 只提出建议，不越过人工审阅边界。"
             .to_string()
     } else if lower.contains("小改快测") || lower.contains("大改重测") {
         tier = MemoryTier::CollaborationPreference;
@@ -243,7 +273,7 @@ fn refine_deterministic(candidate: &Candidate, messages: &mut Vec<String>) -> Op
     } else if (lower.contains("核心功能") && lower.contains("体验")) || lower.contains("用户视角")
     {
         tier = MemoryTier::CrossProjectPrinciple;
-        kind = "principle".to_string();
+        kind = "procedure".to_string();
         "当规划或评估开发工作时，先确保核心功能链路和用户体验稳定；再考虑周边功能。".to_string()
     } else if lower.contains("卡顿") || lower.contains("流畅") || lower.contains("响应") {
         tier = MemoryTier::ProjectRule;
@@ -291,7 +321,7 @@ fn refine_deterministic(candidate: &Candidate, messages: &mut Vec<String>) -> Op
 
 fn refined_min_confidence(body: &str) -> f32 {
     let lower = body.to_lowercase();
-    if lower.contains("skilllet")
+    if lower.contains("memory_card")
         && (lower.contains("review") || lower.contains("merge"))
         && lower.contains("审阅边界")
     {
@@ -327,12 +357,6 @@ fn memory_tier_from_str(value: &str) -> Option<MemoryTier> {
 fn is_known_kind(kind: &str) -> bool {
     matches!(
         kind,
-        "preference"
-            | "constraint"
-            | "procedure"
-            | "correction"
-            | "decision"
-            | "supplement"
-            | "principle"
+        "preference" | "constraint" | "procedure" | "correction" | "decision" | "supplement"
     )
 }

@@ -1,4 +1,4 @@
-use super::ExtractionAction;
+﻿use super::ExtractionAction;
 
 impl ExtractionAction {
     pub fn new_candidate() -> Self {
@@ -31,7 +31,7 @@ impl ExtractionAction {
             record_id: Some(record_id),
             similarity: Some(similarity),
             reason: Some(
-                "Similar durable knowledge already exists; review as a merge instead of creating another Skilllet."
+                "Similar durable knowledge already exists; review as a merge instead of creating another Memory Card."
                     .to_string(),
             ),
             rationale: Some(rationale_for_route(route)),
@@ -65,17 +65,17 @@ fn compile_enabled_for_route(route: &str) -> bool {
 fn rationale_for_route(route: &str) -> String {
     match route {
         "always_on_rule" => {
-            "Compile this Skilllet into AGENTS.md / CLAUDE.md after review.".to_string()
+            "Compile this Memory Card into AGENTS.md / CLAUDE.md after review.".to_string()
         }
         "workflow_skill" => {
-            "Keep this Skilllet as a workflow Skill draft for a SKILL.md target.".to_string()
+            "Keep this Memory Card as a workflow Skill draft for a SKILL.md target.".to_string()
         }
         "skill_supplement" => {
-            "Attach this Skilllet as supplemental guidance to an existing Skill.".to_string()
+            "Attach this Memory Card as supplemental guidance to an existing Skill.".to_string()
         }
         "review_only" => {
-            "Keep this Skilllet in review/library only; do not compile by default.".to_string()
+            "Keep this Memory Card in review/library only; do not compile by default.".to_string()
         }
-        _ => "Keep this Skilllet in review/library only; do not compile by default.".to_string(),
+        _ => "Keep this Memory Card in review/library only; do not compile by default.".to_string(),
     }
 }

@@ -2,7 +2,7 @@
 name = "agent-kernel-desktop"
 version = "0.1.0"
 edition = "2024"
-description = "Agent-Kernel Tauri desktop shell"
+description = "Agent Memory Kernel Tauri desktop shell"
 license = "MIT"
 
 [lib]

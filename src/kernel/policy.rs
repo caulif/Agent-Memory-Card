@@ -75,7 +75,10 @@ pub enum KernelCommand {
     UpdateDraft {
         id: String,
     },
-    UpdateSkilllet {
+    UpdateMemoryCard {
+        id: String,
+    },
+    DeleteMemoryCard {
         id: String,
     },
     ApproveDraft {
@@ -97,25 +100,28 @@ pub enum KernelCommand {
     MergeDrafts {
         ids: Vec<String>,
     },
-    MergeSkilllets {
+    MergeMemoryCards {
         ids: Vec<String>,
     },
-    FuseSkilllets {
+    FuseMemoryCards {
         ids: Vec<String>,
         engine: String,
     },
-    AssignSkilllet {
+    AssignMemoryCard {
         id: String,
         targets: Vec<String>,
+    },
+    ClearMemoryCardTargets {
+        agent: Option<String>,
     },
     SetAgentEnabled {
         agent: String,
         enabled: bool,
     },
-    PromoteSkillletToGlobal {
+    PromoteMemoryCardToGlobal {
         id: String,
     },
-    InstallGlobalSkilllet {
+    InstallGlobalMemoryCard {
         id: String,
         targets: Vec<String>,
     },
@@ -123,8 +129,9 @@ pub enum KernelCommand {
         id: String,
         targets: Vec<String>,
     },
-    AttachSkillletToSkill {
-        skilllet_id: String,
+    ConfigureProvider,
+    AttachMemoryCardToSkill {
+        memory_card_id: String,
         skill_id: String,
     },
     EvolveProject {
@@ -135,6 +142,7 @@ pub enum KernelCommand {
     CompileProject {
         dry_run: bool,
     },
+    ClearProjectHistory,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -305,21 +313,24 @@ pub fn command_risk(command: &KernelCommand) -> KernelRisk {
         KernelCommand::AddProject { .. } => KernelRisk::Low,
         KernelCommand::ImportProject { .. } => KernelRisk::Medium,
         KernelCommand::UpdateDraft { .. } => KernelRisk::Medium,
-        KernelCommand::UpdateSkilllet { .. } => KernelRisk::Medium,
+        KernelCommand::UpdateMemoryCard { .. } => KernelRisk::Medium,
+        KernelCommand::DeleteMemoryCard { .. } => KernelRisk::Medium,
         KernelCommand::RejectDraft { .. } => KernelRisk::Medium,
         KernelCommand::PromoteCandidate { .. } => KernelRisk::Medium,
         KernelCommand::HideCandidate { .. } => KernelRisk::Low,
         KernelCommand::RejectCandidate { .. } => KernelRisk::Low,
         KernelCommand::GcCandidates => KernelRisk::Low,
         KernelCommand::MergeDrafts { .. } => KernelRisk::Medium,
-        KernelCommand::AssignSkilllet { .. } => KernelRisk::Low,
+        KernelCommand::AssignMemoryCard { .. } => KernelRisk::Low,
+        KernelCommand::ClearMemoryCardTargets { .. } => KernelRisk::Low,
         KernelCommand::SetAgentEnabled { .. } => KernelRisk::Low,
-        KernelCommand::InstallGlobalSkilllet { .. } => KernelRisk::Medium,
+        KernelCommand::InstallGlobalMemoryCard { .. } => KernelRisk::Medium,
         KernelCommand::InstallCatalogPackage { .. } => KernelRisk::Medium,
-        KernelCommand::AttachSkillletToSkill { .. } => KernelRisk::Medium,
-        KernelCommand::PromoteSkillletToGlobal { .. } => KernelRisk::Medium,
-        KernelCommand::MergeSkilllets { .. } => KernelRisk::Medium,
-        KernelCommand::FuseSkilllets { .. } => KernelRisk::Medium,
+        KernelCommand::ConfigureProvider => KernelRisk::Medium,
+        KernelCommand::AttachMemoryCardToSkill { .. } => KernelRisk::Medium,
+        KernelCommand::PromoteMemoryCardToGlobal { .. } => KernelRisk::Medium,
+        KernelCommand::MergeMemoryCards { .. } => KernelRisk::Medium,
+        KernelCommand::FuseMemoryCards { .. } => KernelRisk::Medium,
         KernelCommand::ApproveDraft { .. } => KernelRisk::High,
         KernelCommand::EvolveProject { dry_run, .. } => {
             if *dry_run {
@@ -336,6 +347,7 @@ pub fn command_risk(command: &KernelCommand) -> KernelRisk {
                 KernelRisk::High
             }
         }
+        KernelCommand::ClearProjectHistory => KernelRisk::High,
     }
 }
 
@@ -354,7 +366,8 @@ fn command_label(command: &KernelCommand) -> String {
         KernelCommand::AddProject { .. } => "add-project",
         KernelCommand::ImportProject { .. } => "import-project",
         KernelCommand::UpdateDraft { .. } => "update-draft",
-        KernelCommand::UpdateSkilllet { .. } => "update-skilllet",
+        KernelCommand::UpdateMemoryCard { .. } => "update-memory-card",
+        KernelCommand::DeleteMemoryCard { .. } => "delete-memory-card",
         KernelCommand::ApproveDraft { .. } => "approve-draft",
         KernelCommand::RejectDraft { .. } => "reject-draft",
         KernelCommand::PromoteCandidate { .. } => "promote-candidate",
@@ -362,17 +375,20 @@ fn command_label(command: &KernelCommand) -> String {
         KernelCommand::RejectCandidate { .. } => "reject-candidate",
         KernelCommand::GcCandidates => "gc-candidates",
         KernelCommand::MergeDrafts { .. } => "merge-drafts",
-        KernelCommand::MergeSkilllets { .. } => "merge-skilllets",
-        KernelCommand::FuseSkilllets { .. } => "fuse-skilllets",
-        KernelCommand::AssignSkilllet { .. } => "assign-skilllet",
+        KernelCommand::MergeMemoryCards { .. } => "merge-memory-cards",
+        KernelCommand::FuseMemoryCards { .. } => "fuse-memory-cards",
+        KernelCommand::AssignMemoryCard { .. } => "assign-memory-card",
+        KernelCommand::ClearMemoryCardTargets { .. } => "clear-memory-card-targets",
         KernelCommand::SetAgentEnabled { .. } => "set-agent-enabled",
-        KernelCommand::PromoteSkillletToGlobal { .. } => "promote-skilllet-to-global",
-        KernelCommand::InstallGlobalSkilllet { .. } => "install-global-skilllet",
+        KernelCommand::PromoteMemoryCardToGlobal { .. } => "promote-memory-card-to-global",
+        KernelCommand::InstallGlobalMemoryCard { .. } => "install-global-memory-card",
         KernelCommand::InstallCatalogPackage { .. } => "install-catalog-package",
-        KernelCommand::AttachSkillletToSkill { .. } => "attach-skilllet-to-skill",
+        KernelCommand::ConfigureProvider => "configure-provider",
+        KernelCommand::AttachMemoryCardToSkill { .. } => "attach-memory-card-to-skill",
         KernelCommand::EvolveProject { .. } => "evolve-project",
         KernelCommand::ImportArtifactDrifts => "import-artifact-drifts",
         KernelCommand::CompileProject { .. } => "compile-project",
+        KernelCommand::ClearProjectHistory => "clear-project-history",
     }
     .to_string()
 }
@@ -418,7 +434,7 @@ mod tests {
     #[test]
     fn guarded_auto_allows_low_risk_assignment_without_review() {
         let policy = KernelPolicy::guarded_auto();
-        let command = KernelCommand::AssignSkilllet {
+        let command = KernelCommand::AssignMemoryCard {
             id: "project:prefer-bun".to_string(),
             targets: vec!["codex".to_string()],
         };
@@ -431,16 +447,16 @@ mod tests {
     }
 
     #[test]
-    fn guarded_auto_executes_assign_skilllet() {
+    fn guarded_auto_executes_assign_memory_card() {
         let policy = KernelPolicy::guarded_auto();
-        let command = KernelCommand::AssignSkilllet {
+        let command = KernelCommand::AssignMemoryCard {
             id: "project:prefer-bun".to_string(),
             targets: vec!["codex".to_string()],
         };
 
         let decision = enforce_command(&command, &policy).expect("assignment should execute");
 
-        assert_eq!(decision.command, "assign-skilllet");
+        assert_eq!(decision.command, "assign-memory-card");
         assert_eq!(decision.disposition, KernelDisposition::Execute);
         assert_eq!(decision.risk, KernelRisk::Low);
     }
@@ -459,15 +475,15 @@ mod tests {
     }
 
     #[test]
-    fn update_skilllet_is_medium_risk_mutation() {
+    fn update_memory_card_is_medium_risk_mutation() {
         let policy = KernelPolicy::manual();
-        let command = KernelCommand::UpdateSkilllet {
+        let command = KernelCommand::UpdateMemoryCard {
             id: "project:editable".to_string(),
         };
 
         let decision = plan_command(&command, &policy);
 
-        assert_eq!(decision.command, "update-skilllet");
+        assert_eq!(decision.command, "update-memory-card");
         assert_eq!(decision.risk, KernelRisk::Medium);
         assert_eq!(decision.disposition, KernelDisposition::ReviewRequired);
     }

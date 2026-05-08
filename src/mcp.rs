@@ -4,7 +4,7 @@ use std::path::Path;
 use anyhow::{Context, Result, anyhow};
 use serde_json::{Value, json};
 
-use crate::{build, draft, fsutil};
+use crate::{build, draft, fsutil, kernel, memory_card};
 
 const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
 
@@ -96,28 +96,71 @@ fn handle_message(project_root: &Path, request: &Value) -> Result<Option<Value>>
                 {
                     "name": "list_drafts",
                     "description": "List the current project's draft inbox items.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {}
-                    }
+                    "inputSchema": { "type": "object", "properties": {} }
+                },
+                {
+                    "name": "list_memory_cards",
+                    "description": "List the current project's Memory Cards.",
+                    "inputSchema": { "type": "object", "properties": {} }
                 },
                 {
                     "name": "approve_draft",
-                    "description": "Approve one draft inbox item into a skilllet.",
+                    "description": "Approve one draft inbox item into a Memory Card.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "id": {
-                                "type": "string",
-                                "description": "Draft id to approve."
-                            }
+                            "id": { "type": "string", "description": "Draft id to approve." }
                         },
                         "required": ["id"]
                     }
                 },
                 {
+                    "name": "update_memory_card",
+                    "description": "Update editable fields on one Memory Card.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "string" },
+                            "title": { "type": "string" },
+                            "body": { "type": "string" },
+                            "brief": { "type": "string" },
+                            "tags": { "type": "array", "items": { "type": "string" } },
+                            "language": { "type": "string" },
+                            "kind": { "type": "string" },
+                            "scope": { "type": "string" }
+                        },
+                        "required": ["id"]
+                    }
+                },
+                {
+                    "name": "assign_memory_card",
+                    "description": "Assign one Memory Card to explicit Agent targets.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "string" },
+                            "targets": { "type": "array", "items": { "type": "string" } }
+                        },
+                        "required": ["id", "targets"]
+                    }
+                },
+                {
+                    "name": "merge_memory_cards",
+                    "description": "Merge multiple source Memory Cards into a new Memory Card.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "string" },
+                            "title": { "type": "string" },
+                            "sources": { "type": "array", "items": { "type": "string" } },
+                            "targets": { "type": "array", "items": { "type": "string" } }
+                        },
+                        "required": ["id", "title", "sources"]
+                    }
+                },
+                {
                     "name": "build_artifacts",
-                    "description": "Build or preview Agent-Kernel artifacts for the current project.",
+                    "description": "Build or preview Agent Memory Kernel artifacts for the current project.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -127,6 +170,11 @@ fn handle_message(project_root: &Path, request: &Value) -> Result<Option<Value>>
                             }
                         }
                     }
+                },
+                {
+                    "name": "sync_project",
+                    "description": "Compile Agent Memory Kernel artifacts for the current project.",
+                    "inputSchema": { "type": "object", "properties": {} }
                 }
             ]
         })),
@@ -173,10 +221,75 @@ fn handle_tool_call(project_root: &Path, params: &Value) -> Result<Value> {
                 .get("id")
                 .and_then(Value::as_str)
                 .ok_or_else(|| anyhow!("approve_draft requires string argument `id`"))?;
+            audit_mcp_mutation(
+                project_root,
+                kernel::KernelCommand::ApproveDraft { id: id.to_string() },
+            )?;
             draft::approve_draft(project_root, id)?;
             Ok(tool_result(
-                format!("Approved draft `{id}`."),
+                format!("Approved draft `{id}` into a Memory Card."),
                 json!({ "approved": id }),
+            ))
+        }
+        "list_memory_cards" => {
+            let memory_cards = memory_card::load_memory_cards(project_root)?;
+            Ok(tool_result(
+                format!("Loaded {} Memory Card(s).", memory_cards.len()),
+                json!({ "memory_cards": memory_cards }),
+            ))
+        }
+        "update_memory_card" => {
+            let id = required_str(&arguments, "id", "update_memory_card")?;
+            let update = memory_card::MemoryCardUpdate {
+                title: optional_str(&arguments, "title"),
+                body: optional_str(&arguments, "body"),
+                brief: optional_str(&arguments, "brief"),
+                tags: optional_string_array(&arguments, "tags")?,
+                language: optional_str(&arguments, "language"),
+                kind: optional_str(&arguments, "kind"),
+                scope: optional_str(&arguments, "scope"),
+            };
+            audit_mcp_mutation(
+                project_root,
+                kernel::KernelCommand::UpdateMemoryCard { id: id.to_string() },
+            )?;
+            let updated = memory_card::update_memory_card(project_root, id, update)?;
+            Ok(tool_result(
+                format!("Updated Memory Card `{id}`."),
+                json!({ "memory_card": updated }),
+            ))
+        }
+        "assign_memory_card" => {
+            let id = required_str(&arguments, "id", "assign_memory_card")?;
+            let targets = required_string_array(&arguments, "targets", "assign_memory_card")?;
+            audit_mcp_mutation(
+                project_root,
+                kernel::KernelCommand::AssignMemoryCard {
+                    id: id.to_string(),
+                    targets: targets.clone(),
+                },
+            )?;
+            memory_card::set_memory_card_targets(project_root, id, targets)?;
+            Ok(tool_result(
+                format!("Assigned Memory Card `{id}`."),
+                json!({ "assigned": id }),
+            ))
+        }
+        "merge_memory_cards" => {
+            let id = required_str(&arguments, "id", "merge_memory_cards")?;
+            let title = required_str(&arguments, "title", "merge_memory_cards")?;
+            let sources = required_string_array(&arguments, "sources", "merge_memory_cards")?;
+            let targets = optional_string_array(&arguments, "targets")?.unwrap_or_default();
+            audit_mcp_mutation(
+                project_root,
+                kernel::KernelCommand::MergeMemoryCards {
+                    ids: sources.clone(),
+                },
+            )?;
+            memory_card::merge_memory_cards(project_root, id, title, sources, targets)?;
+            Ok(tool_result(
+                format!("Merged Memory Card `{id}`."),
+                json!({ "merged": id }),
             ))
         }
         "build_artifacts" => {
@@ -193,8 +306,68 @@ fn handle_tool_call(project_root: &Path, params: &Value) -> Result<Value> {
                 }),
             ))
         }
+        "sync_project" => {
+            audit_mcp_mutation(
+                project_root,
+                kernel::KernelCommand::CompileProject { dry_run: false },
+            )?;
+            let report = build::sync_project(project_root)?;
+            Ok(tool_result(
+                report.render(),
+                json!({ "report": report.render() }),
+            ))
+        }
         _ => Err(anyhow!("unknown tool `{tool_name}`")),
     }
+}
+
+fn audit_mcp_mutation(project_root: &Path, command: kernel::KernelCommand) -> Result<()> {
+    let policy = kernel::KernelPolicy::agent_managed();
+    let decision = kernel::enforce_command(&command, &policy)?;
+    let entry = kernel::KernelAuditEntry::from_decision(
+        "mcp",
+        &decision,
+        policy.mode,
+        kernel::KernelAuditStatus::Authorized,
+    );
+    kernel::append_audit_entry(project_root, &entry)?;
+    Ok(())
+}
+
+fn required_str<'a>(arguments: &'a Value, key: &str, tool: &str) -> Result<&'a str> {
+    arguments
+        .get(key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("{tool} requires string argument `{key}`"))
+}
+
+fn optional_str(arguments: &Value, key: &str) -> Option<String> {
+    arguments
+        .get(key)
+        .and_then(Value::as_str)
+        .map(ToString::to_string)
+}
+
+fn required_string_array(arguments: &Value, key: &str, tool: &str) -> Result<Vec<String>> {
+    optional_string_array(arguments, key)?
+        .ok_or_else(|| anyhow!("{tool} requires array argument `{key}`"))
+}
+
+fn optional_string_array(arguments: &Value, key: &str) -> Result<Option<Vec<String>>> {
+    let Some(value) = arguments.get(key) else {
+        return Ok(None);
+    };
+    let Some(array) = value.as_array() else {
+        return Err(anyhow!("argument `{key}` must be an array"));
+    };
+    let mut out = Vec::new();
+    for item in array {
+        let Some(text) = item.as_str() else {
+            return Err(anyhow!("argument `{key}` must contain only strings"));
+        };
+        out.push(text.to_string());
+    }
+    Ok(Some(out))
 }
 
 fn tool_result(text: String, structured: Value) -> Value {
@@ -283,7 +456,10 @@ mod tests {
             .filter_map(|tool| tool.get("name").and_then(Value::as_str))
             .collect::<Vec<_>>();
         assert!(names.contains(&"list_drafts"));
+        assert!(names.contains(&"list_memory_cards"));
         assert!(names.contains(&"approve_draft"));
+        assert!(names.contains(&"assign_memory_card"));
+        assert!(names.contains(&"sync_project"));
         assert!(names.contains(&"build_artifacts"));
     }
 
@@ -332,7 +508,7 @@ mod tests {
         assert!(
             temp.path()
                 .join(".agent-kernel")
-                .join("skilllets")
+                .join("memory-cards")
                 .join("project")
                 .join("test.yml")
                 .exists()

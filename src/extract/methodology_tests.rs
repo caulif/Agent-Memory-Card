@@ -1,4 +1,4 @@
-use super::*;
+﻿use super::*;
 
 #[test]
 fn high_value_extraction_normalizes_methodology_drafts_into_actionable_rules() {
@@ -133,11 +133,11 @@ project:不该记的内容直接过滤掉就行了-不要展示为啥不改记",
     .expect("extract");
 
     assert!(
-        report.candidates.iter().any(|candidate| {
-            candidate.body.contains("当生成、筛选或展示候选记忆时")
-                && candidate.body.contains("候选质量优先于数量")
+        report.candidates.iter().all(|candidate| {
+            !candidate.body.contains("当生成、筛选或展示候选记忆时")
+                && !candidate.body.contains("候选质量优先于数量")
         }),
-        "candidate-quality rule should be condition-action memory: {:?}",
+        "candidate-quality pipeline meta should be filtered: {:?}",
         report.candidates
     );
     assert!(
@@ -152,11 +152,11 @@ project:不该记的内容直接过滤掉就行了-不要展示为啥不改记",
         report.candidates.iter().any(|candidate| {
             candidate
                 .body
-                .contains("候选规则、Skilllet 或关键变更准备固化")
+                .contains("候选规则、MemoryCard 或关键变更准备固化")
                 && candidate.memory_tier == crate::candidate::MemoryTier::ProjectRule
                 && candidate.scope == "project"
         }),
-        "Skilllet review/merge boundary should remain project-scoped: {:?}",
+        "MemoryCard review/merge boundary should remain project-scoped: {:?}",
         report.candidates
     );
     assert!(
@@ -179,11 +179,11 @@ project:不该记的内容直接过滤掉就行了-不要展示为啥不改记",
         report.candidates
     );
     assert!(
-        report.candidates.iter().any(|candidate| {
-            candidate.body.contains("无长期价值或低质量")
-                && candidate.body.contains("只让用户审阅真正值得固化的记忆")
+        report.candidates.iter().all(|candidate| {
+            !candidate.body.contains("无长期价值或低质量")
+                && !candidate.body.contains("只让用户审阅真正值得固化的记忆")
         }),
-        "low-quality filtering guidance should be rewritten as memory: {:?}",
+        "low-quality filtering pipeline meta should be filtered: {:?}",
         report.candidates
     );
     assert!(

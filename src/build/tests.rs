@@ -57,11 +57,11 @@ fn status_distinguishes_source_updated_and_target_drifted() {
 }
 
 #[test]
-fn render_instructions_includes_targeted_skilllets() {
-    let mut skilllets = BTreeMap::new();
-    skilllets.insert(
+fn render_instructions_includes_targeted_memory_cards() {
+    let mut memory_cards = BTreeMap::new();
+    memory_cards.insert(
         "project:use-axios".to_string(),
-        SkillletRecord {
+        MemoryCardRecord {
             schema_version: 1,
             id: "project:use-axios".to_string(),
             title: "Use Axios".to_string(),
@@ -82,23 +82,23 @@ fn render_instructions_includes_targeted_skilllets() {
             updated_at: "now".to_string(),
         },
     );
-    let refs = vec![config::SkillletRef {
+    let refs = vec![config::MemoryCardRef {
         id: "project:use-axios".to_string(),
         targets: vec!["codex".to_string()],
         scope: Some("project".to_string()),
     }];
 
-    let codex = render_instructions("codex", &[], &refs, &skilllets);
-    let claude = render_instructions("claude-code", &[], &refs, &skilllets);
+    let codex = render_instructions("codex", &[], &refs, &memory_cards);
+    let claude = render_instructions("claude-code", &[], &refs, &memory_cards);
 
     assert!(codex.contains("Use Axios for frontend requests."));
     assert!(!claude.contains("Use Axios for frontend requests."));
 }
 
 #[test]
-fn sync_project_applies_skilllet_agent_targets_to_generated_artifacts() {
+fn sync_project_applies_memory_card_agent_targets_to_generated_artifacts() {
     let temp = tempfile::tempdir().expect("tempdir");
-    skilllet::add_skilllet(
+    memory_card::add_memory_card(
         temp.path(),
         "project:use-axios",
         "Use Axios",
@@ -107,7 +107,7 @@ fn sync_project_applies_skilllet_agent_targets_to_generated_artifacts() {
         "project",
         vec!["codex".to_string()],
     )
-    .expect("add skilllet");
+    .expect("add memory_card");
 
     sync_project(temp.path()).expect("sync codex target");
     let codex = fs::read_to_string(temp.path().join("AGENTS.md")).expect("codex instructions");
@@ -115,12 +115,12 @@ fn sync_project_applies_skilllet_agent_targets_to_generated_artifacts() {
     assert!(codex.contains("Use Axios for frontend HTTP requests."));
     assert!(!claude.contains("Use Axios for frontend HTTP requests."));
 
-    skilllet::set_skilllet_targets(
+    memory_card::set_memory_card_targets(
         temp.path(),
         "project:use-axios",
         vec!["claude-code".to_string()],
     )
-    .expect("retarget skilllet");
+    .expect("retarget memory_card");
     sync_project(temp.path()).expect("sync claude target");
 
     let codex = fs::read_to_string(temp.path().join("AGENTS.md")).expect("codex instructions");
@@ -130,11 +130,11 @@ fn sync_project_applies_skilllet_agent_targets_to_generated_artifacts() {
 }
 
 #[test]
-fn render_instructions_only_includes_compile_enabled_always_on_skilllets() {
-    let mut skilllets = BTreeMap::new();
-    skilllets.insert(
+fn render_instructions_only_includes_compile_enabled_always_on_memory_cards() {
+    let mut memory_cards = BTreeMap::new();
+    memory_cards.insert(
         "project:always-on".to_string(),
-        test_skilllet_with_artifact_kind(
+        test_memory_card_with_artifact_kind(
             "project:always-on",
             "Always On",
             "Use Axios for frontend HTTP requests.",
@@ -142,9 +142,9 @@ fn render_instructions_only_includes_compile_enabled_always_on_skilllets() {
             true,
         ),
     );
-    skilllets.insert(
+    memory_cards.insert(
         "project:workflow".to_string(),
-        test_skilllet_with_artifact_kind(
+        test_memory_card_with_artifact_kind(
             "project:workflow",
             "Workflow",
             "Create a SKILL.md draft for UI handoff prompts.",
@@ -152,9 +152,9 @@ fn render_instructions_only_includes_compile_enabled_always_on_skilllets() {
             false,
         ),
     );
-    skilllets.insert(
+    memory_cards.insert(
         "project:review-only".to_string(),
-        test_skilllet_with_artifact_kind(
+        test_memory_card_with_artifact_kind(
             "project:review-only",
             "Review Only",
             "Review AI project improvements before compiling them.",
@@ -163,24 +163,24 @@ fn render_instructions_only_includes_compile_enabled_always_on_skilllets() {
         ),
     );
     let refs = vec![
-        config::SkillletRef {
+        config::MemoryCardRef {
             id: "project:always-on".to_string(),
             targets: vec!["codex".to_string()],
             scope: Some("project".to_string()),
         },
-        config::SkillletRef {
+        config::MemoryCardRef {
             id: "project:workflow".to_string(),
             targets: vec!["codex".to_string()],
             scope: Some("project".to_string()),
         },
-        config::SkillletRef {
+        config::MemoryCardRef {
             id: "project:review-only".to_string(),
             targets: vec!["codex".to_string()],
             scope: Some("project".to_string()),
         },
     ];
 
-    let codex = render_instructions("codex", &[], &refs, &skilllets);
+    let codex = render_instructions("codex", &[], &refs, &memory_cards);
 
     assert!(codex.contains("Use Axios for frontend HTTP requests."));
     assert!(!codex.contains("Create a SKILL.md draft"));
@@ -188,9 +188,9 @@ fn render_instructions_only_includes_compile_enabled_always_on_skilllets() {
 }
 
 #[test]
-fn build_compiles_procedure_skilllets_as_agent_skills() {
+fn build_compiles_procedure_memory_cards_as_agent_skills() {
     let temp = tempfile::tempdir().expect("tempdir");
-    skilllet::add_skilllet(
+    memory_card::add_memory_card(
         temp.path(),
         "project:frontend-workflow",
         "Frontend Workflow",
@@ -199,7 +199,7 @@ fn build_compiles_procedure_skilllets_as_agent_skills() {
         "project",
         vec!["claude-code".to_string()],
     )
-    .expect("add skilllet");
+    .expect("add memory_card");
 
     sync_project(temp.path()).expect("sync");
 
@@ -230,9 +230,51 @@ fn build_compiles_procedure_skilllets_as_agent_skills() {
 }
 
 #[test]
-fn build_compiles_hook_skilllets_into_claude_settings_local() {
+fn build_generates_agent_kernel_memory_card_skill_for_agent_operations() {
     let temp = tempfile::tempdir().expect("tempdir");
-    skilllet::add_skilllet(
+    memory_card::add_memory_card(
+        temp.path(),
+        "project:review-boundary",
+        "Review Boundary",
+        "Approve durable rules into Memory Cards through Agent Memory Kernel.",
+        "procedure",
+        "project",
+        vec!["codex".to_string()],
+    )
+    .expect("add memory_card");
+
+    sync_project(temp.path()).expect("sync");
+
+    let skill = fs::read_to_string(
+        temp.path()
+            .join(".agents")
+            .join("skills")
+            .join("agent-kernel-memory-card")
+            .join("SKILL.md"),
+    )
+    .expect("generated Memory Card skill");
+    let reference = fs::read_to_string(
+        temp.path()
+            .join(".agents")
+            .join("skills")
+            .join("agent-kernel-memory-card")
+            .join("references")
+            .join("memory-cards.md"),
+    )
+    .expect("generated Memory Card reference");
+
+    assert!(skill.contains("name: agent-kernel-memory-card"));
+    assert!(skill.contains("list_memory_cards"));
+    assert!(skill.contains("agent-kernel memory-card"));
+    assert!(skill.contains("agent-managed"));
+    assert!(reference.contains("Generated from `.agent-kernel/memory-cards`"));
+    assert!(reference.contains("project:review-boundary"));
+}
+
+#[test]
+fn build_compiles_hook_memory_cards_into_claude_settings_local() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    memory_card::add_memory_card(
         temp.path(),
         "project:run-clippy-before-session-end",
         "Run Clippy Before Session End",
@@ -241,16 +283,16 @@ fn build_compiles_hook_skilllets_into_claude_settings_local() {
         "project",
         vec!["claude-code".to_string()],
     )
-    .expect("add skilllet");
+    .expect("add memory_card");
 
     let path = temp
         .path()
         .join(".agent-kernel")
-        .join("skilllets")
+        .join("memory-cards")
         .join("project")
         .join("run-clippy-before-session-end.yml");
-    let text = fs::read_to_string(&path).expect("skilllet yaml");
-    let mut record: SkillletRecord = serde_yaml::from_str(&text).expect("parse skilllet yaml");
+    let text = fs::read_to_string(&path).expect("memory_card yaml");
+    let mut record: MemoryCardRecord = serde_yaml::from_str(&text).expect("parse memory_card yaml");
     record.activation = "hook".to_string();
     record.tags = vec![
         "hook:event:session-end".to_string(),
@@ -259,9 +301,9 @@ fn build_compiles_hook_skilllets_into_claude_settings_local() {
     ];
     fs::write(
         &path,
-        serde_yaml::to_string(&record).expect("serialize skilllet"),
+        serde_yaml::to_string(&record).expect("serialize memory_card"),
     )
-    .expect("rewrite skilllet yaml");
+    .expect("rewrite memory_card yaml");
 
     sync_project(temp.path()).expect("sync");
 
@@ -273,14 +315,14 @@ fn build_compiles_hook_skilllets_into_claude_settings_local() {
     assert!(!settings.contains("AGENTS.md"));
 }
 
-fn test_skilllet_with_artifact_kind(
+fn test_memory_card_with_artifact_kind(
     id: &str,
     title: &str,
     body: &str,
     artifact_kind: &str,
     compile_enabled: bool,
-) -> SkillletRecord {
-    SkillletRecord {
+) -> MemoryCardRecord {
+    MemoryCardRecord {
         schema_version: 1,
         id: id.to_string(),
         title: title.to_string(),
@@ -305,6 +347,7 @@ fn test_skilllet_with_artifact_kind(
                 hardness: "low".to_string(),
                 control: "default".to_string(),
                 rationale: "test".to_string(),
+                placement_reason: "test placement".to_string(),
                 tags: Vec::new(),
             }),
             suggested_action: Some(crate::candidate::ExtractionAction {
@@ -331,7 +374,7 @@ fn test_skilllet_with_artifact_kind(
 fn build_preview_warns_when_instruction_artifact_exceeds_budget() {
     let temp = tempfile::tempdir().expect("tempdir");
     let oversized_body = "Keep this instruction.\n".repeat(1800);
-    skilllet::add_skilllet(
+    memory_card::add_memory_card(
         temp.path(),
         "project:large-context",
         "Large Context",
@@ -340,7 +383,7 @@ fn build_preview_warns_when_instruction_artifact_exceeds_budget() {
         "project",
         vec!["codex".to_string()],
     )
-    .expect("add skilllet");
+    .expect("add memory_card");
 
     let report = build_project(temp.path(), true).expect("build preview");
     let rendered = report.render();
@@ -349,7 +392,7 @@ fn build_preview_warns_when_instruction_artifact_exceeds_budget() {
 }
 
 #[test]
-fn build_writes_custom_rules_artifact_from_targeted_skilllet() {
+fn build_writes_custom_rules_artifact_from_targeted_memory_card() {
     let temp = tempfile::tempdir().expect("tempdir");
     let mut project = config::default_project_config(temp.path());
     project.agents.insert(
@@ -365,7 +408,7 @@ fn build_writes_custom_rules_artifact_from_targeted_skilllet() {
     );
     config::save_project_config(temp.path(), &project).expect("save project");
 
-    skilllet::add_skilllet(
+    memory_card::add_memory_card(
         temp.path(),
         "project:custom-rule",
         "Custom Rule",
@@ -374,7 +417,7 @@ fn build_writes_custom_rules_artifact_from_targeted_skilllet() {
         "project",
         vec!["custom-agent".to_string()],
     )
-    .expect("add skilllet");
+    .expect("add memory_card");
 
     build_project(temp.path(), false).expect("build");
 
@@ -384,14 +427,14 @@ fn build_writes_custom_rules_artifact_from_targeted_skilllet() {
         .join("rules")
         .join("agent-kernel.md");
     let text = fs::read_to_string(rule_path).expect("custom rule");
-    assert!(text.contains("# Agent Kernel Rules"));
+    assert!(text.contains("# Agent Memory Kernel Rules"));
     assert!(text.contains("Use strict TypeScript in custom-agent edits."));
 }
 
 #[test]
 fn status_reports_generated_artifact_drift() {
     let temp = tempfile::tempdir().expect("tempdir");
-    skilllet::add_skilllet(
+    memory_card::add_memory_card(
         temp.path(),
         "project:codex-rule",
         "Codex Rule",
@@ -400,7 +443,7 @@ fn status_reports_generated_artifact_drift() {
         "project",
         vec!["codex".to_string()],
     )
-    .expect("add skilllet");
+    .expect("add memory_card");
 
     sync_project(temp.path()).expect("sync");
     let synced = status_project(temp.path()).expect("status");
@@ -425,7 +468,7 @@ fn status_reports_generated_artifact_drift() {
 #[test]
 fn sync_project_blocks_generated_artifact_drift_before_overwrite() {
     let temp = tempfile::tempdir().expect("tempdir");
-    skilllet::add_skilllet(
+    memory_card::add_memory_card(
         temp.path(),
         "project:codex-rule",
         "Codex Rule",
@@ -434,7 +477,7 @@ fn sync_project_blocks_generated_artifact_drift_before_overwrite() {
         "project",
         vec!["codex".to_string()],
     )
-    .expect("add skilllet");
+    .expect("add memory_card");
 
     sync_project(temp.path()).expect("initial sync");
     let path = temp.path().join("AGENTS.md");
@@ -450,7 +493,7 @@ fn sync_project_blocks_generated_artifact_drift_before_overwrite() {
 #[test]
 fn import_artifact_drifts_creates_reviewable_draft_from_manual_edit() {
     let temp = tempfile::tempdir().expect("tempdir");
-    skilllet::add_skilllet(
+    memory_card::add_memory_card(
         temp.path(),
         "project:codex-rule",
         "Codex Rule",
@@ -459,7 +502,7 @@ fn import_artifact_drifts_creates_reviewable_draft_from_manual_edit() {
         "project",
         vec!["codex".to_string()],
     )
-    .expect("add skilllet");
+    .expect("add memory_card");
     sync_project(temp.path()).expect("sync");
     let path = temp.path().join("AGENTS.md");
     let mut text = fs::read_to_string(&path).expect("read agents");
@@ -477,10 +520,17 @@ fn import_artifact_drifts_creates_reviewable_draft_from_manual_edit() {
             .body
             .contains("Always use Vitest for frontend unit tests.")
     );
+    assert_eq!(
+        status_project(temp.path())
+            .expect("status")
+            .artifact_drift_count(),
+        0
+    );
+    sync_project(temp.path()).expect("sync after importing drift");
 }
 
 #[test]
-fn mirrored_skill_includes_attached_skilllet_supplement() {
+fn mirrored_skill_includes_attached_memory_card_supplement() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
     let source = root.join("source-skill");
@@ -493,7 +543,7 @@ fn mirrored_skill_includes_attached_skilllet_supplement() {
             skills: vec![SkillRecord {
                 id: "local:demo".to_string(),
                 name: "demo".to_string(),
-                description: "Use when testing skilllet supplements".to_string(),
+                description: "Use when testing memory_card supplements".to_string(),
                 source_path: fsutil::path_to_slash(&source),
                 source_kind: "referenced".to_string(),
                 source_hash: fsutil::sha256_dir(&source).expect("source hash"),
@@ -503,7 +553,7 @@ fn mirrored_skill_includes_attached_skilllet_supplement() {
     )
     .expect("save index");
     config::add_mirror(root, "local:demo", "codex").expect("mirror");
-    skilllet::add_skilllet(
+    memory_card::add_memory_card(
         root,
         "project:extra-context",
         "Extra Context",
@@ -512,7 +562,7 @@ fn mirrored_skill_includes_attached_skilllet_supplement() {
         "project",
         vec!["codex".to_string()],
     )
-    .expect("add skilllet");
+    .expect("add memory_card");
     config::add_skill_supplement(root, "local:demo", "project:extra-context")
         .expect("attach supplement");
 
@@ -522,7 +572,7 @@ fn mirrored_skill_includes_attached_skilllet_supplement() {
         root.join(".agents")
             .join("skills")
             .join("demo")
-            .join("AGENT_KERNEL_SKILLLETS.md"),
+            .join("AGENT_KERNEL_MEMORY_CARDS.md"),
     )
     .expect("supplement");
     assert!(supplement.contains("Extra Context"));

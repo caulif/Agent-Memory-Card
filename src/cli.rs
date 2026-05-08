@@ -14,7 +14,7 @@ pub(crate) struct Cli {
 
 #[derive(Subcommand)]
 pub(crate) enum Commands {
-    /// Discover and manage local projects known to Agent-Kernel.
+    /// Discover and manage local projects known to Agent Memory Kernel.
     Project {
         #[command(subcommand)]
         command: ProjectCommands,
@@ -86,10 +86,10 @@ pub(crate) enum Commands {
         project: PathBuf,
     },
 
-    /// Manage lightweight project Skilllets.
-    Skilllet {
+    /// Manage lightweight project Memory Cards.
+    MemoryCard {
         #[command(subcommand)]
-        command: SkillletCommands,
+        command: MemoryCardCommands,
     },
 
     /// Manage configured Agent targets.
@@ -98,7 +98,7 @@ pub(crate) enum Commands {
         command: AgentCommands,
     },
 
-    /// Manage local Draft Inbox items before they become Skilllets.
+    /// Manage local Draft Inbox items before they become Memory Cards.
     Draft {
         #[command(subcommand)]
         command: DraftCommands,
@@ -137,7 +137,7 @@ pub(crate) enum Commands {
         command: PreferenceCommands,
     },
 
-    /// Import and inspect raw observations before Skilllet synthesis.
+    /// Import and inspect raw observations before Memory Card synthesis.
     Observe {
         #[command(subcommand)]
         command: ObserveCommands,
@@ -149,7 +149,7 @@ pub(crate) enum Commands {
         command: ProviderCommands,
     },
 
-    /// Install or remove optional Agent-Kernel hooks for Claude Code.
+    /// Install or remove optional Agent Memory Kernel hooks for Claude Code.
     Hooks {
         #[command(subcommand)]
         command: HookCommands,
@@ -168,7 +168,7 @@ pub(crate) enum Commands {
         project: PathBuf,
     },
 
-    /// Manage local Skilllet catalog packages.
+    /// Manage local Memory Card catalog packages.
     Catalog {
         #[command(subcommand)]
         command: CatalogCommands,
@@ -181,7 +181,7 @@ pub(crate) enum Commands {
         project: PathBuf,
     },
 
-    /// Serve a minimal MCP stdio endpoint for Agent-Kernel workflows.
+    /// Serve a minimal MCP stdio endpoint for Agent Memory Kernel workflows.
     Mcp {
         /// Project root.
         #[arg(long, default_value = ".")]
@@ -220,14 +220,14 @@ pub(crate) enum ProjectCommands {
         #[arg(long, default_value_t = 5)]
         max_depth: usize,
 
-        /// Home directory used for the global Agent-Kernel registry.
+        /// Home directory used for the global Agent Memory Kernel registry.
         #[arg(long)]
         home: Option<PathBuf>,
     },
 
     /// List registered local projects.
     List {
-        /// Home directory used for the global Agent-Kernel registry.
+        /// Home directory used for the global Agent Memory Kernel registry.
         #[arg(long)]
         home: Option<PathBuf>,
     },
@@ -238,15 +238,15 @@ pub(crate) enum ProjectCommands {
         #[arg(long)]
         path: PathBuf,
 
-        /// Home directory used for the global Agent-Kernel registry.
+        /// Home directory used for the global Agent Memory Kernel registry.
         #[arg(long)]
         home: Option<PathBuf>,
     },
 }
 
 #[derive(Subcommand)]
-pub(crate) enum SkillletCommands {
-    /// Add an owned project Skilllet and include it in project.yml.
+pub(crate) enum MemoryCardCommands {
+    /// Add an owned project Memory Card and include it in project.yml.
     Add {
         /// Stable id, such as project:use-axios.
         #[arg(long)]
@@ -256,7 +256,7 @@ pub(crate) enum SkillletCommands {
         #[arg(long)]
         title: String,
 
-        /// Skilllet body text.
+        /// Memory Card body text.
         #[arg(long)]
         body: String,
 
@@ -277,16 +277,16 @@ pub(crate) enum SkillletCommands {
         project: PathBuf,
     },
 
-    /// List owned project Skilllets.
+    /// List owned project Memory Cards.
     List {
         /// Project root.
         #[arg(long, default_value = ".")]
         project: PathBuf,
     },
 
-    /// Assign an owned Skilllet to one or more Agent targets.
+    /// Assign an owned Memory Card to one or more Agent targets.
     Targets {
-        /// Skilllet id, such as project:use-axios.
+        /// Memory Card id, such as project:use-axios.
         #[arg(long)]
         id: String,
 
@@ -299,9 +299,9 @@ pub(crate) enum SkillletCommands {
         project: PathBuf,
     },
 
-    /// Merge multiple Skilllets into a new Skilllet.
+    /// Merge multiple Memory Cards into a new Memory Card.
     Merge {
-        /// New merged Skilllet id.
+        /// New merged Memory Card id.
         #[arg(long)]
         id: String,
 
@@ -309,7 +309,7 @@ pub(crate) enum SkillletCommands {
         #[arg(long)]
         title: String,
 
-        /// Source Skilllet id. Repeat for multiple sources.
+        /// Source Memory Card id. Repeat for multiple sources.
         #[arg(long = "source")]
         sources: Vec<String>,
 
@@ -322,9 +322,9 @@ pub(crate) enum SkillletCommands {
         project: PathBuf,
     },
 
-    /// Attach a Skilllet as a generated supplement to a mirrored Skill.
+    /// Attach a Memory Card as a generated supplement to a mirrored Skill.
     AttachSkill {
-        /// Skilllet id.
+        /// Memory Card id.
         #[arg(long)]
         id: String,
 
@@ -337,7 +337,7 @@ pub(crate) enum SkillletCommands {
         project: PathBuf,
     },
 
-    /// Show a Skilllet by Agent target matrix.
+    /// Show a Memory Card by Agent target matrix.
     Matrix {
         /// Project root.
         #[arg(long, default_value = ".")]
@@ -430,7 +430,7 @@ pub(crate) enum DraftCommands {
         project: PathBuf,
     },
 
-    /// Approve a Draft Inbox item into an owned Skilllet.
+    /// Approve a Draft Inbox item into an owned Memory Card.
     Approve {
         #[arg(long)]
         id: String,
@@ -613,7 +613,7 @@ pub(crate) enum HookCommands {
         project: PathBuf,
     },
 
-    /// Remove Agent-Kernel handlers from project-local Claude Code hooks.
+    /// Remove Agent Memory Kernel handlers from project-local Claude Code hooks.
     Uninstall {
         /// Project root.
         #[arg(long, default_value = ".")]
@@ -658,7 +658,7 @@ pub(crate) enum CatalogCommands {
         project: PathBuf,
     },
 
-    /// Install a catalog package as an owned Skilllet.
+    /// Install a catalog package as an owned Memory Card.
     Install {
         #[arg(long)]
         id: String,

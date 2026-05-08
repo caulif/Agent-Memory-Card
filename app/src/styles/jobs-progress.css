@@ -305,6 +305,12 @@
   box-shadow: 0 4px 12px rgba(63, 81, 72, 0.18);
 }
 
+.clear-history-action {
+  width: 100%;
+  justify-content: center;
+  margin: 2px 0 12px;
+}
+
 /* ===== 精确重试标记 ===== */
 .job-card-badges {
   display: flex;

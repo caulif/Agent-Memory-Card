@@ -1,11 +1,11 @@
-# Agent-Kernel / Memory-GC 构思文档
+# Agent Memory Kernel / Memory-GC 构思文档
 
 > 日期：2026-04-30  
-> 目标：把一个由 Rust 构建、通过 `bunx` 分发的引擎，设计成面向 Claude Code / Codex 的本地 Skilllet 进化、可视化治理和规则编译系统。
+> 目标：把一个由 Rust 构建、通过 `bunx` 分发的引擎，设计成面向 Claude Code / Codex 的本地 Memory Card 进化、可视化治理和规则编译系统。
 
 ## 0. 本轮增强后的关键结论
 
-这轮讨论后，Agent-Kernel 的定位应该再往前推一步：它不是“修补现有规则文件”的小工具，而是一个面向 Claude Code 和 Codex 的“本地 Skilllet 进化引擎”。
+这轮讨论后，Agent Memory Kernel 的定位应该再往前推一步：它不是“修补现有规则文件”的小工具，而是一个面向 Claude Code 和 Codex 的“本地 Memory Card 进化引擎”。
 
 ### 0.0 v1 可用版架构重置
 
@@ -14,9 +14,9 @@
 1. 选择本地 Claude Code / Codex 项目。
 2. 立即看到轻量项目 Dashboard，而不是等待完整 snapshot。
 3. 手动启动“整理历史与规则”，后台 Job 展示阶段、进度、日志和结果。
-4. 得到少量高价值 Draft Skilllets，默认只展示 Top 候选。
+4. 得到少量高价值 Draft Memory Cards，默认只展示 Top 候选。
 5. 用户编辑、合并、批准或拒绝 Draft。
-6. 将已批准 Skilllet 分配给 Claude Code / Codex。
+6. 将已批准 Memory Card 分配给 Claude Code / Codex。
 7. 编译生成 `CLAUDE.md` / `AGENTS.md` / skills artifacts，并运行本地验证。
 
 因此 v1 架构从“功能模块集合”调整为：
@@ -30,7 +30,7 @@ flowchart TD
   AppService --> Core["Rust Core Domain"]
   Core --> Observation["Observation Pipeline"]
   Core --> Synthesis["Candidate / Draft Synthesis"]
-  Core --> Skilllet["Skilllet Domain"]
+  Core --> Memory Card["Memory Card Domain"]
   Core --> Compiler["Compiler / Artifact Drift"]
   Core --> Policy["Policy / Audit"]
 ```
@@ -39,7 +39,7 @@ flowchart TD
 
 - UI 首屏只读轻量 Read Model，不能把完整 `ProjectSnapshot` 当成切项目主路径。
 - 扫描、整理历史、AI 精炼、同步编译都必须是后台 Job。
-- `Observation -> Candidate -> Draft -> Skilllet -> Assignment -> Artifact` 必须分层，不能把本地历史直接粗暴变成 Draft。
+- `Observation -> Candidate -> Draft -> Memory Card -> Assignment -> Artifact` 必须分层，不能把本地历史直接粗暴变成 Draft。
 - Catalog / App Store 降级为次要能力，先把 Review Inbox 和 Assignment Matrix 做可靠。
 - Canvas / 白板隐喻保留为后续可视化层，v1 默认界面以 Inbox、Library、Assignment Matrix 为主。
 
@@ -47,7 +47,7 @@ flowchart TD
 
 “零数据库”容易被误解为不允许索引和缓存。更准确的工程原则是：
 
-> Agent-Kernel 使用 file-native local store，并且不要求任何外部数据库、向量库或后台服务作为必需依赖。
+> Agent Memory Kernel 使用 file-native local store，并且不要求任何外部数据库、向量库或后台服务作为必需依赖。
 
 合理边界：
 
@@ -61,7 +61,7 @@ flowchart TD
 ```text
 ~/.agent-kernel/
   projects.yml
-  global-skilllets/
+  global-memory_cards/
   jobs/
   cache/
 
@@ -70,12 +70,12 @@ project/.agent-kernel/
   observations/
   candidates/
   drafts/
-  skilllets/
+  memory_cards/
   assignments.yml
   indexes/
     observation-index.yml
     draft-index.yml
-    skilllet-index.yml
+    memory_card-index.yml
   cache/
     dashboard.json
     search-index.json
@@ -88,17 +88,17 @@ project/.agent-kernel/
 - Rust 内核：核心解析、分类、diff、build、Rule CI、文件操作都用 Rust，保证速度、单二进制分发和工程可靠性；`bunx agent-kernel` 是优先的跨平台安装与启动入口。
 - 可视化优先：UI 不是后期锦上添花，而是建立信任的核心产品面。当前主入口从 egui 收敛到 Tauri 2 桌面架构：Rust 继续负责本地内核和文件系统能力，Web 前端负责现代交互和视觉表达；旧 egui app 仅保留为迁移期 fallback，旧 Web Canvas 保留为 legacy/dev 辅助入口。
 - Native App 第一屏：安装后优先展示本机可发现的项目列表，用户选择某个项目后再进入 Project-centered Canvas / Inspector / App Store / Draft Inbox。第一体验不是“打开某个仓库再配置”，而是“先看到我的本地 Agent 工作区地图”。
-- UI 双入口：Tauri 原生 app 第一屏是 Project Console + Canvas；同时提供 App Store/包管理器界面，用于浏览、安装、启用和更新 Skills/Skilllets。Web `ui` 命令后续只作为调试和兼容入口。
-- 编译产物思维：`CLAUDE.md`、`AGENTS.md` 默认视为 build artifacts，由 `~/.agent-kernel/skilllets` 和项目 `.agent-kernel/project.yml` 全量编译生成；Cursor 等其他 Agent 保留 adapter 扩展接口，MVP 不进入默认目标。
-- 首个入口：先从用户现有规则文件和 Skills 导入，后续再通过 MCP/session log 自动提炼对话中的 Draft Skilllets。
-- Skill 管理默认引用模式：第三方或已有 Skill 保持原位置，Agent-Kernel 建立索引、启用关系、导出关系和 overlay，不直接改源文件。
+- UI 双入口：Tauri 原生 app 第一屏是 Project Console + Canvas；同时提供 App Store/包管理器界面，用于浏览、安装、启用和更新 Skills/Memory Cards。Web `ui` 命令后续只作为调试和兼容入口。
+- 编译产物思维：`CLAUDE.md`、`AGENTS.md` 默认视为 build artifacts，由 `~/.agent-kernel/memory_cards` 和项目 `.agent-kernel/project.yml` 全量编译生成；Cursor 等其他 Agent 保留 adapter 扩展接口，MVP 不进入默认目标。
+- 首个入口：先从用户现有规则文件和 Skills 导入，后续再通过 MCP/session log 自动提炼对话中的 Draft Memory Cards。
+- Skill 管理默认引用模式：第三方或已有 Skill 保持原位置，Agent Memory Kernel 建立索引、启用关系、导出关系和 overlay，不直接改源文件。
 - Skill 分发默认 Mirror 模式：拖拽现有 Skill 到某个 Agent/项目时，不改源文件，而是复制/同步一份到目标 Agent 的 skills 目录，并记录 source path、hash 和同步状态。
-- 项目配置采用声明式：`.agent-kernel/project.yml` 只描述“当前项目希望启用哪些规则、Skilllets、Skills，以及它们分配给哪些 Agent”，build 负责生成具体产物。
+- 项目配置采用声明式：`.agent-kernel/project.yml` 只描述“当前项目希望启用哪些规则、Memory Cards、Skills，以及它们分配给哪些 Agent”，build 负责生成具体产物。
 - 对话提炼采用半自动 Draft Inbox：MCP/CLI/session log 主动发现值得沉淀的信息，但只生成草稿和推荐作用域，不自动启用。
 - 隐私策略采用 Hybrid：扫描、索引、Mirror、build、Rule CI 编排默认本地执行；LLM 提炼和冲突判断通过可选 provider 完成，用户可选择云端模型或本地模型。
 - v0.1 范围收紧：先不做半自动对话提炼，第一版只完成“扫描现有规则和 Skills -> Canvas 分配 -> Mirror/build preview”的闭环。
 - v0.2 范围：完善 Mirror 信任闭环，区分 source updated / target drifted，提供 CLI/UI sync。
-- v0.3 范围：落地 Owned Skilllet 存储、CLI add/list、声明式 project.yml include、按 Agent target 编译到指令文件。
+- v0.3 范围：落地 Owned Memory Card 存储、CLI add/list、声明式 project.yml include、按 Agent target 编译到指令文件。
 - v0.4 范围：落地本地 Draft Inbox，不接 LLM，先支持 CLI add/list/approve 和 UI 展示。
 - v0.5 范围：让 Draft Inbox 在 UI 中可操作，支持 approve/reject，并让 build preview 返回结构化 actions/warnings。
 - v0.6 范围：实现本地启发式 extract，从文本/文件中提取高信号规则为 Draft Inbox，不接 LLM、不自动启用。
@@ -112,64 +112,64 @@ project/.agent-kernel/
 - v0.14 范围：补齐发布/分发地基，Bun wrapper 优先加载预编译 Rust binary，本地开发 fallback 到 Cargo，并通过 tag workflow 打包跨平台 artifacts。
 - v0.15 范围：让 `review` 变成可脚本化审查协议，支持 JSON 输出和 Draft approve/reject 决策入口，为后续 `git add -p` 式交互 CLI 铺路。
 - v0.16 范围：把统一 review 协议接入 Canvas，提供 `/api/review` 和可视化 Review 摘要，让 CLI 与 UI 共用同一套审查数据模型。
-- v0.17 范围：实现本地 Skilllet Catalog / App Store 地基，支持内置 packages、`.agent-kernel/catalog.yml` 覆盖、CLI install，以及 Canvas App Store 安装入口。
+- v0.17 范围：实现本地 Memory Card Catalog / App Store 地基，支持内置 packages、`.agent-kernel/catalog.yml` 覆盖、CLI install，以及 Canvas App Store 安装入口。
 - v0.18 范围：增强 Catalog 安装状态反馈，CLI 和 Canvas 均显示 available/installed，避免 App Store 重复安装缺少信任提示。
 - v0.19 范围：为 Catalog package 增加 provenance 元数据（version/source_url/tags），让未来 Registry 和安全审查能基于来源、版本和类别做信任判断。
 - v0.20 范围：加入 Catalog 本地 trust gate，CLI/UI 均可验证 duplicate id、missing provenance、empty body、missing tags，安装前先建立信任反馈。
 - v0.21 范围：加入 instruction artifact 预算警告，默认 32 KiB，借鉴 Codex `project_doc_max_bytes` 约束，提前发现 prompt bloat。
 - v0.22 范围：探索通用 rules exporter，为未来 Cursor adapter 打接口地基；Cursor 不进入当前默认目标。
 - v0.23 范围：加入 Agent target 启停控制，CLI 与 Canvas 都能切换 Agent enabled 状态，降低手改声明式 YAML 的门槛。
-- v0.24 范围：加入 Skilllet target assignment，CLI/UI 都能把同一 Skilllet 分配给不同 Agent，强化 Project 层 multi-agent 配置体验。
-- v0.25 范围：加入 Skilllet target matrix，CLI/UI 都能总览 Skilllet × Agent 分配关系，为后续拖拽连线和批量操作打底。
+- v0.24 范围：加入 Memory Card target assignment，CLI/UI 都能把同一 Memory Card 分配给不同 Agent，强化 Project 层 multi-agent 配置体验。
+- v0.25 范围：加入 Memory Card target matrix，CLI/UI 都能总览 Memory Card × Agent 分配关系，为后续拖拽连线和批量操作打底。
 - v0.26 范围：探索 Cline-style 规则目录 exporter 与旧配置迁移；v0.30 后 Cline 从核心主线移除，作为后续插件式 adapter 备选。
-- v0.27 范围：将 Canvas Inspector 中的 Skilllet target matrix 从文字摘要升级为可点击矩阵表，让用户能直接按 Skilllet × Agent 维度分配能力。
+- v0.27 范围：将 Canvas Inspector 中的 Memory Card target matrix 从文字摘要升级为可点击矩阵表，让用户能直接按 Memory Card × Agent 维度分配能力。
 - v0.28 范围：加入 generated artifact drift 检测，基于 `project.lock.yml` 比对 `AGENTS.md`、`CLAUDE.md` 等编译产物是否被手改，为后续 Reverse Parse 生成 Draft 打基础。
 - v0.29 范围：实现 Reverse Parse 的本地第一版，`import --artifacts` 通过重新渲染期望产物并提取用户新增行，把手改的 build artifact 转成 Draft Inbox 候选。
 - v0.30 范围：重置 MVP 范围，默认只支持 Claude Code / Codex；Cursor 和 Cline 从默认配置与 Canvas 目标中移除，但保留通用 exporter/adapter 接口。
-- v0.31 范围：增强 Skilllet 操作能力，支持把一个或多个 Skilllet 分配到某个项目或 Agent，合并多个 Skilllet，并把 Skilllet 作为生成补充追加进已有 mirrored Skill。
-- v0.32 范围：启动 Observation Layer，支持把本地对话文件和 Claude Code / Codex 常见 JSONL session 目录导入 `.agent-kernel/observations`，先保存原始观察记录，后续再进行 Skilllet Synthesis。
-- v0.33 范围：打通本地进化闭环第一版，`observe synthesize` 将 Observation 转成 Draft Inbox 候选，Canvas 也可以从 Observations 一键生成待审阅 Draft，但不会自动启用 Skilllet。
+- v0.31 范围：增强 Memory Card 操作能力，支持把一个或多个 Memory Card 分配到某个项目或 Agent，合并多个 Memory Card，并把 Memory Card 作为生成补充追加进已有 mirrored Skill。
+- v0.32 范围：启动 Observation Layer，支持把本地对话文件和 Claude Code / Codex 常见 JSONL session 目录导入 `.agent-kernel/observations`，先保存原始观察记录，后续再进行 Memory Card Synthesis。
+- v0.33 范围：打通本地进化闭环第一版，`observe synthesize` 将 Observation 转成 Draft Inbox 候选，Canvas 也可以从 Observations 一键生成待审阅 Draft，但不会自动启用 Memory Card。
 - v0.34 范围：增加 `observe evolve`，一条命令完成本地 Claude Code / Codex 会话导入与 Draft 合成，仍保持“只进 Draft Inbox，不自动启用”的信任边界。
 - v0.35 范围：Observation 导入增加 ID 去重，同一会话重复导入会计入 skipped，避免每天重复 evolve 时制造虚假的新增数量。
 - v0.36 范围：将 JavaScript 包装层从 Node/npm 叙事切到 Bun，目录改为 `bun/`，本地脚本使用 `bun` / `bun test`，发布打包使用 `bun pm pack`。
 - v0.37 范围：本地提取器识别高置信 Bun 包管理偏好，把“从 npm/pnpm/yarn 改为 Bun”这类对话归一化为稳定 `project:prefer-bun` Draft，而不是生成口语化长标题。
 - v0.38 范围：本地提取器识别 Fetch -> Axios 这类高频 HTTP 客户端偏好纠正，归一化为稳定 `project:use-axios` Draft。
-- v0.39 范围：引入 Known Preference Registry，把 Bun、Axios、Vitest 等高置信偏好归一化改为表驱动，后续扩展更多 Skilllet 模板时只需增加条目。
+- v0.39 范围：引入 Known Preference Registry，把 Bun、Axios、Vitest 等高置信偏好归一化改为表驱动，后续扩展更多 Memory Card 模板时只需增加条目。
 - v0.40 范围：Observation Synthesis / Evolve 报告返回具体 Draft ID 列表，让本地进化过程能解释“生成了哪些候选”，而不是只显示数量。
 - v0.41 范围：Observation dry-run 报告也返回候选 Draft ID，让 UI / CLI 在真正写入 Draft Inbox 前就能展示“将会生成哪些候选”。
 - v0.42 范围：Known Preference Registry 支持项目级 `.agent-kernel/preference-registry.yml` 扩展，并且项目模板优先于内置模板，方便高级个人开发者覆盖默认偏好文案。
 - v0.43 范围：增加 `preference list`，列出 built-in / project 来源的偏好模板，让用户能审计当前自动进化词表。
 - v0.44 范围：增加 `preference init` / `preference validate`，让项目级偏好模板库可以初始化、校验，并在错误时以非零退出码接入脚本或 CI。
-- v0.45 范围：增加 `preference test --text` 命中解释器，并提供 `docs/quickstart.md`，让用户能完整体验 Preference Registry -> Draft Inbox -> Skilllet -> Agent artifact 的闭环。
+- v0.45 范围：增加 `preference test --text` 命中解释器，并提供 `docs/quickstart.md`，让用户能完整体验 Preference Registry -> Draft Inbox -> Memory Card -> Agent artifact 的闭环。
 - v0.46 范围：增加全局 Project Registry 与本地原生桌面入口。`project scan/list/add` 维护 `~/.agent-kernel/projects.yml`，`agent-kernel app` 启动 Rust/egui 编译程序，展示本地项目、项目状态，并提供 Claude Code / Codex 历史对话整理到 Draft Inbox 的一键入口。
 - v0.47 范围：将 Windows / macOS / Linux 支持变成工程约束。CI 在三大系统上跑 Rust 与 Bun wrapper 测试，release 输出 `win32-x64`、`linux-x64`、`darwin-x64`、`darwin-arm64` 四类预编译包，其他架构走 Cargo fallback。
 - v0.48 范围：让原生 app 成为真正的 Review Inbox。选中项目后直接展示 Draft Inbox，支持 approve / reject，并复用 CLI review 协议刷新摘要，继续坚持“自动提炼只进 Draft，不静默启用”的信任边界。
-- v0.49 范围：把 Skilllet Catalog / App Store 接入原生 app。选中项目后展示 Catalog Health、package provenance、安装状态，并支持把 catalog package 安装或分配给 Codex / Claude Code；重复分配时合并 targets，不覆盖已有 Agent 分配。
+- v0.49 范围：把 Memory Card Catalog / App Store 接入原生 app。选中项目后展示 Catalog Health、package provenance、安装状态，并支持把 catalog package 安装或分配给 Codex / Claude Code；重复分配时合并 targets，不覆盖已有 Agent 分配。
 - v0.50 范围：将桌面第一屏产品语义收敛为“智能体记忆整理台”。UI 明确说明它不是聊天记录摘要器，而是过滤一次性任务，只保留稳定偏好、硬约束、工作流、项目约定、反复纠正和可补充到 Skill 的能力片段。
 - v0.51 范围：项目发现读取 Claude Code / Codex 的本地历史索引。除了常规目录扫描，还解析 `~/.claude/history.jsonl`、`~/.claude/projects`、`~/.claude/sessions`、`~/.codex/history.jsonl`、`~/.codex/sessions` 中可发现的 `project` / `cwd`，让安装后更接近“看到我所有本地 Agent 项目”。
-- v0.52 范围：Observation 导入过滤 system/base instructions、本地命令回显、token 计数和 session metadata 噪声，避免把 agent 自身提示词或终端输出误判成用户 Skilllet。
-- v0.53 范围：Observation Synthesis 从逐条生成改为聚合式高价值提炼。默认最多生成 24 个候选，只保留命中 Known Preference Registry 或强 Skilllet 信号的内容，并在 UI 隐藏低置信度碎片，解决一千多个草稿无法审阅的问题。
+- v0.52 范围：Observation 导入过滤 system/base instructions、本地命令回显、token 计数和 session metadata 噪声，避免把 agent 自身提示词或终端输出误判成用户 Memory Card。
+- v0.53 范围：Observation Synthesis 从逐条生成改为聚合式高价值提炼。默认最多生成 24 个候选，只保留命中 Known Preference Registry 或强 Memory Card 信号的内容，并在 UI 隐藏低置信度碎片，解决一千多个草稿无法审阅的问题。
 - v0.54 范围：桌面提炼入口加入整理引擎选择，默认 Claude Code，保留 Codex 与本地过滤入口。Claude Code / Codex 通过非交互命令生成结构化 JSON 候选，失败或超时时回落到本地高价值过滤，避免 UI 卡死或因外部 CLI 不可用中断整理。
-- v0.55 范围：加入首次启动静默增量整理。Tauri 桌面端启动后在后台处理已发现 Claude Code / Codex 项目的本地会话，首次全量生成 Draft Skilllets，后续通过 `.agent-kernel/observation-index.yml` 记录 source path、hash、processed bytes，只读取新增或追加内容，避免同一批历史反复生成草稿。
+- v0.55 范围：加入首次启动静默增量整理。Tauri 桌面端启动后在后台处理已发现 Claude Code / Codex 项目的本地会话，首次全量生成 Draft Memory Cards，后续通过 `.agent-kernel/observation-index.yml` 记录 source path、hash、processed bytes，只读取新增或追加内容，避免同一批历史反复生成草稿。
 - v0.56 范围：修正会话归属。Observation 导入会读取 JSONL 中的 `cwd` / `project`，只把某个会话导入它所属的项目，避免“当前选中项目”吃进所有 Claude/Codex 历史导致记忆污染。
-- v0.57 范围：扩展“高价值”定义，不再只等同于长期偏好、硬约束、项目约定、流程和反复纠正。凡是对项目未来执行质量有明显改善的记录，例如 root cause、成功修复路径、架构决策、性能/卡顿处理、跨平台坑、测试策略、UI 可用性改进，也可以提炼成 Draft Skilllet。
-- v0.50 范围：把 Skilllet × Agent target matrix 接入原生 app。选中项目后可以直接点击矩阵单元格给 Codex / Claude Code 分配或取消分配 Skilllet；同时防止通过 UI 产生空 targets，因为当前声明式语义中空 targets 表示“所有启用 Agent”。
-- v0.51 范围：让 Draft Inbox 具备可解释性。自动提炼出来的 Draft 需要保存并展示 `confidence`、`matched_template`、`reason`，dry-run 与原生 app 都能说明“为什么建议固化这条 Skilllet”，把进化系统的信任边界从“可审批”推进到“可审计”。
+- v0.57 范围：扩展“高价值”定义，不再只等同于长期偏好、硬约束、项目约定、流程和反复纠正。凡是对项目未来执行质量有明显改善的记录，例如 root cause、成功修复路径、架构决策、性能/卡顿处理、跨平台坑、测试策略、UI 可用性改进，也可以提炼成 Draft Memory Card。
+- v0.50 范围：把 Memory Card × Agent target matrix 接入原生 app。选中项目后可以直接点击矩阵单元格给 Codex / Claude Code 分配或取消分配 Memory Card；同时防止通过 UI 产生空 targets，因为当前声明式语义中空 targets 表示“所有启用 Agent”。
+- v0.51 范围：让 Draft Inbox 具备可解释性。自动提炼出来的 Draft 需要保存并展示 `confidence`、`matched_template`、`reason`，dry-run 与原生 app 都能说明“为什么建议固化这条 Memory Card”，把进化系统的信任边界从“可审批”推进到“可审计”。
 - v0.52 范围：让 Draft Inbox 支持审批前编辑。CLI 提供 `draft update` 修改 title、body、kind、scope、targets，同时保留 evidence、confidence、matched_template、reason；原生 app 的 Draft 卡片提供 Edit / Save / Cancel，让用户能先修正候选，再决定 approve/reject。
 - v0.53 范围：让 Draft Inbox 支持保守合并。CLI 提供 `draft merge` 把两个或更多 Draft 合成一个新的 reviewable Draft；源 Draft 不删除、不批准，原生 app 支持勾选多个候选、预填目标 Agent 并创建合并候选。
-- v0.54 范围：将桌面 UI 从 egui 迁移到 Tauri 2。Rust 核心抽成 `agent-kernel` library 供 CLI 和 Tauri 后端共享；`src-tauri` 只暴露本地项目扫描、Draft 审批、Skilllet 分配、Catalog 安装、Observation evolve、build/sync 等命令；`app/` 使用 Bun + Vite + React 构建中文优先的现代桌面前端。
+- v0.54 范围：将桌面 UI 从 egui 迁移到 Tauri 2。Rust 核心抽成 `agent-kernel` library 供 CLI 和 Tauri 后端共享；`src-tauri` 只暴露本地项目扫描、Draft 审批、Memory Card 分配、Catalog 安装、Observation evolve、build/sync 等命令；`app/` 使用 Bun + Vite + React 构建中文优先的现代桌面前端。
 - v0.67 范围：后台 Job 记录持久化可重放 replay payload。扫描、历史整理和同步任务在创建时记录原始 Tauri command 与参数，Job Center 重试时直接调用后端保存的命令，不再根据中文任务名猜测项目路径、engine、targets 或 policy。
-- v0.68 范围：Skilllet 融合进入后台 Job。`fuse_skilllets_to_draft` 不再同步阻塞 UI，而是创建“融合Skilllet”任务、记录 replay payload、展示读取源 Skilllet / 写入融合草稿阶段，并在完成后自动刷新页面读模型。
-- v0.69 范围：Job Center 增加状态/类型筛选和精确重试标记。用户可以按运行中、失败、已完成、已取消，以及扫描、整理历史、同步、融合 Skilllet 快速定位任务；带 replay payload 的任务会显示“可重试”徽章。
+- v0.68 范围：Memory Card 融合进入后台 Job。`fuse_memory_cards_to_draft` 不再同步阻塞 UI，而是创建“融合Memory Card”任务、记录 replay payload、展示读取源 Memory Card / 写入融合草稿阶段，并在完成后自动刷新页面读模型。
+- v0.69 范围：Job Center 增加状态/类型筛选和精确重试标记。用户可以按运行中、失败、已完成、已取消，以及扫描、整理历史、同步、融合 Memory Card 快速定位任务；带 replay payload 的任务会显示“可重试”徽章。
 - 交互式 CLI：CLI 需要像 `git add -p` 一样逐块确认，而不是只给用户一份冷冰冰的 patch。
-- Skilllet Registry：长期看，skilllet 可以像 JavaScript registry 包一样安装、版本化和组合，形成社区规则生态。
+- Memory Card Registry：长期看，memory_card 可以像 JavaScript registry 包一样安装、版本化和组合，形成社区规则生态。
 - Rule CI：规则压缩和合并后要能跑测试，验证“使用压缩后规则的 Agent 是否仍会做出期望行为”。
 
 ### 0.1 当前 MVP 权威决策
 
 本阶段产品主线收束为：
 
-> Agent-Kernel 先只服务 Claude Code / Codex，但 Observation Layer 要能读取本地规则、生成产物、手动修改，以及所有可发现的本地对话记录，从中持续提炼 Skilllets，让个人开发环境越用越贴合自己。
+> Agent Memory Kernel 先只服务 Claude Code / Codex，但 Observation Layer 要能读取本地规则、生成产物、手动修改，以及所有可发现的本地对话记录，从中持续提炼 Memory Cards，让个人开发环境越用越贴合自己。
 
 当前目标 Agent：
 
@@ -193,21 +193,21 @@ project/.agent-kernel/
    - 后续扩展 Cursor / IDE / MCP / terminal history adapter
 
 2. Observation Store
-   - Observation 不直接变成 Skilllet。
+   - Observation 不直接变成 Memory Card。
    - 先保存为 observation record，字段包括 source、timestamp、agent、project、text span、evidence、privacy/redaction status、confidence。
-   - Observation 是证据层，Draft Skilllet 是建议层，Active Skilllet 是用户批准后的源代码。
+   - Observation 是证据层，Draft Memory Card 是建议层，Active Memory Card 是用户批准后的源代码。
 
-3. Skilllet Synthesis Layer
-   - 从 observations 中提炼候选 Skilllet。
+3. Memory Card Synthesis Layer
+   - 从 observations 中提炼候选 Memory Card。
    - 识别类型：`preference`、`constraint`、`procedure`、`convention`、`correction`、`anti-pattern`。
    - 自动判断 scope：`global`、`project`、`directory`、`agent-specific`。
    - 输出必须包含 confidence、reason、evidence、suggested targets。
 
 4. Evolution Layer
    - 负责去重、合并、冲突检测和版本演化。
-   - Skilllet 需要 lineage：来自哪几次 observation、被修改过几次、是否通过 Rule CI、被哪些 Agent 使用、最近是否仍然有效。
-   - Project Skilllet 如果反复出现，可建议 promotion 到 global preference。
-   - 长期未触发的 Skilllet 可进入 dormant candidate，但不能自动删除。
+   - Memory Card 需要 lineage：来自哪几次 observation、被修改过几次、是否通过 Rule CI、被哪些 Agent 使用、最近是否仍然有效。
+   - Project Memory Card 如果反复出现，可建议 promotion 到 global preference。
+   - 长期未触发的 Memory Card 可进入 dormant candidate，但不能自动删除。
 
 5. Review Layer
    - 所有自动生成内容先进 Draft Inbox。
@@ -220,30 +220,30 @@ project/.agent-kernel/
    - 检测 drift。
    - 支持 Reverse Parse 回流。
 
-### 0.3 Skilllet 操作模型
+### 0.3 Memory Card 操作模型
 
-用户必须能对 Skilllet 做这些操作：
+用户必须能对 Memory Card 做这些操作：
 
-- 将一个或多个 Skilllet 赋予给某个 Project。
-- 将一个或多个 Skilllet 赋予给某个 Agent，例如只给 Codex 或只给 Claude Code。
-- 合并多个 Skilllet，生成新的复合 Skilllet。
-- 把 Skilllet 加入现有 mirrored Skill，作为生成补充，不直接修改第三方 Skill 源文件。
+- 将一个或多个 Memory Card 赋予给某个 Project。
+- 将一个或多个 Memory Card 赋予给某个 Agent，例如只给 Codex 或只给 Claude Code。
+- 合并多个 Memory Card，生成新的复合 Memory Card。
+- 把 Memory Card 加入现有 mirrored Skill，作为生成补充，不直接修改第三方 Skill 源文件。
 - 后续在 UI 中用拖拽和矩阵完成这些操作，同时保留 CLI 等价命令。
 
 这些能力是 Project 层 multi-agent 配置的基础。即使当前 MVP 只支持 Claude Code / Codex，也要保持“同一项目中不同 Agent 获得不同能力”的模型。
 
 ### 0.4 进化体验设计
 
-Skilllet 进化可以轻微参考游戏里的“技能树”隐喻，但命名和交互要工程化，不能喧宾夺主。
+Memory Card 进化可以轻微参考游戏里的“技能树”隐喻，但命名和交互要工程化，不能喧宾夺主。
 
 建议 UI 元素：
 
-- Skilllet Tree：展示某条规则如何从多次 Observation 进化而来。
+- Memory Card Tree：展示某条规则如何从多次 Observation 进化而来。
 - Confidence / Stability：可信度和稳定度，不叫等级。
 - Evolution Timeline：来自哪次对话，何时批准，何时合并，何时编译给哪个 Agent。
-- Conflict Warning：冲突 Skilllet 用红色边连接。
-- Dormant / Active：长期没触发的 Skilllet 进入休眠候选。
-- Promotion Candidate：反复出现的 project Skilllet 可以建议提升为 global preference。
+- Conflict Warning：冲突 Memory Card 用红色边连接。
+- Dormant / Active：长期没触发的 Memory Card 进入休眠候选。
+- Promotion Candidate：反复出现的 project Memory Card 可以建议提升为 global preference。
 - Review Task：需要用户处理的候选、冲突或合并建议。
 
 命名原则：
@@ -255,7 +255,7 @@ Skilllet 进化可以轻微参考游戏里的“技能树”隐喻，但命名�
 
 ## 1. 一句话定位
 
-Agent-Kernel 是一个面向 Claude Code 和 Codex 的本地 Skilllet 进化引擎：它不试图替代 Agent runtime，而是专门治理它们依赖的文件化上下文，把散落在本地对话、规则文件、Skill 文件和项目文档里的有效信息抽取、去重、合并、冲突仲裁，并编译回对应 Agent 能直接消费的格式。
+Agent Memory Kernel 是一个面向 Claude Code 和 Codex 的本地 Memory Card 进化引擎：它不试图替代 Agent runtime，而是专门治理它们依赖的文件化上下文，把散落在本地对话、规则文件、Skill 文件和项目文档里的有效信息抽取、去重、合并、冲突仲裁，并编译回对应 Agent 能直接消费的格式。
 
 更短的产品表达：
 
@@ -276,7 +276,7 @@ Agent-Kernel 是一个面向 Claude Code 和 Codex 的本地 Skilllet 进化引�
 
 痛点是：文件化上下文越用越乱。规则被重复追加，旧偏好和新偏好冲突，项目级规则混进个人偏好，步骤型知识塞进常驻 Prompt，最后导致 Token 浪费和 Agent 行为不稳定。
 
-Agent-Kernel 的价值就是把“文件即记忆”从手工维护升级成半自动编译。
+Agent Memory Kernel 的价值就是把“文件即记忆”从手工维护升级成半自动编译。
 
 ## 3. 最新生态观察
 
@@ -297,7 +297,7 @@ Claude Code 已经把文件化记忆做得很完整：
 - Claude Code Skills 采用 Agent Skills 开放标准，Skill body 只有在被触发时才加载，避免常驻上下文膨胀。
 - Claude Code auto memory 的 `MEMORY.md` 只加载前 200 行或 25KB，说明“索引短、细节按需读”是官方认可的上下文治理方向。
 
-这直接支持你的想法：Agent-Kernel 应该帮助用户把“长期常驻规则”“按需 Skill”“自动记忆条目”拆清楚，而不是一股脑写进一个大文件。
+这直接支持你的想法：Agent Memory Kernel 应该帮助用户把“长期常驻规则”“按需 Skill”“自动记忆条目”拆清楚，而不是一股脑写进一个大文件。
 
 ### 3.2 OpenAI Codex
 
@@ -314,7 +314,7 @@ Codex 的文件化上下文也已经形成清晰结构：
 
 - Codex 已经天然适合“全局偏好 + 项目规则 + 子目录规则 + Skills”的分层模型。
 - `AGENTS.md` 的大小限制说明规则治理必须有预算意识。
-- symlink 支持很适合作为 Agent-Kernel 的跨项目注入机制。
+- symlink 支持很适合作为 Agent Memory Kernel 的跨项目注入机制。
 
 ### 3.3 Cursor（Future Adapter）
 
@@ -330,7 +330,7 @@ Cursor 当前规则系统已经从旧式 `.cursorrules` 迁移到 `.cursor/rules
 关键启发：
 
 - Cursor 已经具备“从对话生成规则”的入口，但缺少跨工具、跨项目的统一治理。
-- Agent-Kernel 可以把 Cursor Memories / Rules 纳入统一知识库，再导出成 Claude Skill、Codex Skill 或 AGENTS.md。
+- Agent Memory Kernel 可以把 Cursor Memories / Rules 纳入统一知识库，再导出成 Claude Skill、Codex Skill 或 AGENTS.md。
 - 但 Cursor 不进入当前 MVP 主路径。现阶段只保留 exporter/adapter 接口，等 Claude Code / Codex 的进化闭环足够稳定后再补 UI 与原生 `.cursor/rules` 导出。
 
 ### 3.4 Cline（Out Of Core）
@@ -341,13 +341,13 @@ Cline 的 Memory Bank 是一个结构化 Markdown 文档体系：
 - 通过 “initialize memory bank”“update memory bank”“follow your custom instructions” 等命令维护。
 - `/smol` 和 `/newtask` 用于压缩上下文或新任务交接。
 - 文档强调 Memory Bank 文件要短，详细信息应拆成按需读取的文档。
-- `.clinerules/` 目录适合作为项目级规则面，Agent-Kernel 应把自己的规则写成其中一个可审查的 build artifact，而不是独占整个 Cline 规则空间。
+- `.clinerules/` 目录适合作为项目级规则面，Agent Memory Kernel 应把自己的规则写成其中一个可审查的 build artifact，而不是独占整个 Cline 规则空间。
 
 关键启发：
 
 - Cline 证明“文档化记忆”对开发流程很有效。
 - 但它更像项目持续文档，不是规则冲突解决器。
-- Agent-Kernel 可以借鉴其文件结构，但 Cline 不进入当前产品主线。后续如果支持，应作为插件式 adapter，而不是默认 Agent、默认 Canvas 节点或核心叙事。
+- Agent Memory Kernel 可以借鉴其文件结构，但 Cline 不进入当前产品主线。后续如果支持，应作为插件式 adapter，而不是默认 Agent、默认 Canvas 节点或核心叙事。
 
 ### 3.5 Mem0 / Letta / LangGraph / Graphiti
 
@@ -362,7 +362,7 @@ Cline 的 Memory Bank 是一个结构化 Markdown 文档体系：
 
 - 这些方案解决的是“Agent 应用如何持久化和检索大量动态记忆”。
 - 你的项目解决的是“开发者已有规则文件和 Skill 文件如何保持干净、短小、一致、可迁移”。
-- 这不是替代关系，而是互补关系。Agent-Kernel 可以在 MVP 阶段保持零数据库，后续再把 Mem0/Graphiti 接成可选后端。
+- 这不是替代关系，而是互补关系。Agent Memory Kernel 可以在 MVP 阶段保持零数据库，后续再把 Mem0/Graphiti 接成可选后端。
 
 ### 3.6 Aider
 
@@ -373,25 +373,25 @@ Aider 的 RepoMap 很值得借鉴：
 
 关键启发：
 
-- Agent-Kernel 可以做 “MemoryMap”：不是把整份规则文件丢给 LLM，而是先构建 Markdown AST 和语义索引，让模型只处理冲突候选、冗余候选和需要合并的节点。
+- Agent Memory Kernel 可以做 “MemoryMap”：不是把整份规则文件丢给 LLM，而是先构建 Markdown AST 和语义索引，让模型只处理冲突候选、冗余候选和需要合并的节点。
 
 ### 3.7 2026-05-01 生态补充：Skills 正在变成基础设施
 
 最新一轮生态观察显示，Agent Skills 已经从“单个 Agent 的小插件”变成更通用的能力封装格式：
 
 - Codex / Claude Code 都把 Skills 作为按需加载能力包，配合 `AGENTS.md` / `CLAUDE.md` 形成“常驻规则 + 按需 Skill”的双层上下文。
-- Memento-Skills 这类研究方向开始强调把成功经验自动压缩成可复用 skills，说明“从历史任务中进化 Skilllet”不是孤立想法，而是 Agent 生态的共同趋势。
-- 社区 Skill 生态会带来供应链风险。Skilllet Catalog / App Store 不能只做安装按钮，还需要 provenance、版本、校验、信任提示、Rule CI 和 review 默认门槛。
+- Memento-Skills 这类研究方向开始强调把成功经验自动压缩成可复用 skills，说明“从历史任务中进化 Memory Card”不是孤立想法，而是 Agent 生态的共同趋势。
+- 社区 Skill 生态会带来供应链风险。Memory Card Catalog / App Store 不能只做安装按钮，还需要 provenance、版本、校验、信任提示、Rule CI 和 review 默认门槛。
 
-对 Agent-Kernel 的启发：
+对 Agent Memory Kernel 的启发：
 
 - Draft explainability 是必要地基：每条自动候选都必须说明 `matched_template`、`confidence`、`reason` 和 evidence。
 - App Store 后续要从“本地内置包”升级为“带信任元数据的 registry client”，但 MVP 仍保持本地 catalog 优先。
-- Skilllet lineage 应成为下一阶段核心：用户需要看到一个 Skilllet 来自哪些 observations、何时被批准、编译给了哪些 Agent、是否通过 Rule CI。
+- Memory Card lineage 应成为下一阶段核心：用户需要看到一个 Memory Card 来自哪些 observations、何时被批准、编译给了哪些 Agent、是否通过 Rule CI。
 
 ## 4. 产品边界
 
-Agent-Kernel 不应该做：
+Agent Memory Kernel 不应该做：
 
 - 不做完整 Agent 框架。
 - 不强制用户接入数据库。
@@ -400,7 +400,7 @@ Agent-Kernel 不应该做：
 - 不把所有对话自动永久保存。
 - 不让 LLM 直接重写整份规则文件。
 
-Agent-Kernel 应该做：
+Agent Memory Kernel 应该做：
 
 - 从对话、规则文件、Skill、Memory Bank 中抽取可复用知识。
 - 判断知识类型：事实、偏好、流程、禁令、架构约束、临时上下文、已废弃规则。
@@ -463,25 +463,25 @@ Use Axios for HTTP requests. Do not introduce new Fetch-based request helpers un
 - 只是历史经验：Memory Bank 或 topic memory。
 - 未验证或单次上下文：不要固化，只放候选区。
 
-### 5.3 Skilllet：比 Skill 更轻的中间单元
+### 5.3 Memory Card：比 Skill 更轻的中间单元
 
-你提到“类似 skill，但更轻量化”。可以命名为 `skilllet`：
+你提到“类似 skill，但更轻量化”。可以命名为 `memory_card`：
 
-- `skilllet` 是 Agent-Kernel 内部最小知识单元。
-- 多个 skilllet 可以编译成一个 Agent Skill。
-- 单个 skilllet 也可以导出为一条 Cursor Rule 或一段 AGENTS.md。
-- skilllet 有状态：draft、active、deprecated、archived、conflicted。
+- `memory_card` 是 Agent Memory Kernel 内部最小知识单元。
+- 多个 memory_card 可以编译成一个 Agent Skill。
+- 单个 memory_card 也可以导出为一条 Cursor Rule 或一段 AGENTS.md。
+- memory_card 有状态：draft、active、deprecated、archived、conflicted。
 
 这样你不会被现有 `SKILL.md` 目录格式绑死，同时可以输出到各种平台。
 
 ### 5.4 Skill Library：现有 Skill 的可视化管理
 
-Agent-Kernel 不只管理自己生成的 skilllets，也要管理用户已经拥有的 Claude Code / Codex / Superpowers / 社区 Skills。
+Agent Memory Kernel 不只管理自己生成的 memory_cards，也要管理用户已经拥有的 Claude Code / Codex / Superpowers / 社区 Skills。
 
 默认采用引用模式：
 
 - 第三方 Skill 保持在原路径，不复制、不重写。
-- Agent-Kernel 建立索引：名称、描述、路径、来源、版本、适配 Agent、依赖脚本、references、assets。
+- Agent Memory Kernel 建立索引：名称、描述、路径、来源、版本、适配 Agent、依赖脚本、references、assets。
 - UI 中可以启用、禁用、分配到项目、分配到 Agent、查看依赖和预览导出。
 - 如果用户想修改第三方 Skill，系统应提示 fork 成用户自有 Skill，再由 Kernel 托管修改后的副本。
 
@@ -490,7 +490,7 @@ Skill Library 中的资产分两类：
 | 类型 | 来源 | 管理方式 |
 | --- | --- | --- |
 | Referenced Skill | `.claude/skills`、`.agents/skills`、Superpowers、社区目录 | 索引和引用，不原地修改 |
-| Owned Skill | 用户在 Agent-Kernel 内创建或 fork 的 Skill | 由 Kernel 托管，可编辑、组合、编译 |
+| Owned Skill | 用户在 Agent Memory Kernel 内创建或 fork 的 Skill | 由 Kernel 托管，可编辑、组合、编译 |
 
 这能避免一个很危险的问题：规则治理工具不应该把用户安装的第三方 Skill 悄悄改坏。引用模式让第一版更可信，也更符合个人高级开发者的实际使用习惯。
 
@@ -501,7 +501,7 @@ Skill Library 中的资产分两类：
 Mirror 的含义：
 
 - Source Skill 保持原位置，不修改。
-- Agent-Kernel 把 Source Skill 复制到目标 Agent 的 skills 目录。
+- Agent Memory Kernel 把 Source Skill 复制到目标 Agent 的 skills 目录。
 - 复制时保留目录结构：`SKILL.md`、`scripts/`、`references/`、`assets/`。
 - Kernel 记录 source path、target path、source hash、target hash、mirrored_at。
 - 目标副本头部或旁边 metadata 标明来源，方便追踪。
@@ -549,7 +549,7 @@ Mirror 比 Link 更兼容，因为不是所有 Agent 都支持任意外部路径
 ```text
 agent-kernel/
   crates/
-    agent-kernel-core/      # IR、skilllet、分类、冲突、预算
+    agent-kernel-core/      # IR、memory_card、分类、冲突、预算
     agent-kernel-parser/    # Markdown/MDC/SKILL/AGENTS 解析与反向解析
     agent-kernel-exporters/ # Claude/Codex exporters, future adapters
     agent-kernel-ci/        # Rule CI runner
@@ -653,14 +653,14 @@ Rust 适合这里的原因：
 
 ### 6.5 Kernel Store 内核存储与唯一事实来源
 
-核心原则：`~/.agent-kernel/skilllets` 和项目 `.agent-kernel/project.yml` 才是 Single Source of Truth。当前 MVP 中 Claude Code / Codex 读取的 `CLAUDE.md`、`AGENTS.md` 是编译产物；Cursor/Cline 类文件只作为后续 adapter 产物。
+核心原则：`~/.agent-kernel/memory_cards` 和项目 `.agent-kernel/project.yml` 才是 Single Source of Truth。当前 MVP 中 Claude Code / Codex 读取的 `CLAUDE.md`、`AGENTS.md` 是编译产物；Cursor/Cline 类文件只作为后续 adapter 产物。
 
 MVP 建议零数据库：
 
 ```text
 ~/.agent-kernel/
   kernel.yml
-  skilllets/
+  memory_cards/
     global/
     projects/
     registry/
@@ -679,11 +679,11 @@ MVP 建议零数据库：
   tests/
 ```
 
-推荐 skilllet 文件结构：
+推荐 memory_card 文件结构：
 
 ```text
-~/.agent-kernel/skilllets/global/frontend/http-client.skilllet.yml
-~/.agent-kernel/skilllets/global/frontend/http-client.md
+~/.agent-kernel/memory_cards/global/frontend/http-client.memory_card.yml
+~/.agent-kernel/memory_cards/global/frontend/http-client.md
 ```
 
 其中 `.yml` 保存 metadata、scope、conflicts、export targets，`.md` 保存正文。这样比把所有内容塞进一个 YAML 更适合人工阅读和 Git diff。
@@ -720,48 +720,48 @@ MVP 建议零数据库：
 
 `bunx agent-kernel ui` 启动本地面板。
 
-这个 UI 应该提前到 MVP，而不是排到最后。因为 Agent-Kernel 做的是“长期知识治理”，用户最担心的是误删、误合并和误固化。可视化面板是信任系统的一部分，不是装饰层。
+这个 UI 应该提前到 MVP，而不是排到最后。因为 Agent Memory Kernel 做的是“长期知识治理”，用户最担心的是误删、误合并和误固化。可视化面板是信任系统的一部分，不是装饰层。
 
 UI 应采用双入口：
 
-1. Project-centered Canvas 第一屏：用于理解和操作“当前项目启用了哪些 Skills/Skilllets，并分别分发给哪些 Agent”。
-2. App Store / Package Manager：用于浏览、搜索、安装、更新和启用现有 Skills/Skilllets。
+1. Project-centered Canvas 第一屏：用于理解和操作“当前项目启用了哪些 Skills/Memory Cards，并分别分发给哪些 Agent”。
+2. App Store / Package Manager：用于浏览、搜索、安装、更新和启用现有 Skills/Memory Cards。
 
 核心页面：
 
-- Canvas Workspace：第一屏，以当前 Project 为中心，用白板节点和连线展示目标 Agent、Referenced Skills、Owned Skills、Skilllets、Rules、Exports。
-- Inbox：从对话和文件提取出的候选 skilllets。
+- Canvas Workspace：第一屏，以当前 Project 为中心，用白板节点和连线展示目标 Agent、Referenced Skills、Owned Skills、Memory Cards、Rules、Exports。
+- Inbox：从对话和文件提取出的候选 memory_cards。
 - Conflict Center：冲突规则对比，显示证据、时间线、推荐决策。
 - Knowledge Map：按项目、技术栈、目录、Agent、知识类型浏览。
 - Skill Library：现有 Skills 与 Owned Skills 的索引、搜索、预览、拖拽分发和 Mirror 同步状态。
-- App Store：卡片式 Skill/Skilllet 浏览、安装、升级、评分、来源和兼容性展示。
+- App Store：卡片式 Skill/Memory Card 浏览、安装、升级、评分、来源和兼容性展示。
 - Export Preview：选择目标 Agent，预览将写入哪些文件和 diff。
 - Budget View：显示常驻规则 token/byte 占用，提示哪些应该迁移成 Skill。
 - Audit Log：记录每次合并、删除、迁移和导出。
-- Registry：搜索、安装、升级和禁用社区 skilllet 包。
+- Registry：搜索、安装、升级和禁用社区 memory_card 包。
 - Rule CI：展示规则测试用例、最近运行结果和失败原因。
 
 很关键的一点：UI 不是花哨面板，而是“信任建立器”。用户必须能看到为什么引擎认为两条规则冲突、为什么要删除旧规则、会改哪些文件。
 
 交互形态建议：
 
-- Canvas 节点：Current Project、Claude Code、Codex、Skill、Skilllet、Rule Set、Export Artifact。Cursor 等后续目标只通过 adapter 插件加入。
+- Canvas 节点：Current Project、Claude Code、Codex、Skill、Memory Card、Rule Set、Export Artifact。Cursor 等后续目标只通过 adapter 插件加入。
 - Canvas 连线：启用、Mirror、Compile、Depends on、Conflicts with、Supersedes。
-- 拖动连接：从 Skill 节点拖线到 Agent 节点，创建该项目下的 Agent-specific Mirror；从 Skilllet 拖到 Project，加入项目规则；从 Skilllet 拖到某个 Agent，只给该 Agent 编译；从多个 Skilllets 拖到新 Skill，组合成 Owned Skill。
+- 拖动连接：从 Skill 节点拖线到 Agent 节点，创建该项目下的 Agent-specific Mirror；从 Memory Card 拖到 Project，加入项目规则；从 Memory Card 拖到某个 Agent，只给该 Agent 编译；从多个 Memory Cards 拖到新 Skill，组合成 Owned Skill。
 - 连线状态：synced、source updated、target drifted、conflict、test failed。
 - 冲突对比：左侧旧规则，右侧新规则，红色表示将废弃，绿色表示将保留。
-- 知识拖拽：把 skilllet 从 Global 拖到 Project，或从 Always Prompt 拖到 Skill。
+- 知识拖拽：把 memory_card 从 Global 拖到 Project，或从 Always Prompt 拖到 Skill。
 - Skill 拖拽：把 Referenced Skill 拖到 Claude Code / Codex，系统默认创建 Mirror 副本。后续 adapter 可加入新的 Agent 节点。
 - 预算条：像 bundle analyzer 一样展示每个 Agent 的上下文占用。
-- 反向解析提示：如果用户手动改了 `CLAUDE.md`，UI 显示“检测到编译产物被手动修改，是否导入为 Draft skilllet？”
+- 反向解析提示：如果用户手动改了 `CLAUDE.md`，UI 显示“检测到编译产物被手动修改，是否导入为 Draft memory_card？”
 - Mirror 状态：显示 synced / source updated / target drifted / fork recommended。
-- 一键回滚：从 audit log 选择某次 build，还原对应 skilllet 状态和导出结果。
+- 一键回滚：从 audit log 选择某次 build，还原对应 memory_card 状态和导出结果。
 
 Canvas 第一屏的信息布局建议：
 
 ```text
 左侧 Palette:
-  Rules / Skilllets / Skills / Packages / Drafts
+  Rules / Memory Cards / Skills / Packages / Drafts
 
 中间 Canvas:
   Current Project
@@ -779,7 +779,7 @@ App Store 页面重点不做复杂关系图，而做快速发现：
 
 - 搜索：React、Rust、TDD、Security、Claude、Codex。
 - 筛选：Agent 兼容性、来源、本地/远程、已安装/可更新、风险等级。
-- 卡片：名称、描述、来源、版本、包含多少 skilllets、是否有 Rule CI。
+- 卡片：名称、描述、来源、版本、包含多少 memory_cards、是否有 Rule CI。
 - 操作：Install、Mirror to Project、Preview Contents、Fork。
 
 Project-centered Canvas 的关键规则：
@@ -787,7 +787,7 @@ Project-centered Canvas 的关键规则：
 - Project 是唯一中心节点，所有操作都回答“这个项目当前如何配置”。
 - Agent 节点是 Project 的运行目标，可以同时存在多个。
 - 同一个 Skill 可以 Mirror 给多个 Agent，也可以只给一个 Agent。
-- 同一个 Skilllet 可以编译进项目级规则，也可以只编译进某个 Agent 的规则。
+- 同一个 Memory Card 可以编译进项目级规则，也可以只编译进某个 Agent 的规则。
 - Canvas 上要清楚显示 inheritance：Global Preferences -> Project Rules -> Agent-specific Rules。
 - 任何 Agent-specific 分配都不应该污染全局偏好。
 
@@ -802,10 +802,10 @@ Global Preference: "Prefer Bun"
 Skill "superpowers/brainstorming"
   -> Codex only, Mirror
 
-Skilllet "Use Axios for frontend requests"
+Memory Card "Use Axios for frontend requests"
   -> Project Rule, compiled to Codex + Claude Code
 
-Skilllet "Use Claude subagents for refactors"
+Memory Card "Use Claude subagents for refactors"
   -> Claude Code only
 ```
 
@@ -816,7 +816,7 @@ Skilllet "Use Claude subagents for refactors"
 编译流程：
 
 ```text
-skilllets + project.yml + exporter config
+memory_cards + project.yml + exporter config
   -> plan
   -> Rule CI
   -> preview diff
@@ -826,7 +826,7 @@ skilllets + project.yml + exporter config
 产物文件头部可以写明来源，但不要依赖 managed block 保护局部结构：
 
 ```md
-<!-- Generated by Agent-Kernel. Do not edit directly. Run `bunx agent-kernel import` to ingest manual changes. -->
+<!-- Generated by Agent Memory Kernel. Do not edit directly. Run `bunx agent-kernel import` to ingest manual changes. -->
 ```
 
 如果用户确实手动改了产物：
@@ -834,7 +834,7 @@ skilllets + project.yml + exporter config
 1. `agent-kernel scan` 检测文件 hash 与 lockfile 不一致。
 2. `agent-kernel import CLAUDE.md` 做 reverse parse。
 3. 新增内容进入 Draft Inbox。
-4. 用户确认后写回 skilllets。
+4. 用户确认后写回 memory_cards。
 5. 再次 build 全量生成产物。
 
 这个模式比 managed block 更稳，因为系统不会在半手写半生成的文件中做脆弱手术。managed block 可保留为 legacy/compat 模式，服务不愿全量托管规则文件的团队。
@@ -846,7 +846,7 @@ skilllets + project.yml + exporter config
 原则：
 
 - 写“我要启用什么”，不写“上一次具体生成了什么”。
-- 写 Project -> Agent -> Skills/Skilllets 的分配关系。
+- 写 Project -> Agent -> Skills/Memory Cards 的分配关系。
 - 不把 Canvas 坐标、hash、同步时间、测试结果塞进 `project.yml`。
 - build、test、sync 根据声明式配置推导产物。
 - lockfile 和 cache 可以存在，但它们是派生状态，不是用户主要编辑对象。
@@ -875,7 +875,7 @@ rules:
     - "global:typescript-style"
     - "project:frontend-api"
 
-skilllets:
+memory_cards:
   include:
     - id: "global:prefer-bun"
       scope: "project"
@@ -910,9 +910,9 @@ budgets:
 
 这样 UI 可以拖拽操作，但最终落盘时仍然转换成简洁的声明式配置。高级用户可以像维护 dotfiles 一样维护 `project.yml`，UI 用户也不会被运行时细节淹没。
 
-### 6.9 Skilllet Registry
+### 6.9 Memory Card Registry
 
-skilllet 天然适合社区化。长期可以做一个轻量 Registry，让用户安装经过整理的 AI 规则包。
+memory_card 天然适合社区化。长期可以做一个轻量 Registry，让用户安装经过整理的 AI 规则包。
 
 命令草案：
 
@@ -928,7 +928,7 @@ Registry 包应该包含：
 
 ```text
 package.yml
-skilllets/
+memory_cards/
 tests/
 README.md
 LICENSE
@@ -949,13 +949,13 @@ risk: "medium"
 社区生态的价值：
 
 - 新手可以直接安装高质量规则包。
-- 团队可以发布内部私有 skilllet collection。
+- 团队可以发布内部私有 memory_card collection。
 - 开源项目可以随仓库发布官方 Agent 使用规则。
-- Agent-Kernel 可以像 lockfile 一样固定规则包版本，避免规则漂移。
+- Agent Memory Kernel 可以像 lockfile 一样固定规则包版本，避免规则漂移。
 
 ### 6.10 Hybrid 隐私与模型 Provider
 
-Agent-Kernel 的默认信任模型应该是 local-first，但产品能力允许用户接入云端或本地模型。因此第一版采用 Hybrid 策略。
+Agent Memory Kernel 的默认信任模型应该是 local-first，但产品能力允许用户接入云端或本地模型。因此第一版采用 Hybrid 策略。
 
 本地默认执行：
 
@@ -969,7 +969,7 @@ Agent-Kernel 的默认信任模型应该是 local-first，但产品能力允许�
 
 需要 provider 的能力：
 
-- 从对话中提炼 Draft Skilllets。
+- 从对话中提炼 Draft Memory Cards。
 - 语义去重。
 - 规则冲突判断。
 - 压缩冗余文本。
@@ -1062,9 +1062,9 @@ bunx agent-kernel ui
 
 导入后 UI 先不自动改文件，而是展示：
 
-- Imported Rules：可反向解析为 skilllets 的规则。
+- Imported Rules：可反向解析为 memory_cards 的规则。
 - Referenced Skills：已发现但保持原路径的 Skills。
-- Draft Skilllets：可从规则中提炼出的候选。
+- Draft Memory Cards：可从规则中提炼出的候选。
 - Conflicts：跨 Agent 规则中互相冲突的偏好。
 - Export Targets：当前项目可以编译到哪些 Agent。
 
@@ -1076,7 +1076,7 @@ cat session.md | bunx agent-kernel extract --project .
 
 输出：
 
-- 5 条候选 skilllets
+- 5 条候选 memory_cards
 - 2 条疑似重复
 - 1 条与旧规则冲突
 - 1 条建议变成 Skill
@@ -1130,7 +1130,7 @@ Accept this change? [y]es / [n]o / [e]dit / [s]kip / [a]pply all / [q]uit
 
 - 比纯 patch 更接近人的判断方式。
 - 让用户逐条批准高风险知识变化。
-- `e` 可以直接打开临时编辑器修改最终 skilllet 正文。
+- `e` 可以直接打开临时编辑器修改最终 memory_card 正文。
 - `s` 可以跳过不确定项，保留到 UI Inbox。
 - 每次决策都写入 audit log，便于回滚和训练后续推荐。
 
@@ -1142,7 +1142,7 @@ bunx agent-kernel attach --project . --profile frontend-saas --agents codex,clau
 
 实现方式：
 
-- 轻量方案：项目内生成 `.agent-kernel/project.yml`，记录启用哪些 skilllets。
+- 轻量方案：项目内生成 `.agent-kernel/project.yml`，记录启用哪些 memory_cards。
 - 编译方案：把目标 Agent 文件视为 build artifacts，全量生成。
 - symlink 方案：把全局 skill 目录 symlink 到 `.agents/skills` 或 `.claude/skills`。
 
@@ -1155,7 +1155,7 @@ bunx agent-kernel attach --project . --profile frontend-saas --agents codex,clau
 - `agent_kernel.extract_from_text`
 - `agent_kernel.propose_memory`
 - `agent_kernel.gc_project_rules`
-- `agent_kernel.search_skilllets`
+- `agent_kernel.search_memory_cards`
 - `agent_kernel.export_to_agent`
 - `agent_kernel.archive_success`
 
@@ -1200,7 +1200,7 @@ Conversation / Agent Session / CLI Extract
 - `agent-kernel extract chat.md` 手动导入会话。
 - MCP 工具从当前 Agent session 提交候选。
 
-Draft Skilllet 必须包含：
+Draft Memory Card 必须包含：
 
 ```yaml
 title: "Use Axios for frontend requests"
@@ -1230,7 +1230,7 @@ UI Inbox 展示：
 - 不自动启用 Draft。
 - 不自动覆盖冲突规则。
 - 低风险重复项可以批量合并，但仍需要用户确认。
-- 用户批准后才写入 `project.yml` 或 global skilllet store。
+- 用户批准后才写入 `project.yml` 或 global memory_card store。
 
 这个设计保留了“AI 会主动帮你整理”的感觉，但把最终控制权留给用户。
 
@@ -1289,7 +1289,7 @@ Use Axios for new HTTP request helpers. Do not introduce Fetch-based wrappers. E
 
 新的主策略：
 
-- skilllets 是源代码。
+- memory_cards 是源代码。
 - `project.yml` 是 build config。
 - `CLAUDE.md`、`AGENTS.md` 是当前 MVP 编译产物。
 - `.cursor/rules/*.mdc`、`.clinerules` 是后续 adapter 编译产物，不进入当前默认路径。
@@ -1373,7 +1373,7 @@ Rule CI 不需要真的运行完整 Agent，也可以先用小模型做判断：
 
 - 阻止自动 build。
 - 回滚到上一个 lockfile。
-- 在 UI 中标出是哪个 skilllet 压缩后破坏了行为。
+- 在 UI 中标出是哪个 memory_card 压缩后破坏了行为。
 - 允许用户把失败用例一键保存为长期 Rule CI。
 
 Rule CI 的真正价值不是“模型测试 100% 准确”，而是为高价值规则建立回归保护。它会让用户敢于让系统持续进化。
@@ -1388,7 +1388,7 @@ v0.1 明确不做：
 
 - 不做半自动对话提炼。
 - 不做 LLM 语义合并。
-- 不做 Skilllet Registry。
+- 不做 Memory Card Registry。
 - 不做 Rule CI。
 - 不做复杂团队协作。
 
@@ -1401,7 +1401,7 @@ v0.1 明确不做：
 - 检测重复标题和重复 bullet
 - 输出 dry-run diff
 - 反向解析现有规则，生成 Imported Rules 索引
-- 从 skilllets 全量编译到 Codex `AGENTS.md` 和 Claude `CLAUDE.md`
+- 从 memory_cards 全量编译到 Codex `AGENTS.md` 和 Claude `CLAUDE.md`
 - 生成 lockfile，记录产物 hash
 - UI 第一屏显示 Current Project、Codex、Claude Code 和已发现 Skills
 - 支持把一个 Referenced Skill Mirror 到 Codex 或 Claude Code
@@ -1452,7 +1452,7 @@ v0.1 明确不做：
 功能：
 
 - 通过 CLI/MCP/session log 手动或半自动提交候选
-- 从文本中抽取候选 skilllets
+- 从文本中抽取候选 memory_cards
 - 结构化分类
 - 发现 3 类冲突：工具偏好、语言/框架偏好、禁令
 - 生成 Draft Inbox 项，不自动启用
@@ -1463,7 +1463,7 @@ v0.1 明确不做：
 功能：
 
 - Canvas Workspace 作为第一屏
-- Project-centered multi-agent 分配：同一项目下可给 Claude Code / Codex 分配不同 Skills/Skilllets；Cursor/Cline 仅作为未来 adapter 扩展。
+- Project-centered multi-agent 分配：同一项目下可给 Claude Code / Codex 分配不同 Skills/Memory Cards；Cursor/Cline 仅作为未来 adapter 扩展。
 - Inbox
 - Conflict Center
 - Knowledge Map
@@ -1478,11 +1478,11 @@ v0.1 明确不做：
 - Rust `axum` 本地服务
 - 前端可用 React/Vite，构建后嵌入 Rust 二进制
 
-### MVP 4：Skilllet Store + Exporters + Rule CI
+### MVP 4：Memory Card Store + Exporters + Rule CI
 
 功能：
 
-- `~/.agent-kernel/skilllets`
+- `~/.agent-kernel/memory_cards`
 - project profile
 - Exporters：当前 Claude Code、Codex；后续 Cursor、Cline 通过 adapter 扩展
 - full-build / managed-block 两种模式
@@ -1498,21 +1498,21 @@ v0.1 明确不做：
 - 暴露 extract/search/gc/export/archive_success 工具
 - 让 Claude Code、Codex 在工作中调用；后续 adapter 可开放给更多 Agent
 
-### MVP 6：Skilllet Registry
+### MVP 6：Memory Card Registry
 
 功能：
 
-- 安装社区 skilllet 包
+- 安装社区 memory_card 包
 - 支持私有 registry
 - lockfile 固定版本
 - registry package Rule CI
 
 ## 10. 竞争定位
 
-| 项目 | 主要路线 | 与 Agent-Kernel 的关系 |
+| 项目 | 主要路线 | 与 Agent Memory Kernel 的关系 |
 | --- | --- | --- |
 | Mem0 | 托管记忆层，向量/图/重排 | 可作为后端，不是直接竞品 |
-| Letta | Stateful memory-first agent | 偏完整 Agent，Agent-Kernel 偏文件治理 |
+| Letta | Stateful memory-first agent | 偏完整 Agent，Agent Memory Kernel 偏文件治理 |
 | LangGraph memory | Agent 应用状态和长期记忆框架 | 可借鉴记忆分类 |
 | Graphiti/Zep | 动态时序知识图谱 | 可处理复杂事实变化，MVP 不需要 |
 | Claude Code memory/skills | 原生文件记忆和 Skill | 目标输出平台 |
@@ -1523,7 +1523,7 @@ v0.1 明确不做：
 
 一句话差异：
 
-> Mem0/Letta 帮 Agent 记住更多东西；Agent-Kernel 帮开发者决定哪些东西值得变成规则、应该放在哪里、如何保持不冲突。
+> Mem0/Letta 帮 Agent 记住更多东西；Agent Memory Kernel 帮开发者决定哪些东西值得变成规则、应该放在哪里、如何保持不冲突。
 
 ## 11. 开源包形态
 
@@ -1534,12 +1534,12 @@ v0.1 明确不做：
 - `skill-os`
 - `agent-memory-gc`
 - `context-compiler`
-- `skilllet`
+- `memory_card`
 
 我更推荐：
 
 - JavaScript registry 包：`agent-kernel`
-- 核心概念：`skilllet`
+- 核心概念：`memory_card`
 - 核心实现：Rust binary
 - 分发方式：Bun wrapper + GitHub Releases，后续支持 Homebrew / Cargo install
 - 子命令：`project`、`app`、`gc`、`extract`、`review`、`export`、`attach`、`ui`（legacy Web Canvas）
@@ -1589,7 +1589,7 @@ bunx agent-kernel mcp
 - 允许 “summary + details link”
 - 对安全、支付、数据迁移等规则降低压缩强度
 - 用 Rule CI 对关键行为做回归测试
-- 压缩前后的 skilllet 保留版本，可一键回滚
+- 压缩前后的 memory_card 保留版本，可一键回滚
 
 ### 12.3 多平台格式漂移
 
@@ -1620,21 +1620,21 @@ Claude Code、Codex 的规则格式会继续变化；未来 adapter 还要面对
 
 缓解：
 
-- 产物头部明确写 Generated by Agent-Kernel。
+- 产物头部明确写 Generated by Agent Memory Kernel。
 - build 前检查 hash，发现手动修改则中断并提示 import。
-- `agent-kernel import` 先反向解析为 draft，不直接覆盖 skilllets。
-- UI 中展示“手动改动 -> draft skilllet -> build”的闭环。
+- `agent-kernel import` 先反向解析为 draft，不直接覆盖 memory_cards。
+- UI 中展示“手动改动 -> draft memory_card -> build”的闭环。
 
 ## 13. 我建议的产品路线
 
 最好的第一步不是做 MCP，也不是一开始接所有 Agent，而是做一个很锋利的 Rust CLI + 早期可视化预览：
 
-> 输入一份混乱的 `CLAUDE.md` / `AGENTS.md`，反向解析成 draft skilllets，交互式确认后编译成干净的目标产物。
+> 输入一份混乱的 `CLAUDE.md` / `AGENTS.md`，反向解析成 draft memory_cards，交互式确认后编译成干净的目标产物。
 
 因为这个闭环最小，但价值最明显：
 
 - 用户能立刻看到重复、冲突、过期规则。
-- 能证明“反向解析 + skilllet 源码 + 全量编译”比 LLM 全文重写更可靠。
+- 能证明“反向解析 + memory_card 源码 + 全量编译”比 LLM 全文重写更可靠。
 - 能积累真实规则样本，用来打磨分类和冲突提示词。
 - 可视化页面能建立用户信任，避免它看起来像危险的自动清理脚本。
 
@@ -1672,26 +1672,26 @@ Patch:
 
 ### 13.1 最新迭代重点：高价值 Prompt 与可编辑进化视图
 
-Skilllet 的含义需要继续放宽：它不只是“以后/必须/always/prefer”这类显式规则，也应该包含能明显改善项目质量的高价值 prompt、成功协作模式、根因复盘、测试策略、UI 性能经验、跨平台修复路径和 agent 交接流程。
+Memory Card 的含义需要继续放宽：它不只是“以后/必须/always/prefer”这类显式规则，也应该包含能明显改善项目质量的高价值 prompt、成功协作模式、根因复盘、测试策略、UI 性能经验、跨平台修复路径和 agent 交接流程。
 
 当前产品体验应遵循：
 
 - 提取器先过滤一次性任务噪声，再识别长期偏好、硬约束、项目约定、流程、反复纠正、项目改善记录和高价值 prompt。
 - 高价值 prompt 不要求出现规则词，只要它描述了可复用的 agent 协作方式，并带来减少返工、提高质量、降低理解成本等结果，就可以进入 Draft Inbox。
-- 分配页不再只是矩阵展示，而是用户可直接决定每个 Skilllet 是否分配给 Claude Code / Codex。
-- Skilllet 说明优先用常用语言解释，让用户一眼知道“它以后会怎样帮我”，而不是只展示抽象分类。
-- Skilllet 进化视图采用工程化的“进化树/时间线”隐喻：展示来源、置信度、稳定度、活跃/休眠、冲突预警、提升候选，但避免游戏化术语喧宾夺主。
+- 分配页不再只是矩阵展示，而是用户可直接决定每个 Memory Card 是否分配给 Claude Code / Codex。
+- Memory Card 说明优先用常用语言解释，让用户一眼知道“它以后会怎样帮我”，而不是只展示抽象分类。
+- Memory Card 进化视图采用工程化的“进化树/时间线”隐喻：展示来源、置信度、稳定度、活跃/休眠、冲突预警、提升候选，但避免游戏化术语喧宾夺主。
 
 下一步建议：
 
 - 将 evolution insight 从前端启发式推导下沉到 Rust 数据模型，记录真实 observation lineage、approval timeline、merge history 和 target history。
-- 给分配页增加批量操作：多选 Skilllets 后统一分配给 Claude Code、Codex，或合并为一个更高层级 Skilllet。
-- 增加“提升候选”审阅流：项目级 Skilllet 多次被不同项目复用后，建议提升为 global preference。
-- 增加“休眠候选”审阅流：长期未被触发或不再分配给任何 Agent 的 Skilllet，建议归档但不删除。
+- 给分配页增加批量操作：多选 Memory Cards 后统一分配给 Claude Code、Codex，或合并为一个更高层级 Memory Card。
+- 增加“提升候选”审阅流：项目级 Memory Card 多次被不同项目复用后，建议提升为 global preference。
+- 增加“休眠候选”审阅流：长期未被触发或不再分配给任何 Agent 的 Memory Card，建议归档但不删除。
 
-### 13.2 v0.60：Visible Evolution & Reusable Skilllets
+### 13.2 v0.60：Visible Evolution & Reusable Memory Cards
 
-这一版的目标是把 Agent-Kernel 从“能整理”推进到“用户知道它在做什么，并且能把沉淀出的能力拿到别的项目继续用”。
+这一版的目标是把 Agent Memory Kernel 从“能整理”推进到“用户知道它在做什么，并且能把沉淀出的能力拿到别的项目继续用”。
 
 #### 启动与长任务可见化
 
@@ -1700,7 +1700,7 @@ Skilllet 的含义需要继续放宽：它不只是“以后/必须/always/prefe
 - 每个慢操作都有阶段、进度、状态文案和完成/失败记录。
 - 首次启动显示“建立本地记忆索引”，后续启动显示“检查增量”。
 - UI 不应该被后台任务整体锁死，只有相关按钮进入等待状态。
-- 手动扫描、整理历史、调用 Claude Code/Codex、融合 Skilllet、同步编译都进入同一个任务中心。
+- 手动扫描、整理历史、调用 Claude Code/Codex、融合 Memory Card、同步编译都进入同一个任务中心。
 
 #### Draft Brief 与轻量精炼
 
@@ -1713,7 +1713,7 @@ Skilllet 的含义需要继续放宽：它不只是“以后/必须/always/prefe
 
 #### Tags 与筛选
 
-Skilllet / Draft 都要支持 tag，作为分类、筛选、推荐和全局复用的基础。初始建议 tags：
+Memory Card / Draft 都要支持 tag，作为分类、筛选、推荐和全局复用的基础。初始建议 tags：
 
 - `ui-design`
 - `frontend`
@@ -1727,38 +1727,38 @@ Skilllet / Draft 都要支持 tag，作为分类、筛选、推荐和全局复�
 - `workflow`
 - `safety`
 
-#### 可暂停的 Skilllet 分配
+#### 可暂停的 Memory Card 分配
 
 技能分配不再强制至少保留一个目标。空 targets 表示“已保存但未启用”，UI 显示为未分配/休眠，而不是阻止用户取消。
 
-#### 全局 Skilllet Library
+#### 全局 Memory Card Library
 
-某个项目产生的 Skilllet 应该可以给别的项目使用。推荐采用 Hybrid：
+某个项目产生的 Memory Card 应该可以给别的项目使用。推荐采用 Hybrid：
 
-- 项目 Skilllet 仍保存在项目 `.agent-kernel/skilllets/`。
-- 全局 Skilllet 保存在 `~/.agent-kernel/skilllets/`。
-- 项目可以引用全局 Skilllet，也可以把全局 Skilllet fork 成项目本地版本。
-- 项目 Skilllet 可以被提升为全局库项，保留来源项目和 lineage。
+- 项目 Memory Card 仍保存在项目 `.agent-kernel/memory_cards/`。
+- 全局 Memory Card 保存在 `~/.agent-kernel/memory_cards/`。
+- 项目可以引用全局 Memory Card，也可以把全局 Memory Card fork 成项目本地版本。
+- 项目 Memory Card 可以被提升为全局库项，保留来源项目和 lineage。
 
 #### 融合与推荐
 
-Skilllet 融合不应该只是拼接文本，而是调用当前整理引擎生成新的融合草稿：
+Memory Card 融合不应该只是拼接文本，而是调用当前整理引擎生成新的融合草稿：
 
-- 用户多选多个 Skilllet。
+- 用户多选多个 Memory Card。
 - 引擎生成新的 `title / brief / body / tags / conflict_notes / source_ids`。
-- 原 Skilllet 保留，融合结果进入 Draft Inbox。
+- 原 Memory Card 保留，融合结果进入 Draft Inbox。
 
 项目推荐功能在“项目构思完成后”触发：
 
 - 读取项目技术栈、目录结构、已有规则、历史会话和已安装 Skills。
-- 推荐应该启用的已有 Skilllets。
+- 推荐应该启用的已有 Memory Cards。
 - 推荐适合安装或镜像的 Skills。
-- 推荐需要新建的项目级 Skilllets。
+- 推荐需要新建的项目级 Memory Cards。
 - 标出冲突、过时、过窄或可以提升为全局的内容。
 
 ### 13.3 v0.61：真实任务中心与全局复用闭环
 
-这一版把 v0.60 的体验进一步落地：前端不再只用动作名猜测进度，而是从 Tauri 后端读取真实任务状态；全局 Skilllet Library 也不再只是展示，而是能被加入当前项目继续使用。
+这一版把 v0.60 的体验进一步落地：前端不再只用动作名猜测进度，而是从 Tauri 后端读取真实任务状态；全局 Memory Card Library 也不再只是展示，而是能被加入当前项目继续使用。
 
 #### Desktop Task Center
 
@@ -1767,23 +1767,23 @@ Skilllet 融合不应该只是拼接文本，而是调用当前整理引擎生�
 - 前端每隔固定时间轻量轮询 `get_task_status`，优先显示后端进度，后端不可用时回退到本地启发式进度。
 - 后续可以升级为事件推送或任务队列，但 MVP 先用稳定、易调试的状态快照。
 
-#### Global Skilllet Reuse
+#### Global Memory Card Reuse
 
-- 项目 Skilllet 可以被提升到 `~/.agent-kernel/skilllets/`，保留 `source_project`。
-- 全局 Skilllet 可以一键加入当前项目，复制为项目本地 Skilllet 并写入目标 Agent 分配。
-- 加入后的全局 Skilllet 可继续在项目内编辑、分配、休眠、融合，避免全局库变成只读收藏夹。
-- 后续再加入“引用模式”：项目只引用全局 Skilllet，不复制正文；当全局项更新时可以提示受影响项目。
+- 项目 Memory Card 可以被提升到 `~/.agent-kernel/memory_cards/`，保留 `source_project`。
+- 全局 Memory Card 可以一键加入当前项目，复制为项目本地 Memory Card 并写入目标 Agent 分配。
+- 加入后的全局 Memory Card 可继续在项目内编辑、分配、休眠、融合，避免全局库变成只读收藏夹。
+- 后续再加入“引用模式”：项目只引用全局 Memory Card，不复制正文；当全局项更新时可以提示受影响项目。
 
 #### 下一步
 
 - 把任务状态从单个全局状态升级为多任务列表，支持并行扫描、整理、推荐和编译。
-- 给全局 Skilllet 加版本号和来源 lineage，支持项目 fork 后对比差异。
-- 给 Draft / Skilllet 增加 UI 编辑器，允许直接修改 `brief / body / tags / targets`。
+- 给全局 Memory Card 加版本号和来源 lineage，支持项目 fork 后对比差异。
+- 给 Draft / Memory Card 增加 UI 编辑器，允许直接修改 `brief / body / tags / targets`。
 - 融合功能接入 Claude Code / Codex 引擎，生成真正压缩后的融合草稿，而不是简单拼接。
 
 ### 13.4 v0.62：Agent Skills Kernel Architecture
 
-这一版把 Agent-Kernel 的定位从“桌面管理器”进一步收束为“Agent Skills 的本地内核”。后端是可被 Claude Code / Codex / CLI / 未来 MCP 调用的强类型治理接口；前端是高级个人开发者的驾驶舱，既能手动管理，也能把部分权限交给 AI。
+这一版把 Agent Memory Kernel 的定位从“桌面管理器”进一步收束为“Agent Skills 的本地内核”。后端是可被 Claude Code / Codex / CLI / 未来 MCP 调用的强类型治理接口；前端是高级个人开发者的驾驶舱，既能手动管理，也能把部分权限交给 AI。
 
 #### 三层驱动模型
 
@@ -1796,7 +1796,7 @@ AI Engine（语义精炼）
   ↓
 Governance Layer（人/AI 决策）
   ↓
-Skilllet Kernel Store
+Memory Card Kernel Store
   ↓
 Compiler / AI Interface / Human UI
 ```
@@ -1804,18 +1804,18 @@ Compiler / AI Interface / Human UI
 底层规则驱动：
 
 - 噪声过滤：过滤“继续优化”“帮我修一下”“再来一版”这类一次性对话。
-- tag 分类：为 Draft / Skilllet 自动建议 `ui-design`、`testing`、`workflow`、`agent-handoff` 等标签。
+- tag 分类：为 Draft / Memory Card 自动建议 `ui-design`、`testing`、`workflow`、`agent-handoff` 等标签。
 - scope 推断：判断内容更适合 `global`、`project`、`directory` 还是 `agent-specific`。
 - risk 分级：区分只读、生成草稿、修改内核存储、编译写文件等风险。
-- 结构校验：检查 Skilllet schema、目标 Agent、token 预算和编译产物漂移。
+- 结构校验：检查 Memory Card schema、目标 Agent、token 预算和编译产物漂移。
 
 中层 AI 驱动：
 
 - 生成用户主要语言的 `brief`。
 - 精炼 `body`，把对话式表达转成可编译指令。
-- 语义融合多个 Skilllet，保留来源和冲突说明。
+- 语义融合多个 Memory Card，保留来源和冲突说明。
 - 识别高价值 Prompt、项目改善记录、复用工作流。
-- 给项目推荐应启用的 Skilllets / Skills / 包。
+- 给项目推荐应启用的 Memory Cards / Skills / 包。
 
 上层治理驱动：
 
@@ -1832,8 +1832,8 @@ Compiler / AI Interface / Human UI
 - `kernel.plan_command(...)`
 - `kernel.update_draft(...)`
 - `kernel.approve_draft(...)`
-- `kernel.merge_skilllets(...)`
-- `kernel.assign_skilllet(...)`
+- `kernel.merge_memory_cards(...)`
+- `kernel.assign_memory_card(...)`
 - `kernel.compile_project(...)`
 - `kernel.explain_decision(...)`
 
@@ -1845,7 +1845,7 @@ Tauri UI、Bun CLI、未来 MCP Server 和 Claude Code/Codex 调用入口都应�
 - 提供 `KernelPolicy`、`AutomationMode`、`KernelCommand`、`KernelDecision`。
 - 提供确定性 `RuleAssessment`，用于 command 风险分级和文本分类。
 - Tauri 暴露 `plan_kernel_command`，给 UI 或未来 AI 工具查看“这个动作是否可自动执行、为什么需要审阅”。
-- 暂不替换所有旧命令，先作为兼容门面存在，后续再逐步让 Draft 编辑器、Skilllet 融合和 MCP 工具迁移到内核层。
+- 暂不替换所有旧命令，先作为兼容门面存在，后续再逐步让 Draft 编辑器、Memory Card 融合和 MCP 工具迁移到内核层。
 
 ### 13.5 v0.63：多角色自治迭代协议
 
@@ -1855,7 +1855,7 @@ Tauri UI、Bun CLI、未来 MCP Server 和 Claude Code/Codex 调用入口都应�
 
 - Leader / Kernel Architect：维护 Local-first、Rust core、Tauri UI、Bun tooling、Kernel API、编译产物模型和用户信任边界。
 - PM / Developer Experience Strategist：定义高级个人开发者的体验、PRD、验收标准和隐私/信任要求。
-- Rust Kernel Engineer：实现 Draft、Skilllet、Kernel Policy、Rule Engine、Compiler、Provider、Tauri command 等核心能力。
+- Rust Kernel Engineer：实现 Draft、Memory Card、Kernel Policy、Rule Engine、Compiler、Provider、Tauri command 等核心能力。
 - UI / Desktop Experience Engineer：实现 Tauri + React 桌面体验；涉及视觉 polish 时优先调用 Claude Code，Codex 负责审核、集成和测试。
 - QA / User Advocate：审查数据丢失、静默覆盖、重复处理、噪声草稿、UI 卡顿、跨平台路径和 Rule CI 风险。
 
@@ -1869,8 +1869,8 @@ Tauri UI、Bun CLI、未来 MCP Server 和 Claude Code/Codex 调用入口都应�
 
 #### 当前迭代目标
 
-- Draft / Skilllet 可视化编辑器：允许编辑 `brief / body / tags / targets`，并支持清空 targets 作为休眠。
-- Skilllet 语义融合：由 Claude Code / Codex 做精炼，但结果进入 Draft Inbox，不直接覆盖原 Skilllet。
+- Draft / Memory Card 可视化编辑器：允许编辑 `brief / body / tags / targets`，并支持清空 targets 作为休眠。
+- Memory Card 语义融合：由 Claude Code / Codex 做精炼，但结果进入 Draft Inbox，不直接覆盖原 Memory Card。
 - UI 接入 Kernel Policy：在执行高风险动作前展示决策原因和审阅要求。
 
 ### 13.6 v0.64：Kernel Policy 强制门禁与写入审计
@@ -1880,7 +1880,7 @@ Tauri UI、Bun CLI、未来 MCP Server 和 Claude Code/Codex 调用入口都应�
 已落地的核心约束：
 
 - Tauri 写命令需要携带 confirmed policy；未确认时默认按 Manual policy 拦截。
-- `approve_draft`、`reject_draft`、`update_draft`、`update_skilllet`、`set_skilllet_targets`、`merge/fuse`、`promote/install`、`evolve_project`、`import_artifact_drifts`、`sync_project` 等项目级 mutation 都先构造 `KernelCommand` 并经过 `KernelPolicy`。
+- `approve_draft`、`reject_draft`、`update_draft`、`update_memory_card`、`set_memory_card_targets`、`merge/fuse`、`promote/install`、`evolve_project`、`import_artifact_drifts`、`sync_project` 等项目级 mutation 都先构造 `KernelCommand` 并经过 `KernelPolicy`。
 - React UI 在用户触发写操作时传递 confirmed policy；编辑器仍保留“审查变更 -> 确认保存”的流程。
 - 新增 `.agent-kernel/audit-log.jsonl`，记录 Tauri 项目 mutation 的 authorized / blocked 决策、风险等级、policy mode、原因和时间。
 - `sync_project` 写 `AGENTS.md` / `CLAUDE.md` / rules 前会检查 `project.lock.yml`。如果生成产物被手动修改，会阻止覆盖并要求先走 artifact import / reverse parse。
@@ -1888,8 +1888,8 @@ Tauri UI、Bun CLI、未来 MCP Server 和 Claude Code/Codex 调用入口都应�
 下一步：
 
 - confirmed policy 已升级为 command payload hash / decision token：plan 阶段签发 token，执行阶段校验 project + command + payload，并一次性消费，避免前端或 AI 入口复用“已确认”。
-- Draft 批准已增加同 ID Skilllet 冲突保护：不会再直接覆盖已有 Skilllet，而是要求先审查或合并。
-- Draft / Skilllet 编辑已增加 schema 防线：空标题/空正文、未知 kind/scope、未知 Agent target 会被后端拒绝。
+- Draft 批准已增加同 ID Memory Card 冲突保护：不会再直接覆盖已有 Memory Card，而是要求先审查或合并。
+- Draft / Memory Card 编辑已增加 schema 防线：空标题/空正文、未知 kind/scope、未知 Agent target 会被后端拒绝。
 - 在 UI 中展示 Audit Log，并基于 audit entry 提供回滚/checkpoint。
 - 将启动静默整理的写入也接入 audit，保持“静默增量”和“可追踪”同时成立。
 
@@ -1905,7 +1905,7 @@ Tauri UI、Bun CLI、未来 MCP Server 和 Claude Code/Codex 调用入口都应�
 - `sync_project` 不再阻塞按钮点击，而是先通过 Kernel Policy，再启动后台编译任务；完成后 UI 自动刷新当前项目快照。
 - `evolve_project` 保持后台整理，并在任务完成后自动刷新 Dashboard / Snapshot，让新 Draft 出现在审阅区。
 - Job History 写入 `~/.agent-kernel/jobs/history.jsonl`，重启后仍可恢复最近任务记录。
-- Application Service 新增页面级读模型：`ProjectReviewInbox`、`ProjectSkillletLibrary`、`ProjectAssignmentView`、`ProjectQualityView`。后续前端可以按页面加载，而不是切换项目时拉取全量 snapshot。
+- Application Service 新增页面级读模型：`ProjectReviewInbox`、`ProjectMemory CardLibrary`、`ProjectAssignmentView`、`ProjectQualityView`。后续前端可以按页面加载，而不是切换项目时拉取全量 snapshot。
 
 这一版确认的产品原则：
 
@@ -1916,8 +1916,8 @@ Tauri UI、Bun CLI、未来 MCP Server 和 Claude Code/Codex 调用入口都应�
 
 下一步大版本建议：
 
-- 把 Draft、Skilllet、Assignment、Quality 页面切到对应 read model，进一步降低切项目和页面切换成本。
-- 将 Skilllet 融合、项目推荐和 Claude Code / Codex 深度整理全部接入 Job Manager。
+- 把 Draft、Memory Card、Assignment、Quality 页面切到对应 read model，进一步降低切项目和页面切换成本。
+- 将 Memory Card 融合、项目推荐和 Claude Code / Codex 深度整理全部接入 Job Manager。
 - 在 UI 中增加按项目/状态筛选 Job History，并支持清理过期日志。
 - 增加“重试”能力：失败任务可以用同一 payload 重新排队，但仍要经过 Kernel Policy。
 
@@ -1928,8 +1928,8 @@ Tauri UI、Bun CLI、未来 MCP Server 和 Claude Code/Codex 调用入口都应�
 已落地：
 
 - Draft Inbox 页面优先读取 `get_project_review_inbox`，只加载待审草稿。
-- Skilllet Library / Catalog 页面优先读取 `get_project_skilllet_library`，共享项目 Skilllets、全局 Skilllets 和包状态。
-- Assignment 页面优先读取 `get_project_assignment_view`，只加载目标 Agent 和 Skilllet target matrix。
+- Memory Card Library / Catalog 页面优先读取 `get_project_memory_card_library`，共享项目 Memory Cards、全局 Memory Cards 和包状态。
+- Assignment 页面优先读取 `get_project_assignment_view`，只加载目标 Agent 和 Memory Card target matrix。
 - 右侧质量状态优先读取 `get_project_quality_view`，避免为了显示 Rule CI / warnings 拉取整个项目。
 - 完整 `ProjectSnapshot` 仍作为兼容 fallback 和调试路径存在；后续可以逐页移除对它的主路径依赖。
 - 任务中心增加失败/取消任务的“重试”入口，先支持扫描、整理历史和同步三类主任务。
@@ -1957,7 +1957,7 @@ Tauri UI、Bun CLI、未来 MCP Server 和 Claude Code/Codex 调用入口都应�
 - Job history JSONL 持久化 replay payload，重启后仍能精确重试。
 - `scan_projects`、`evolve_project`、`sync_project` 创建任务时写入 replay payload。
 - 前端 Job Center 重试改为直接调用 `job.replay.command` 和 `job.replay.args`，不再根据 `job.key` 猜测。
-- `fuse_skilllets_to_draft` 改为后台 Job，立即返回 job ticket；任务中心展示读取源 Skilllet、写入融合草稿和完成/失败结果。
+- `fuse_memory_cards_to_draft` 改为后台 Job，立即返回 job ticket；任务中心展示读取源 Memory Card、写入融合草稿和完成/失败结果。
 - 融合任务也保存 replay payload，并在完成后刷新 Dashboard、页面读模型和兼容 snapshot。
 - Job Center 增加状态筛选、类型筛选和“可重试”标记，让任务历史积累后仍然能快速定位失败任务或确认哪些任务支持精确重放。
 

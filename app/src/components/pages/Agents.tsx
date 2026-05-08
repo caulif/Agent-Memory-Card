@@ -1,17 +1,16 @@
 import React from "react";
-import { Check, Circle, GitBranch, Loader2 } from "lucide-react";
-import { EmptyState, Panel } from "../common";
+import { Check, Circle, GitBranch, Loader2, MessageSquareText, Save, Trash2 } from "lucide-react";
+import { ActionButton, EmptyState, Panel } from "../common";
 import {
-  deriveSkillletEvolution,
-  describeSkillletPlainly,
   formatAgent,
-  nextSkillletTargets,
-  type EvolutionInsight,
-  type ProjectAction,
+  nextMemoryCardTargets,
+  translateKind,
   type ProjectAssignmentView,
-  type ProjectSkillletLibrary,
+  type ProjectMemoryCardLibrary,
   type ProjectSnapshot,
   type PanelPageProps,
+  type RegisteredProject,
+  type MemoryCardRecord,
 } from "../../ui-helpers";
 
 export function Agents({
@@ -21,36 +20,332 @@ export function Agents({
   pendingAction,
   disabled,
   onAction,
-}: PanelPageProps & { assignment: ProjectAssignmentView | null; library: ProjectSkillletLibrary | null }) {
+  projects,
+}: PanelPageProps & {
+  assignment: ProjectAssignmentView | null;
+  library: ProjectMemoryCardLibrary | null;
+  projects: RegisteredProject[];
+}) {
   const agents = assignment?.target_matrix.agents ?? snapshot?.target_matrix.agents ?? [];
   const rows = assignment?.target_matrix.rows ?? snapshot?.target_matrix.rows ?? [];
-  const skilllets = library?.skilllets ?? snapshot?.skilllets ?? [];
+  const memory_cards = library?.memory_cards ?? snapshot?.memory_cards ?? [];
+  const globalMemoryCards = library?.global_memory_cards ?? snapshot?.global_memory_cards ?? [];
   const togglingKey = pendingAction.startsWith("切换-") ? pendingAction : "";
-  const evolutionSnapshot = React.useMemo<ProjectSnapshot | null>(() => {
-    if (snapshot) return snapshot;
-    if (!assignment && !library) return null;
-    return {
-      project_path: assignment?.project_path ?? library?.project_path ?? "",
-      drafts: [],
-      skilllets,
-      global_skilllets: library?.global_skilllets ?? [],
-      observations: [],
-      catalog_status: library?.catalog_status ?? { items: [] },
-      target_matrix: assignment?.target_matrix ?? { agents, rows },
-      rule_ci: { passed: 0, failed: 0 },
-      build_preview: { actions: [], warnings: [] },
-      status: { warnings: [] },
-    };
-  }, [agents, assignment, library, rows, skilllets, snapshot]);
+  const [dragOverAgent, setDragOverAgent] = React.useState<string | null>(null);
+  const [hasUnwrittenChanges, setHasUnwrittenChanges] = React.useState(false);
+  const [reloadPromptStatus, setReloadPromptStatus] = React.useState("");
+  const projectLabel = React.useMemo(() => {
+    const path = assignment?.project_path ?? snapshot?.project_path ?? "";
+    return path.split(/[\\/]/).filter(Boolean).pop() || "当前项目";
+  }, [assignment?.project_path, snapshot?.project_path]);
+  const projectPath = assignment?.project_path ?? snapshot?.project_path ?? "";
+  const allAvailable = React.useMemo(
+    () => dedupeAvailableMemoryCards([...memory_cards, ...globalMemoryCards], projectPath),
+    [globalMemoryCards, projectPath, memory_cards],
+  );
+  const assignmentDisabled = disabled;
+  const syncBusy = pendingAction === "写入-Agent-文件";
+  const clearAllBusy = pendingAction === "清空-全部分配";
 
-  /** 解析正在切换中的 skilllet_id 和 agent */
+  React.useEffect(() => {
+    setHasUnwrittenChanges(false);
+    setReloadPromptStatus("");
+  }, [projectPath]);
+
+  /** 解析正在切换中的 memory_card_id 和 agent */
   const togglingParts = togglingKey ? togglingKey.replace("切换-", "").split("|") : [];
-  const togglingSkillletId = togglingParts[0] ?? "";
+  const togglingMemoryCardId = togglingParts[0] ?? "";
   const togglingAgent = togglingParts[1] ?? "";
+
+  /** 根据 agent 获取已分配的 memory_card */
+  function getEquippedFor(agent: string) {
+    return rows.filter((row) => row.targets[agent]);
+  }
+
+  /** 根据 kind 分组 memory_cards */
+  const poolByKind = React.useMemo(() => {
+    const map: Record<string, typeof allAvailable> = {};
+    for (const s of allAvailable) {
+      const kind = s.kind ?? "other";
+      if (!map[kind]) map[kind] = [];
+      map[kind].push(s);
+    }
+    return map;
+  }, [allAvailable]);
+
+  /** 判断 memory_card 是否已分配给任意 agent */
+  function isEquippedAnywhere(memory_cardId: string) {
+    return rows.some((row) => row.memory_card_id === memory_cardId && Object.values(row.targets).some(Boolean));
+  }
+
+  function startMemoryCardDrag(event: React.DragEvent<HTMLElement>, memory_card: Pick<MemoryCardRecord, "id" | "title" | "scope">) {
+    event.dataTransfer.effectAllowed = "copyMove";
+    event.dataTransfer.setData("application/x-memory_card-id", memory_card.id);
+    event.dataTransfer.setData("application/x-memory-card-id", memory_card.id);
+    event.dataTransfer.setData("text/plain", memory_card.id);
+  }
+
+  async function runAssignmentAction(
+    actionKey: string,
+    doneMessage: string,
+    command: string,
+    args: Record<string, unknown>,
+  ) {
+    await onAction(actionKey, doneMessage, command, args);
+    setHasUnwrittenChanges(true);
+    setReloadPromptStatus("");
+  }
+
+  function assignMemoryCardToAgent(memory_cardId: string, agent: string) {
+    const row = rows.find((item) => item.memory_card_id === memory_cardId);
+    const memory_card = allAvailable.find((item) => item.id === memory_cardId);
+    const title = row?.title ?? memory_card?.title ?? memory_cardId;
+    const currentTargets = row ? agents.filter((a) => row.targets[a]) : [];
+    const nextTargets = nextMemoryCardTargets(currentTargets, agent, true);
+    void runAssignmentAction(
+      `切换-${memory_cardId}|${agent}`,
+      `已更新"${title}"的目标智能体`,
+      "set_memory_card_targets",
+      { id: memory_cardId, targets: nextTargets },
+    );
+  }
+
+  function clearAgentAssignments(agent: string) {
+    void runAssignmentAction(
+      `清空-${agent}`,
+      `已清空 ${formatAgent(agent)} 的分配`,
+      "clear_memory_card_targets",
+      { agent },
+    );
+  }
+
+  function clearAllAssignments() {
+    void runAssignmentAction(
+      "清空-全部分配",
+      "已清空本项目全部分配",
+      "clear_memory_card_targets",
+      { agent: null },
+    );
+  }
+
+  async function syncAgentFiles() {
+    await onAction(
+      "写入-Agent-文件",
+      "已写入 Agent 文件。新会话会自动生效；当前会话可使用重读提示。",
+      "sync_project",
+      {},
+    );
+    setHasUnwrittenChanges(false);
+  }
+
+  async function copyReloadPrompt() {
+    const prompt = `请重新读取本项目的 AGENTS.md / CLAUDE.md 以及 .agents/.claude skills，并在当前会话中遵循最新 Enabled Memory Cards。项目路径：${projectPath}`;
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setReloadPromptStatus("已复制重读提示");
+    } catch {
+      setReloadPromptStatus(prompt);
+    }
+  }
+
+  function handleDrop(event: React.DragEvent<HTMLElement>, agent: string) {
+    event.preventDefault();
+    const memory_cardId =
+      event.dataTransfer.getData("application/x-memory_card-id") ||
+      event.dataTransfer.getData("application/x-memory-card-id") ||
+      event.dataTransfer.getData("text/plain");
+    setDragOverAgent(null);
+    if (!memory_cardId || assignmentDisabled) return;
+    assignMemoryCardToAgent(memory_cardId, agent);
+  }
+
+  /** 计算覆盖率 */
+  const totalMemoryCards = allAvailable.length;
+  const assignedMemoryCards = rows.filter((row) => Object.values(row.targets).some(Boolean)).length;
+  const coveragePercent = totalMemoryCards > 0 ? Math.round((assignedMemoryCards / totalMemoryCards) * 100) : 0;
+  const unassignedCount = totalMemoryCards - assignedMemoryCards;
 
   return (
     <div className="stack">
-      <Panel title="当前项目 Skilllet 分配矩阵" subtitle="这里只分配当前项目已安装/已批准的 Skilllet 到目标智能体；全局库需先加入当前项目后才会出现在这里。" icon={GitBranch}>
+      {/* ===== Loadout 标题 ===== */}
+      <Panel title="Memory Card Loadout" subtitle="为当前项目配置记忆卡；分配后写入 Agent 文件才会更新生成产物。" icon={GitBranch}>
+        {agents.length === 0 ? (
+          <EmptyState title="暂无目标智能体" description="当前项目未检测到 Codex 或 Claude Code 配置。" />
+        ) : (
+          <>
+            <div className="target-scope-row">
+              <div className="target-scope-label">
+                <strong>当前项目</strong>
+                <span>{projectLabel}</span>
+              </div>
+              <div className="target-scope-current">
+                <strong>{hasUnwrittenChanges ? "有未写入变更" : "生成产物待检查"}</strong>
+                <span>{projectPath}</span>
+              </div>
+              <div className="assignment-toolbar">
+                <ActionButton
+                  icon={Save}
+                  label="写入 Agent 文件"
+                  busyLabel="写入中"
+                  busy={syncBusy}
+                  disabled={disabled || syncBusy}
+                  onClick={syncAgentFiles}
+                />
+                <ActionButton
+                  icon={MessageSquareText}
+                  label="提示重读"
+                  busyLabel="准备中"
+                  busy={false}
+                  disabled={!projectPath}
+                  onClick={copyReloadPrompt}
+                />
+                <ActionButton
+                  variant="danger"
+                  icon={Trash2}
+                  label="清空本项目分配"
+                  busyLabel="清空中"
+                  busy={clearAllBusy}
+                  disabled={assignmentDisabled || clearAllBusy || rows.length === 0}
+                  onClick={clearAllAssignments}
+                />
+              </div>
+            </div>
+            {reloadPromptStatus ? <div className="target-apply-note">{reloadPromptStatus}</div> : null}
+            <div className="loadout-grid">
+              {agents.map((agent) => {
+                const equipped = getEquippedFor(agent);
+                const clearAgentBusy = pendingAction === `清空-${agent}`;
+                return (
+                  <div
+                    className={`loadout-column ${dragOverAgent === agent ? "drag-over" : ""}`}
+                    key={agent}
+                    onDragOver={(event) => {
+                      if (assignmentDisabled) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "copy";
+                      setDragOverAgent(agent);
+                    }}
+                    onDragEnter={(event) => {
+                      if (assignmentDisabled) return;
+                      event.preventDefault();
+                      setDragOverAgent(agent);
+                    }}
+                    onDragLeave={() => setDragOverAgent((current) => (current === agent ? null : current))}
+                    onDrop={(event) => handleDrop(event, agent)}
+                  >
+                    <h3>
+                      <span className="loadout-dot" />
+                      {formatAgent(agent)}
+                      <span className="loadout-count">
+                        {equipped.length} 已装备
+                      </span>
+                      <button
+                        className="icon-action"
+                        disabled={assignmentDisabled || clearAgentBusy || equipped.length === 0}
+                        title={`清空 ${formatAgent(agent)} 的全部分配`}
+                        aria-label={`清空 ${formatAgent(agent)} 的全部分配`}
+                        onClick={() => clearAgentAssignments(agent)}
+                      >
+                        {clearAgentBusy ? <Loader2 className="spin" size={13} /> : <Trash2 size={13} />}
+                      </button>
+                    </h3>
+                    {equipped.length === 0 ? (
+                      <p className="empty" style={{ textAlign: "center", padding: "12px 0" }}>
+                        暂无装备的技能片段
+                      </p>
+                    ) : (
+                      equipped.map((row) => (
+                        <button
+                          key={`${row.memory_card_id}-${agent}`}
+                          className="equipped-item"
+                          draggable={!assignmentDisabled}
+                          disabled={assignmentDisabled}
+                          title={`点击取消分配给 ${formatAgent(agent)}`}
+                          onDragStart={(event) => startMemoryCardDrag(event, { id: row.memory_card_id, title: row.title, scope: row.scope ?? "project" })}
+                          onClick={() => {
+                            const currentTargets = agents.filter((a) => row.targets[a]);
+                            const nextTargets = nextMemoryCardTargets(currentTargets, agent, false);
+                            void runAssignmentAction(
+                              `切换-${row.memory_card_id}|${agent}`,
+                              `已更新"${row.title}"的目标智能体`,
+                              "set_memory_card_targets",
+                              { id: row.memory_card_id, targets: nextTargets },
+                            );
+                          }}
+                        >
+                          {togglingMemoryCardId === row.memory_card_id && togglingAgent === agent ? (
+                            <Loader2 className="spin" size={13} />
+                          ) : (
+                            <Check size={13} className="equip-check" />
+                          )}
+                          <span className="equip-name">{row.title}</span>
+                          <span className="equip-kind">
+                            {row.scope === "global" ? "全局" : "项目"}
+                          </span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </Panel>
+
+      {/* ===== 技能池 ===== */}
+      <div className="skill-pool">
+        <div className="skill-pool-head">
+          <h3>可用技能池</h3>
+          <span>拖到上方智能体完成分配</span>
+        </div>
+        {allAvailable.length === 0 ? (
+          <EmptyState title="暂无可用技能" description="批准草稿后，这里会显示可分配的技能片段。" />
+        ) : (
+          <div className="pool-groups">
+            {(["rule", "procedure", "constraint", "preference", "other"] as const).map((kind) => {
+              const items = kind === "other"
+                ? allAvailable.filter((item) => !["rule", "procedure", "constraint", "preference"].includes(item.kind))
+                : poolByKind[kind];
+              if (!items || items.length === 0) return null;
+              return (
+                <div className="pool-group" key={kind}>
+                  <h4>{kind === "other" ? "其他" : translateKind(kind)}</h4>
+                  <div className="pool-items">
+                    {items.map((s) => {
+                      const equipped = isEquippedAnywhere(s.id);
+                      return (
+                        <div
+                          key={s.id}
+                          role="button"
+                          tabIndex={assignmentDisabled ? -1 : 0}
+                          className={`pool-item ${equipped ? "equipped" : ""}`}
+                          draggable={!assignmentDisabled}
+                          onDragStart={(event) => startMemoryCardDrag(event, s)}
+                          onDragEnd={() => setDragOverAgent(null)}
+                          aria-disabled={assignmentDisabled}
+                          title={s.title}
+                          onKeyDown={(event) => {
+                            if (assignmentDisabled || event.key !== "Enter" || agents.length === 0) return;
+                            assignMemoryCardToAgent(s.id, agents[0]!);
+                          }}
+                        >
+                          {equipped ? <Check size={12} className="pool-check" /> : <Circle size={12} />}
+                          <span className="pool-title">{s.title}</span>
+                          <span className="pool-source">{sourceScopeLabel(s)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ===== 分配矩阵（原有功能保留） ===== */}
+      <Panel title="分配矩阵" subtitle="精细管理每个 Memory Card 到每个智能体的分配关系。" icon={GitBranch}>
         {rows.length === 0 ? (
           <EmptyState title="暂无分配数据" description="安装包或批准技能片段后，这里会显示目标智能体矩阵。" />
         ) : (
@@ -64,26 +359,26 @@ export function Agents({
             {rows.flatMap((row) => {
               const currentTargets = agents.filter((a) => row.targets[a]);
               return [
-                <div key={`${row.skilllet_id}-title`} className="matrix-title">
+                <div key={`${row.memory_card_id}-title`} className="matrix-title">
                   {row.title}
                   <span className="matrix-scope">{row.scope === "global" ? "全局来源" : "项目"}</span>
                 </div>,
                 ...agents.map((agent) => {
                   const isOn = row.targets[agent];
-                  const isToggling = togglingSkillletId === row.skilllet_id && togglingAgent === agent;
-                  const nextTargets = nextSkillletTargets(currentTargets, agent, !isOn);
+                  const isToggling = togglingMemoryCardId === row.memory_card_id && togglingAgent === agent;
+                  const nextTargets = nextMemoryCardTargets(currentTargets, agent, !isOn);
                   return (
                     <button
-                      key={`${row.skilllet_id}-${agent}`}
+                      key={`${row.memory_card_id}-${agent}`}
                       className={`matrix-cell interactive ${isOn ? "on" : "off"} ${isToggling ? "toggling" : ""}`}
-                      disabled={disabled}
+                      disabled={assignmentDisabled}
                       title={isOn ? `点击取消分配给 ${formatAgent(agent)}` : `点击分配给 ${formatAgent(agent)}`}
                       onClick={() =>
-                        onAction(
-                          `切换-${row.skilllet_id}|${agent}`,
+                        runAssignmentAction(
+                          `切换-${row.memory_card_id}|${agent}`,
                           `已更新"${row.title}"的目标智能体`,
-                          "set_skilllet_targets",
-                          { id: row.skilllet_id, targets: nextTargets },
+                          "set_memory_card_targets",
+                          { id: row.memory_card_id, targets: nextTargets },
                         )
                       }
                     >
@@ -102,114 +397,47 @@ export function Agents({
           </div>
         )}
       </Panel>
-
-      {/* 工程化进化视图 */}
-      {skilllets.length > 0 && evolutionSnapshot ? (
-        <Panel title="工程化技能进化视图" subtitle="只展示当前项目已安装或已批准的 Skilllet，帮助判断哪些真正会参与分配和编译。" icon={GitBranch}>
-          <div className="evolution-grid">
-            {skilllets.map((skilllet) => {
-              const insight = deriveSkillletEvolution(skilllet, evolutionSnapshot);
-              const targetRow = rows.find((row) => row.skilllet_id === skilllet.id);
-              return <EvolutionCard key={skilllet.id} insight={insight} skilllet={skilllet} targetRow={targetRow} />;
-            })}
-          </div>
-        </Panel>
-      ) : (
-        <Panel title="工程化技能进化视图" subtitle="当前项目还没有可分析的 Skilllet。" icon={GitBranch}>
-          <EmptyState title="暂无进化数据" description="批准或加入当前项目 Skilllet 后，这里会基于分配目标、草稿和记录元数据生成进化视图。" />
-        </Panel>
-      )}
     </div>
   );
 }
 
-/** 技能进化卡片：进化树 + 置信度/稳定度 + 时间线 + 冲突预警 + 活跃状态 */
-function EvolutionCard({
-  insight,
-  skilllet,
-  targetRow,
-}: {
-  insight: EvolutionInsight;
-  skilllet: import("../../ui-helpers").SkillletRecord;
-  targetRow?: ProjectAssignmentView["target_matrix"]["rows"][number];
-}) {
-  const assignedAgents = targetRow
-    ? Object.entries(targetRow.targets)
-        .filter(([, enabled]) => enabled)
-        .map(([agent]) => formatAgent(agent))
-    : [];
-  return (
-    <article className="evolution-card">
-      <div className="evolution-head">
-        <h3>{insight.title}</h3>
-        <div className="evolution-badges">
-          <span className={`activity-badge ${insight.activity}`}>
-            {insight.activity === "active" ? "活跃" : "未分配"}
-          </span>
-          {insight.promotion_candidate ? <span className="promotion-badge">↑ 提升候选</span> : null}
-        </div>
-      </div>
+function dedupeAvailableMemoryCards(memory_cards: MemoryCardRecord[], projectPath: string): MemoryCardRecord[] {
+  const entries: MemoryCardRecord[] = [];
+  const indexByKey = new Map<string, number>();
 
-      <div className="evolution-summary">
-        <span>{skilllet.scope === "global" ? "全局 Skilllet" : "项目 Skilllet"}</span>
-        <span>{assignedAgents.length > 0 ? `已分配给 ${assignedAgents.join(" / ")}` : "尚未分配给智能体"}</span>
-      </div>
+  for (const memory_card of memory_cards) {
+    const key = logicalMemoryCardKey(memory_card);
+    const existingIndex = indexByKey.get(key);
+    if (existingIndex == null) {
+      indexByKey.set(key, entries.length);
+      entries.push(memory_card);
+      continue;
+    }
 
-      {insight.evolution_tree.length > 0 ? (
-        <div className="evolution-source">
-          <span className="evolution-label">来源</span>
-          <p>{insight.evolution_tree.map((edge) => edge.label).join("；")}</p>
-        </div>
-      ) : null}
+    const current = entries[existingIndex]!;
+    if (!isProjectSource(current, projectPath) && isProjectSource(memory_card, projectPath)) {
+      entries[existingIndex] = memory_card;
+    }
+  }
 
-      {/* 置信度 & 稳定度 */}
-      <div className="metrics-row">
-        <div className="confidence-bar-wrap">
-          <div className="bar-header">
-            <span>置信度</span>
-            <strong>{Math.round(insight.confidence * 100)}%</strong>
-          </div>
-          <div className="bar-track">
-            <div className="bar-fill confidence" style={{ width: `${insight.confidence * 100}%` }} />
-          </div>
-        </div>
-        <div className="confidence-bar-wrap">
-          <div className="bar-header">
-            <span>稳定度</span>
-            <strong>{Math.round(insight.stability * 100)}%</strong>
-          </div>
-          <div className="bar-track">
-            <div className="bar-fill stability" style={{ width: `${insight.stability * 100}%` }} />
-          </div>
-        </div>
-      </div>
+  return entries;
+}
 
-      {/* 时间线 */}
-      <div className="evolution-timeline">
-        <span className="evolution-label">时间线</span>
-        {insight.timeline.map((entry, idx) => (
-          <div className="timeline-entry" key={idx}>
-            <span className="timeline-dot" />
-            <time className="timeline-date">{entry.date}</time>
-            <span className="timeline-event">{entry.event}</span>
-          </div>
-        ))}
-      </div>
+function logicalMemoryCardKey(memory_card: MemoryCardRecord): string {
+  const id = memory_card.id.toLowerCase().replace(/^(project|global):/, "").trim();
+  const title = normalizeMemoryCardText(memory_card.title);
+  const bodyPrefix = normalizeMemoryCardText(memory_card.body).slice(0, 120);
+  return `${id || title}|${title}|${bodyPrefix}`;
+}
 
-      {/* 冲突预警 */}
-      {insight.conflicts.length > 0 ? (
-        <div className="conflict-section">
-          <span className="evolution-label conflict-label">冲突预警</span>
-          {insight.conflicts.map((c, idx) => (
-            <p className="conflict-warning" key={idx}>
-              {c}
-            </p>
-          ))}
-        </div>
-      ) : null}
+function normalizeMemoryCardText(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, " ").trim();
+}
 
-      {/* 一句话描述 */}
-      <p className="evolution-description">{describeSkillletPlainly(skilllet)}</p>
-    </article>
-  );
+function isProjectSource(memory_card: MemoryCardRecord, projectPath: string): boolean {
+  return memory_card.scope === "project" || memory_card.source_project === projectPath || memory_card.id.startsWith("project:");
+}
+
+function sourceScopeLabel(memory_card: MemoryCardRecord): string {
+  return memory_card.scope === "global" || memory_card.id.startsWith("global:") ? "来源：全局" : "来源：项目";
 }

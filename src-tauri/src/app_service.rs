@@ -1,15 +1,15 @@
-use std::path::{Path, PathBuf};
+﻿use std::path::{Path, PathBuf};
 use std::thread;
 
 use agent_kernel::{
     build, candidate, catalog, config, draft, fsutil, kernel, observation, project_registry,
-    rule_test, scanner, skilllet,
+    rule_test, scanner, memory_card,
 };
 use serde::Serialize;
 
 use crate::{
     DesktopJobReplay, DesktopJobStart, DesktopTaskStore, DraftMergeInput, DraftUpdateInput,
-    SkillletMergeInput, SkillletUpdateInput,
+    MemoryCardMergeInput, MemoryCardUpdateInput,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -17,9 +17,9 @@ pub struct ProjectDashboard {
     pub project_path: String,
     pub candidate_count: usize,
     pub draft_count: usize,
-    pub skilllet_count: usize,
+    pub memory_card_count: usize,
     pub observation_count: usize,
-    pub global_skilllet_count: usize,
+    pub global_memory_card_count: usize,
     pub enabled_agents: Vec<String>,
     pub warning_count: usize,
 }
@@ -37,10 +37,10 @@ pub struct ProjectCandidateInbox {
 }
 
 #[derive(Debug, Serialize)]
-pub struct ProjectSkillletLibrary {
+pub struct ProjectMemoryCardLibrary {
     pub project_path: String,
-    pub skilllets: Vec<skilllet::SkillletRecord>,
-    pub global_skilllets: Vec<skilllet::SkillletRecord>,
+    pub memory_cards: Vec<memory_card::MemoryCardRecord>,
+    pub global_memory_cards: Vec<memory_card::MemoryCardRecord>,
     pub catalog_status: catalog::CatalogStatus,
 }
 
@@ -48,7 +48,7 @@ pub struct ProjectSkillletLibrary {
 pub struct ProjectAssignmentView {
     pub project_path: String,
     pub enabled_agents: Vec<String>,
-    pub target_matrix: skilllet::SkillletTargetMatrix,
+    pub target_matrix: memory_card::MemoryCardTargetMatrix,
 }
 
 #[derive(Debug, Serialize)]
@@ -76,9 +76,9 @@ pub fn load_project_dashboard(
         project_path: fsutil::path_to_slash(&root),
         candidate_count: candidate::list_visible_candidates(&root)?.len(),
         draft_count: draft::load_reviewable_drafts(&root)?.len(),
-        skilllet_count: skilllet::load_skilllets(&root)?.len(),
+        memory_card_count: memory_card::load_memory_cards(&root)?.len(),
         observation_count: observation::count_observations(&root)?,
-        global_skilllet_count: skilllet::count_global_skilllets(home)?,
+        global_memory_card_count: memory_card::count_global_memory_cards(home)?,
         enabled_agents,
         warning_count: 0,
     })
@@ -100,12 +100,12 @@ pub fn load_project_candidate_inbox(project_root: &Path) -> anyhow::Result<Proje
     })
 }
 
-pub fn approve_candidate_to_skilllet(
+pub fn approve_candidate_to_memory_card(
     project_root: &Path,
     id: &str,
-) -> anyhow::Result<skilllet::SkillletRecord> {
+) -> anyhow::Result<memory_card::MemoryCardRecord> {
     let root = fsutil::normalize_project_root(project_root)?;
-    candidate::approve_candidate_to_skilllet(&root, id)
+    candidate::approve_candidate_to_memory_card(&root, id)
 }
 
 pub fn hide_candidate(
@@ -165,49 +165,49 @@ pub fn set_agent_enabled(project_root: &Path, agent: &str, enabled: bool) -> any
     config::set_agent_enabled(&root, agent, enabled)
 }
 
-pub fn set_skilllet_targets(
+pub fn set_memory_card_targets(
     project_root: &Path,
     id: &str,
     targets: Vec<String>,
 ) -> anyhow::Result<()> {
     let root = fsutil::normalize_project_root(project_root)?;
-    skilllet::set_skilllet_targets(&root, id, targets)
+    memory_card::set_memory_card_targets(&root, id, targets)
 }
 
-pub fn update_skilllet(
+pub fn update_memory_card(
     project_root: &Path,
     id: &str,
-    input: SkillletUpdateInput,
-) -> anyhow::Result<skilllet::SkillletRecord> {
+    input: MemoryCardUpdateInput,
+) -> anyhow::Result<memory_card::MemoryCardRecord> {
     let root = fsutil::normalize_project_root(project_root)?;
-    skilllet::update_skilllet(&root, id, skilllet_update_from_input(input))
+    memory_card::update_memory_card(&root, id, memory_card_update_from_input(input))
 }
 
-pub fn promote_skilllet_to_global(
+pub fn promote_memory_card_to_global(
     project_root: &Path,
     home: &Path,
     id: &str,
-) -> anyhow::Result<skilllet::SkillletRecord> {
+) -> anyhow::Result<memory_card::MemoryCardRecord> {
     let root = fsutil::normalize_project_root(project_root)?;
-    skilllet::promote_skilllet_to_global(&root, home, id)
+    memory_card::promote_memory_card_to_global(&root, home, id)
 }
 
-pub fn install_global_skilllet_to_project(
+pub fn install_global_memory_card_to_project(
     project_root: &Path,
     home: &Path,
     id: &str,
     targets: Vec<String>,
-) -> anyhow::Result<skilllet::SkillletRecord> {
+) -> anyhow::Result<memory_card::MemoryCardRecord> {
     let root = fsutil::normalize_project_root(project_root)?;
-    skilllet::install_global_skilllet_to_project(&root, home, id, targets)
+    memory_card::install_global_memory_card_to_project(&root, home, id, targets)
 }
 
-pub fn merge_skilllets(
+pub fn merge_memory_cards(
     project_root: &Path,
-    input: SkillletMergeInput,
+    input: MemoryCardMergeInput,
 ) -> anyhow::Result<()> {
     let root = fsutil::normalize_project_root(project_root)?;
-    skilllet::merge_skilllets(
+    memory_card::merge_memory_cards(
         &root,
         &input.id,
         &input.title,
@@ -216,13 +216,13 @@ pub fn merge_skilllets(
     )
 }
 
-pub fn attach_skilllet_to_skill(
+pub fn attach_memory_card_to_skill(
     project_root: &Path,
-    skilllet_id: &str,
+    memory_card_id: &str,
     skill_id: &str,
 ) -> anyhow::Result<()> {
     let root = fsutil::normalize_project_root(project_root)?;
-    config::add_skill_supplement(&root, skill_id, skilllet_id)
+    config::add_skill_supplement(&root, skill_id, memory_card_id)
 }
 
 pub fn install_catalog_package(
@@ -255,6 +255,15 @@ pub fn compile_project(project_root: &Path) -> anyhow::Result<build::BuildReport
     build::sync_project(&root)
 }
 
+pub fn sync_project_importing_artifact_drifts(
+    project_root: &Path,
+) -> anyhow::Result<build::ArtifactImportReport> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    let import = build::import_artifact_drifts(&root)?;
+    build::sync_project(&root)?;
+    Ok(import)
+}
+
 fn draft_update_from_input(input: DraftUpdateInput) -> draft::DraftUpdate {
     draft::DraftUpdate {
         title: input.title,
@@ -268,8 +277,8 @@ fn draft_update_from_input(input: DraftUpdateInput) -> draft::DraftUpdate {
     }
 }
 
-fn skilllet_update_from_input(input: SkillletUpdateInput) -> skilllet::SkillletUpdate {
-    skilllet::SkillletUpdate {
+fn memory_card_update_from_input(input: MemoryCardUpdateInput) -> memory_card::MemoryCardUpdate {
+    memory_card::MemoryCardUpdate {
         title: input.title,
         body: input.body,
         brief: input.brief,
@@ -280,15 +289,15 @@ fn skilllet_update_from_input(input: SkillletUpdateInput) -> skilllet::SkillletU
     }
 }
 
-pub fn load_project_skilllet_library(
+pub fn load_project_memory_card_library(
     project_root: &Path,
     home: &Path,
-) -> anyhow::Result<ProjectSkillletLibrary> {
+) -> anyhow::Result<ProjectMemoryCardLibrary> {
     let root = fsutil::normalize_project_root(project_root)?;
-    Ok(ProjectSkillletLibrary {
+    Ok(ProjectMemoryCardLibrary {
         project_path: fsutil::path_to_slash(&root),
-        skilllets: skilllet::load_skilllets(&root)?,
-        global_skilllets: skilllet::load_global_skilllets(home)?,
+        memory_cards: memory_card::load_memory_cards(&root)?,
+        global_memory_cards: memory_card::load_global_memory_cards(home)?,
         catalog_status: catalog::catalog_status(&root)?,
     })
 }
@@ -306,7 +315,7 @@ pub fn load_project_assignment_view(project_root: &Path) -> anyhow::Result<Proje
     Ok(ProjectAssignmentView {
         project_path: fsutil::path_to_slash(&root),
         enabled_agents,
-        target_matrix: skilllet::skilllet_target_matrix(&root)?,
+        target_matrix: memory_card::memory_card_target_matrix(&root)?,
     })
 }
 
@@ -368,7 +377,7 @@ pub fn start_evolve_project_job(
         background_store.job_step(
             &background_job_id,
             "整理提炼材料",
-            "正在脱敏、过滤噪声，并拼接可用于 Skilllet 合成的高价值材料；低价值片段不会进入推理阶段",
+            "正在脱敏、过滤噪声，并拼接可用于 Memory Card 合成的高价值材料；低价值片段不会进入推理阶段",
             55,
         );
         if background_store.cancel_requested(&background_job_id) {
@@ -488,7 +497,7 @@ pub fn start_sync_project_job(
     let job_id = task_store.begin_job(
         "同步",
         "编译 Agent 产物",
-        "正在将已批准 Skilllet 编译到 Claude Code / Codex",
+        "正在将已批准 Memory Card 编译到 Claude Code / Codex",
         18,
     );
     task_store.attach_replay(
@@ -517,33 +526,52 @@ pub fn start_sync_project_job(
         }
         background_store.job_step(
             &job_id,
+            "导入漂移草稿",
+            "正在把 CLAUDE.md / AGENTS.md 手工改动导入 Draft，避免覆盖",
+            58,
+        );
+        if background_store.cancel_requested(&job_id) {
+            background_store.finish_job(&job_id, "同步已取消，未导入漂移或写入 Agent 产物");
+            return;
+        }
+        background_store.job_step(
+            &job_id,
             "写入 Agent 产物",
             "正在全量编译并写入 Claude Code / Codex 目标文件",
             76,
         );
-        match build::sync_project(Path::new(&background_project_path)) {
-            Ok(_) => background_store.finish_job(&job_id, "已同步生成产物"),
+        match sync_project_importing_artifact_drifts(Path::new(&background_project_path)) {
+            Ok(report) => {
+                if report.created > 0 {
+                    background_store.finish_job(
+                        &job_id,
+                        &format!("已导入 {} 条漂移草稿并同步生成产物", report.created),
+                    );
+                } else {
+                    background_store.finish_job(&job_id, "已同步生成产物");
+                }
+            }
             Err(error) => background_store.finish_job(&job_id, &format!("同步失败：{error}")),
         }
     });
     start
 }
 
-pub fn start_fuse_skilllets_to_draft_job(
+pub fn start_fuse_memory_cards_to_draft_job(
     task_store: DesktopTaskStore,
     project_path: String,
-    input: SkillletMergeInput,
+    input: MemoryCardMergeInput,
 ) -> DesktopJobStart {
     let job_id = task_store.begin_job(
-        "融合Skilllet",
+        "融合 Memory Card",
         "创建融合草稿",
-        "正在把多个 Skilllet 合成为一条可审阅草稿",
+        "正在把多个 Memory Card 合成为一条可审阅草稿",
         15,
     );
     task_store.attach_replay(
         &job_id,
         DesktopJobReplay {
-            command: "fuse_skilllets_to_draft".to_string(),
+            command: "fuse_memory_cards_to_draft".to_string(),
             args: serde_json::json!({
                 "projectPath": project_path,
                 "input": input,
@@ -558,9 +586,9 @@ pub fn start_fuse_skilllets_to_draft_job(
     thread::spawn(move || {
         background_store.job_step(
             &job_id,
-            "读取源 Skilllet",
+            "读取源 Memory Card",
             &format!(
-                "正在读取 {} 个源 Skilllet 并准备融合上下文",
+                "正在读取 {} 个源 Memory Card 并准备融合上下文",
                 background_input.sources.len()
             ),
             38,
@@ -572,10 +600,10 @@ pub fn start_fuse_skilllets_to_draft_job(
         background_store.job_step(
             &job_id,
             "写入融合草稿",
-            "正在生成可编辑、可拒绝、可批准的 Draft Skilllet",
+            "正在生成可编辑、可拒绝、可批准的 Draft Memory Card",
             76,
         );
-        let result = draft::fuse_skilllets_to_draft(
+        let result = draft::fuse_memory_cards_to_draft(
             Path::new(&background_project_path),
             &background_input.id,
             &background_input.title,
@@ -583,7 +611,7 @@ pub fn start_fuse_skilllets_to_draft_job(
             background_input.targets,
         );
         match result {
-            Ok(_) => background_store.finish_job(&job_id, "Skilllet 融合草稿已生成"),
+            Ok(_) => background_store.finish_job(&job_id, "Memory Card 融合草稿已生成"),
             Err(error) => background_store.finish_job(&job_id, &format!("融合失败：{error}")),
         }
     });
@@ -614,8 +642,8 @@ mod tests {
         .expect("seed draft");
     }
 
-    fn seed_skilllet(project_root: &Path, id: &str) {
-        skilllet::add_skilllet(
+    fn seed_memory_card(project_root: &Path, id: &str) {
+        memory_card::add_memory_card(
             project_root,
             id,
             "Use Axios",
@@ -624,31 +652,31 @@ mod tests {
             "project",
             vec!["codex".to_string()],
         )
-        .expect("seed skilllet");
+        .expect("seed memory_card");
     }
 
     #[test]
-    fn approve_draft_promotes_to_skilllet_and_removes_from_inbox() {
+    fn approve_draft_promotes_to_memory_card_and_removes_from_inbox() {
         let temp = tempfile::tempdir().expect("tempdir");
         seed_draft(temp.path(), "project:prefer-bun");
 
         approve_draft(temp.path(), "project:prefer-bun").expect("approve draft");
-        let skilllets = skilllet::load_skilllets(temp.path()).expect("skilllets");
+        let memory_cards = memory_card::load_memory_cards(temp.path()).expect("memory_cards");
 
-        assert_eq!(skilllets[0].id, "project:prefer-bun");
+        assert_eq!(memory_cards[0].id, "project:prefer-bun");
         assert_eq!(load_project_review_inbox(temp.path()).expect("inbox").drafts.len(), 0);
-        assert_eq!(skilllets.len(), 1);
+        assert_eq!(memory_cards.len(), 1);
     }
 
     #[test]
-    fn reject_draft_removes_draft_without_creating_skilllet() {
+    fn reject_draft_removes_draft_without_creating_memory_card() {
         let temp = tempfile::tempdir().expect("tempdir");
         seed_draft(temp.path(), "project:reject-me");
 
         reject_draft(temp.path(), "project:reject-me").expect("reject draft");
 
         assert_eq!(load_project_review_inbox(temp.path()).expect("inbox").drafts.len(), 0);
-        assert_eq!(skilllet::load_skilllets(temp.path()).expect("skilllets").len(), 0);
+        assert_eq!(memory_card::load_memory_cards(temp.path()).expect("memory_cards").len(), 0);
     }
 
     #[test]
@@ -707,12 +735,12 @@ mod tests {
     }
 
     #[test]
-    fn assignment_services_update_agent_and_skilllet_targets() {
+    fn assignment_services_update_agent_and_memory_card_targets() {
         let temp = tempfile::tempdir().expect("tempdir");
-        seed_skilllet(temp.path(), "project:use-axios");
+        seed_memory_card(temp.path(), "project:use-axios");
 
         set_agent_enabled(temp.path(), "claude-code", false).expect("disable agent");
-        set_skilllet_targets(
+        set_memory_card_targets(
             temp.path(),
             "project:use-axios",
             vec!["claude-code".to_string()],
@@ -725,20 +753,20 @@ mod tests {
             .target_matrix
             .rows
             .iter()
-            .find(|row| row.skilllet_id == "project:use-axios")
-            .expect("skilllet row");
+            .find(|row| row.memory_card_id == "project:use-axios")
+            .expect("memory_card row");
         assert_eq!(row.targets.get("claude-code"), Some(&true));
     }
 
     #[test]
-    fn update_skilllet_maps_editor_input_and_persists_fields() {
+    fn update_memory_card_maps_editor_input_and_persists_fields() {
         let temp = tempfile::tempdir().expect("tempdir");
-        seed_skilllet(temp.path(), "project:editable");
+        seed_memory_card(temp.path(), "project:editable");
 
-        let updated = update_skilllet(
+        let updated = update_memory_card(
             temp.path(),
             "project:editable",
-            SkillletUpdateInput {
+            MemoryCardUpdateInput {
                 title: Some("Use Axios Everywhere".to_string()),
                 body: Some("Use Axios for every frontend HTTP request.".to_string()),
                 brief: Some("Axios standard".to_string()),
@@ -748,7 +776,7 @@ mod tests {
                 scope: Some("project".to_string()),
             },
         )
-        .expect("update skilllet");
+        .expect("update memory_card");
 
         assert_eq!(updated.title, "Use Axios Everywhere");
         assert_eq!(updated.brief, "Axios standard");
@@ -756,15 +784,15 @@ mod tests {
     }
 
     #[test]
-    fn global_skilllet_services_promote_and_install_with_targets() {
+    fn global_memory_card_services_promote_and_install_with_targets() {
         let source = tempfile::tempdir().expect("source");
         let target = tempfile::tempdir().expect("target");
         let home = tempfile::tempdir().expect("home");
-        seed_skilllet(source.path(), "project:review-before-sync");
+        seed_memory_card(source.path(), "project:review-before-sync");
 
-        let global = promote_skilllet_to_global(source.path(), home.path(), "project:review-before-sync")
+        let global = promote_memory_card_to_global(source.path(), home.path(), "project:review-before-sync")
             .expect("promote global");
-        let installed = install_global_skilllet_to_project(
+        let installed = install_global_memory_card_to_project(
             target.path(),
             home.path(),
             &global.id,
@@ -774,41 +802,41 @@ mod tests {
 
         assert_eq!(global.id, "global:review-before-sync");
         assert_eq!(installed.id, "global:review-before-sync");
-        assert_eq!(skilllet::load_skilllets(target.path()).expect("skilllets").len(), 1);
+        assert_eq!(memory_card::load_memory_cards(target.path()).expect("memory_cards").len(), 1);
         let config = config::load_or_default_project_config(target.path()).expect("config");
-        assert_eq!(config.skilllets.include[0].targets, vec!["codex"]);
+        assert_eq!(config.memory_cards.include[0].targets, vec!["codex"]);
     }
 
     #[test]
-    fn merge_skilllets_service_creates_combined_skilllet() {
+    fn merge_memory_cards_service_creates_combined_memory_card() {
         let temp = tempfile::tempdir().expect("tempdir");
-        seed_skilllet(temp.path(), "project:ui-a");
-        seed_skilllet(temp.path(), "project:ui-b");
+        seed_memory_card(temp.path(), "project:ui-a");
+        seed_memory_card(temp.path(), "project:ui-b");
 
-        merge_skilllets(
+        merge_memory_cards(
             temp.path(),
-            SkillletMergeInput {
+            MemoryCardMergeInput {
                 id: "project:ui-merged".to_string(),
                 title: "Merged UI".to_string(),
                 sources: vec!["project:ui-a".to_string(), "project:ui-b".to_string()],
                 targets: vec!["codex".to_string()],
             },
         )
-        .expect("merge skilllets");
+        .expect("merge memory_cards");
 
-        let merged = skilllet::load_skilllets(temp.path())
-            .expect("skilllets")
+        let merged = memory_card::load_memory_cards(temp.path())
+            .expect("memory_cards")
             .into_iter()
             .find(|record| record.id == "project:ui-merged")
-            .expect("merged skilllet");
+            .expect("merged memory_card");
         assert_eq!(merged.id, "project:ui-merged");
         assert!(merged.body.contains("Use Axios"));
     }
 
     #[test]
-    fn attach_skilllet_service_updates_skill_supplements() {
+    fn attach_memory_card_service_updates_skill_supplements() {
         let temp = tempfile::tempdir().expect("tempdir");
-        seed_skilllet(temp.path(), "project:use-axios");
+        seed_memory_card(temp.path(), "project:use-axios");
         config::save_skill_index(
             temp.path(),
             &config::SkillIndex {
@@ -826,16 +854,16 @@ mod tests {
         )
         .expect("skill index");
 
-        attach_skilllet_to_skill(temp.path(), "project:use-axios", "skill:frontend")
-            .expect("attach skilllet");
+        attach_memory_card_to_skill(temp.path(), "project:use-axios", "skill:frontend")
+            .expect("attach memory_card");
 
         let config = config::load_or_default_project_config(temp.path()).expect("config");
         assert_eq!(config.skills.supplements[0].skill, "skill:frontend");
-        assert_eq!(config.skills.supplements[0].skilllets[0], "project:use-axios");
+        assert_eq!(config.skills.supplements[0].memory_cards[0], "project:use-axios");
     }
 
     #[test]
-    fn install_catalog_package_service_installs_skilllet_with_targets() {
+    fn install_catalog_package_service_installs_memory_card_with_targets() {
         let temp = tempfile::tempdir().expect("tempdir");
 
         let package = install_catalog_package(
@@ -846,10 +874,10 @@ mod tests {
         .expect("install catalog package");
 
         assert_eq!(package.id, "core:rust-quality-gate");
-        let skilllets = skilllet::load_skilllets(temp.path()).expect("skilllets");
-        assert_eq!(skilllets[0].id, "core:rust-quality-gate");
+        let memory_cards = memory_card::load_memory_cards(temp.path()).expect("memory_cards");
+        assert_eq!(memory_cards[0].id, "core:rust-quality-gate");
         let config = config::load_or_default_project_config(temp.path()).expect("config");
-        assert_eq!(config.skilllets.include[0].targets, vec!["codex"]);
+        assert_eq!(config.memory_cards.include[0].targets, vec!["codex"]);
     }
 
     #[test]
@@ -923,14 +951,14 @@ mod tests {
     fn fuse_job_service_records_precise_input_in_replay() {
         let project = tempfile::tempdir().expect("project");
         let store = crate::DesktopTaskStore::default();
-        let input = SkillletMergeInput {
+        let input = MemoryCardMergeInput {
             id: "draft:fused-ui".to_string(),
             title: "融合 UI 规则".to_string(),
             sources: vec!["project:ui-a".to_string(), "project:ui-b".to_string()],
             targets: vec!["codex".to_string()],
         };
 
-        let start = start_fuse_skilllets_to_draft_job(
+        let start = start_fuse_memory_cards_to_draft_job(
             store.clone(),
             fsutil::path_to_slash(project.path()),
             input,
@@ -939,9 +967,9 @@ mod tests {
         let status = store.snapshot();
         let replay = status.replay.expect("replay payload");
         assert!(start.accepted);
-        assert_eq!(start.key, "融合Skilllet");
+        assert_eq!(start.key, "融合 Memory Card");
         assert_eq!(status.job_id, start.job_id);
-        assert_eq!(replay.command, "fuse_skilllets_to_draft");
+        assert_eq!(replay.command, "fuse_memory_cards_to_draft");
         assert_eq!(replay.args["input"]["id"], "draft:fused-ui");
         assert_eq!(replay.args["input"]["sources"][1], "project:ui-b");
         assert_eq!(replay.args["input"]["targets"][0], "codex");

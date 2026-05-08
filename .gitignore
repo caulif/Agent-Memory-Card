@@ -6,6 +6,10 @@
 /src-tauri/target/
 /.playwright-cli/
 /output/
+/.agent-kernel/
+/.claude/skills/
+/.codex/
+/.superpowers/
 /.agent-kernel/cache/
 /.agent-kernel/canvas.state.json
 /.agent-kernel/imported-rules.yml

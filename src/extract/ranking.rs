@@ -278,7 +278,7 @@ pub(super) fn body_domain(body: &str) -> &'static str {
         "validation"
     } else if contains_any(&lower, &["clarifying", "澄清", "先提问", "先规划", "plan"]) {
         "planning"
-    } else if contains_any(&lower, &["agents.md", "claude.md", "skilllet", "draft"]) {
+    } else if contains_any(&lower, &["agents.md", "claude.md", "memory_card", "draft"]) {
         "governance"
     } else if contains_any(&lower, &["用户", "ux", "体验", "responsive", "卡顿"]) {
         "user-experience"

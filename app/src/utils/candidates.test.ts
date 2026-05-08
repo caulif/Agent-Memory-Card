@@ -39,7 +39,7 @@ describe("candidate inbox utilities", () => {
     const snapshot = {
       candidates: [],
       drafts: [{ id: "draft:visible" }],
-      skilllets: [],
+      memory_cards: [],
       observations: [],
     } as unknown as ProjectSnapshot;
     const dashboard = { draft_count: 99 } as ProjectDashboard;

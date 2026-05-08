@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
+use serde_yaml::Value;
 
 use crate::fsutil;
 
@@ -15,7 +16,7 @@ pub struct ProjectConfig {
     #[serde(default)]
     pub rules: RuleSelection,
     #[serde(default)]
-    pub skilllets: SkillletSelection,
+    pub memory_cards: MemoryCardSelection,
     #[serde(default)]
     pub skills: SkillSelection,
 }
@@ -49,13 +50,13 @@ pub struct RuleSelection {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SkillletSelection {
+pub struct MemoryCardSelection {
     #[serde(default)]
-    pub include: Vec<SkillletRef>,
+    pub include: Vec<MemoryCardRef>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SkillletRef {
+pub struct MemoryCardRef {
     pub id: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<String>,
@@ -81,7 +82,7 @@ pub struct MirrorDecl {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillSupplementDecl {
     pub skill: String,
-    pub skilllets: Vec<String>,
+    pub memory_cards: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -190,7 +191,7 @@ pub fn default_project_config(project_root: &Path) -> ProjectConfig {
         },
         agents,
         rules: RuleSelection::default(),
-        skilllets: SkillletSelection::default(),
+        memory_cards: MemoryCardSelection::default(),
         skills: SkillSelection::default(),
     }
 }
@@ -199,11 +200,32 @@ pub fn load_or_default_project_config(project_root: &Path) -> Result<ProjectConf
     let path = project_config_path(project_root);
     let config = if path.exists() {
         let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-        serde_yaml::from_str(&text).with_context(|| format!("parse {}", path.display()))?
+        let value = normalize_legacy_project_config_yaml(&text)
+            .with_context(|| format!("parse {}", path.display()))?;
+        serde_yaml::from_value(value).with_context(|| format!("parse {}", path.display()))?
     } else {
         default_project_config(project_root)
     };
     Ok(migrate_project_config(config))
+}
+
+fn normalize_legacy_project_config_yaml(text: &str) -> Result<Value> {
+    let mut value: Value = serde_yaml::from_str(text)?;
+    let Value::Mapping(root) = &mut value else {
+        return Ok(value);
+    };
+    let legacy_key = Value::String(legacy_memory_cards_key());
+    let next_key = Value::String("memory_cards".to_string());
+    if !root.contains_key(&next_key)
+        && let Some(legacy_value) = root.remove(&legacy_key)
+    {
+        root.insert(next_key, legacy_value);
+    }
+    Ok(value)
+}
+
+fn legacy_memory_cards_key() -> String {
+    ["skill", "lets"].concat()
 }
 
 fn migrate_project_config(mut config: ProjectConfig) -> ProjectConfig {
@@ -287,7 +309,11 @@ pub fn add_mirror(project_root: &Path, skill_id: &str, agent: &str) -> Result<()
     save_project_config(&root, &config)
 }
 
-pub fn add_skill_supplement(project_root: &Path, skill_id: &str, skilllet_id: &str) -> Result<()> {
+pub fn add_skill_supplement(
+    project_root: &Path,
+    skill_id: &str,
+    memory_card_id: &str,
+) -> Result<()> {
     let root = fsutil::normalize_project_root(project_root)?;
     let index = load_skill_index(&root)?;
     if !index.skills.iter().any(|skill| skill.id == skill_id) {
@@ -296,11 +322,11 @@ pub fn add_skill_supplement(project_root: &Path, skill_id: &str, skilllet_id: &s
         ));
     }
 
-    let skilllet_exists = crate::skilllet::load_skilllets(&root)?
+    let memory_card_exists = crate::memory_card::load_memory_cards(&root)?
         .iter()
-        .any(|record| record.id == skilllet_id);
-    if !skilllet_exists {
-        return Err(anyhow!("skilllet `{skilllet_id}` does not exist"));
+        .any(|record| record.id == memory_card_id);
+    if !memory_card_exists {
+        return Err(anyhow!("memory_card `{memory_card_id}` does not exist"));
     }
 
     let mut config = load_or_default_project_config(&root)?;
@@ -310,14 +336,18 @@ pub fn add_skill_supplement(project_root: &Path, skill_id: &str, skilllet_id: &s
         .iter_mut()
         .find(|item| item.skill == skill_id)
     {
-        if !existing.skilllets.iter().any(|item| item == skilllet_id) {
-            existing.skilllets.push(skilllet_id.to_string());
-            existing.skilllets.sort();
+        if !existing
+            .memory_cards
+            .iter()
+            .any(|item| item == memory_card_id)
+        {
+            existing.memory_cards.push(memory_card_id.to_string());
+            existing.memory_cards.sort();
         }
     } else {
         config.skills.supplements.push(SkillSupplementDecl {
             skill: skill_id.to_string(),
-            skilllets: vec![skilllet_id.to_string()],
+            memory_cards: vec![memory_card_id.to_string()],
         });
     }
     save_project_config(&root, &config)

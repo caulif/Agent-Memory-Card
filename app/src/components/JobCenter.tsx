@@ -1,5 +1,5 @@
-import React from "react";
-import { RefreshCw, X } from "lucide-react";
+﻿import React from "react";
+import { RefreshCw, Trash2, X } from "lucide-react";
 import { formatJobLifecycle, type DesktopTaskStatus } from "../ui-helpers";
 import { EmptyState } from "./common";
 export function JobCenter({
@@ -7,12 +7,14 @@ export function JobCenter({
   currentJob,
   onCancel,
   onRetry,
+  onClearHistory,
   onClose,
 }: {
   jobs: DesktopTaskStatus[];
   currentJob?: DesktopTaskStatus;
   onCancel: (jobId: string) => void | Promise<void>;
   onRetry: (job: DesktopTaskStatus) => void | Promise<void>;
+  onClearHistory: () => void | Promise<void>;
   onClose: () => void;
 }) {
   const [statusFilter, setStatusFilter] = React.useState("all");
@@ -23,7 +25,7 @@ export function JobCenter({
   const filteredJobs = React.useMemo(() => {
     return allJobs.filter((job) => {
       if (statusFilter !== "all" && job.lifecycle !== statusFilter) return false;
-      if (typeFilter !== "all" && job.key !== typeFilter) return false;
+      if (typeFilter !== "all" && !jobMatchesType(job, typeFilter)) return false;
       return true;
     });
   }, [allJobs, statusFilter, typeFilter]);
@@ -35,13 +37,12 @@ export function JobCenter({
     { value: "completed", label: "已完成" },
     { value: "cancelled", label: "已取消" },
   ];
-
   const typeOptions = [
-    { value: "all", label: "全部" },
-    { value: "扫描", label: "扫描" },
-    { value: "整理历史", label: "整理历史" },
-    { value: "同步", label: "同步" },
-    { value: "融合Skilllet", label: "融合Skilllet" },
+    { value: "all", label: "全部类型" },
+    { value: "scan", label: "扫描" },
+    { value: "evolve", label: "整理历史" },
+    { value: "sync", label: "同步" },
+    { value: "fuse", label: "融合 Memory Card" },
   ];
 
   return (
@@ -70,7 +71,6 @@ export function JobCenter({
           ))}
         </nav>
 
-        {/* 类型筛选 */}
         <nav className="job-filter" aria-label="按类型筛选">
           {typeOptions.map((opt) => (
             <button
@@ -83,12 +83,17 @@ export function JobCenter({
           ))}
         </nav>
 
+        <button className="danger-action clear-history-action" onClick={() => void onClearHistory()}>
+          <Trash2 size={14} />
+          清除所有历史记录
+        </button>
+
         {filteredJobs.length === 0 ? (
           <EmptyState
             title={allJobs.length === 0 ? "暂无后台任务" : "暂无匹配任务"}
             description={
               allJobs.length === 0
-                ? "扫描、整理历史或同步产物后，任务进度和日志会出现在这里。"
+                ? "后台任务执行后，进度和日志会出现在这里。"
                 : "当前筛选条件下没有匹配的任务记录，请调整筛选条件。"
             }
           />
@@ -163,3 +168,12 @@ export function JobCenter({
   );
 }
 
+function jobMatchesType(job: DesktopTaskStatus, typeFilter: string) {
+  const command = job.replay?.command ?? "";
+  const key = job.key ?? "";
+  if (typeFilter === "scan") return key === "扫描" || command === "scan_projects";
+  if (typeFilter === "evolve") return key === "整理历史" || command === "evolve_project";
+  if (typeFilter === "sync") return key === "同步" || command === "sync_project";
+  if (typeFilter === "fuse") return key === "融合 Memory Card" || command === "fuse_memory_cards_to_draft";
+  return true;
+}

@@ -36,7 +36,7 @@ pub struct ProjectScanReport {
 
 impl ProjectScanReport {
     pub fn render(&self) -> String {
-        let mut output = String::from("Agent-Kernel project scan\n\n");
+        let mut output = String::from("Agent Memory Kernel project scan\n\n");
         output.push_str(&format!("Registry: {}\n", self.registry_path.display()));
         output.push_str(&format!("Discovered: {}\n", self.discovered.len()));
         output.push_str(&format!("Total registered: {}\n", self.total));

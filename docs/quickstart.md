@@ -1,6 +1,6 @@
-# Agent-Kernel 可体验教程
+# Agent Memory Kernel 可体验教程
 
-这份教程帮助你在一个本地项目里体验 Agent-Kernel 的核心闭环：导入现有规则，配置偏好模板，从一句对话提取 Draft Skilllet，批准为 Skilllet，再编译到 Codex / Claude Code 的原生规则文件。
+这份教程帮助你在一个本地项目里体验 Agent Memory Kernel 的核心闭环：导入现有规则，配置偏好模板，从一句对话提取 Draft Memory Card，批准为 Memory Card，再编译到 Codex / Claude Code 的原生规则文件。
 
 ## 0. 准备
 
@@ -23,7 +23,7 @@ cargo run -- preference list --project .
 bun run app:dev
 ```
 
-Tauri 桌面工作台会读取 `~/.agent-kernel/projects.yml`，在第一屏展示本地项目列表；选择项目后可以查看 Review 摘要、处理带置信度和原因解释的 Draft Inbox、安装 Catalog Skilllets、调整 Skilllet × Agent 分配矩阵，并手动触发 Claude Code / Codex 本地历史对话整理进 Draft Inbox。
+Tauri 桌面工作台会读取 `~/.agent-kernel/projects.yml`，在第一屏展示本地项目列表；选择项目后可以查看 Review 摘要、处理带置信度和原因解释的 Draft Inbox、安装 Catalog Memory Cards、调整 Memory Card × Agent 分配矩阵，并手动触发 Claude Code / Codex 本地历史对话整理进 Draft Inbox。
 
 ## 1. 初始化项目状态
 
@@ -79,7 +79,7 @@ preferences:
 
 规则含义：
 
-- `title` 会变成 Draft / Skilllet 标题，并决定稳定 ID，例如 `Use Playwright` -> `project:use-playwright`
+- `title` 会变成 Draft / Memory Card 标题，并决定稳定 ID，例如 `Use Playwright` -> `project:use-playwright`
 - `body` 是最终写入 Agent 规则的标准正文
 - `required` 必须全部命中
 - `context` 至少命中一个；为空时会被 `preference validate` 警告，因为可能匹配太宽
@@ -95,7 +95,7 @@ cargo run -- preference test --text "以后前端请求统一使用 Axios，不�
 你应该看到类似输出：
 
 ```text
-Agent-Kernel preference test
+Agent Memory Kernel preference test
 
 Matches:
 - project:use-axios [built-in] Use Axios: Use Axios for frontend HTTP requests.
@@ -111,7 +111,7 @@ cargo run -- preference test --text "以后浏览器自动化测试统一使用 
 
 这个命令不会写文件，只用于调试模板命中。
 
-## 4. 从对话提取 Draft Skilllet
+## 4. 从对话提取 Draft Memory Card
 
 先 dry-run：
 
@@ -153,7 +153,7 @@ cargo run -- draft merge --id project:frontend-defaults --title "Frontend Defaul
 - `matched_template`：命中的模板来源，例如 `built-in:Use Axios`
 - `reason`：具体命中了哪些 required/context marker
 
-## 5. 批准 Draft 为 Skilllet
+## 5. 批准 Draft 为 Memory Card
 
 批准候选：
 
@@ -161,22 +161,22 @@ cargo run -- draft merge --id project:frontend-defaults --title "Frontend Defaul
 cargo run -- draft approve --id project:use-axios --project .
 ```
 
-查看 Skilllet：
+查看 Memory Card：
 
 ```bash
-cargo run -- skilllet list --project .
-cargo run -- skilllet matrix --project .
+cargo run -- memory_card list --project .
+cargo run -- memory_card matrix --project .
 ```
 
-如果想把某个 Skilllet 分配给多个 Agent：
+如果想把某个 Memory Card 分配给多个 Agent：
 
 ```bash
-cargo run -- skilllet targets --id project:use-axios --target codex --target claude-code --project .
+cargo run -- memory_card targets --id project:use-axios --target codex --target claude-code --project .
 ```
 
-同样可以在 Tauri 桌面工作台的“分配”页面点击矩阵单元格切换分配。注意：当前声明式配置里空 targets 表示“所有启用 Agent”，所以工作台不允许通过矩阵关掉最后一个 target；要完全移除某个 Skilllet，后续会提供专门的 remove/disable 操作。
+同样可以在 Tauri 桌面工作台的“分配”页面点击矩阵单元格切换分配。注意：当前声明式配置里空 targets 表示“所有启用 Agent”，所以工作台不允许通过矩阵关掉最后一个 target；要完全移除某个 Memory Card，后续会提供专门的 remove/disable 操作。
 
-## 5.1 从 Catalog 安装 Skilllet
+## 5.1 从 Catalog 安装 Memory Card
 
 查看内置 Catalog：
 
@@ -191,12 +191,12 @@ cargo run -- catalog validate --project .
 cargo run -- catalog install --id core:rust-quality-gate --target codex --project .
 ```
 
-也可以在 Tauri 桌面工作台的“包管理”页面安装 Catalog Skilllet。如果同一个 package 已经安装，再分配给另一个 Agent 会合并 targets，不会覆盖之前的分配。
+也可以在 Tauri 桌面工作台的“包管理”页面安装 Catalog Memory Card。如果同一个 package 已经安装，再分配给另一个 Agent 会合并 targets，不会覆盖之前的分配。
 
 安装后可以用矩阵检查：
 
 ```bash
-cargo run -- skilllet matrix --project .
+cargo run -- memory_card matrix --project .
 ```
 
 ## 6. 预览并编译到 Agent 规则文件
@@ -227,7 +227,7 @@ cargo run -- test-rules --project .
 - `.agents/skills`
 - `.claude/skills`
 
-编译器会按 Skilllet 的 activation 分流：`preference` / `constraint` 默认进入 always-on 指令文件，`procedure` / `template` / `workflow` 默认生成标准 Agent Skill 目录。生成的 Skill 形态如下：
+编译器会按 Memory Card 的 activation 分流：`preference` / `constraint` 默认进入 always-on 指令文件，`procedure` / `template` / `workflow` 默认生成标准 Agent Skill 目录。生成的 Skill 形态如下：
 
 ```text
 .claude/skills/frontend-workflow/
@@ -238,7 +238,7 @@ cargo run -- test-rules --project .
 
 `SKILL.md` 包含 `name` 和 `description` frontmatter，详细规则放在 `references/`，这样 Claude Code / Codex 可以按需加载，而不是把所有流程都塞进启动上下文。
 
-如果某条 Skilllet 需要编译成 Claude Code hook，可以把它的 `activation` 设为 `hook`，并在 `tags` 里声明事件，例如：
+如果某条 Memory Card 需要编译成 Claude Code hook，可以把它的 `activation` 设为 `hook`，并在 `tags` 里声明事件，例如：
 
 ```yaml
 activation: hook
@@ -248,7 +248,7 @@ tags:
 body: cargo clippy --quiet -- -D warnings
 ```
 
-这类 Skilllet 会写入 `.claude/settings.local.json`，并保留该文件里不属于 Agent-Kernel 的其他配置键。
+这类 Memory Card 会写入 `.claude/settings.local.json`，并保留该文件里不属于 Agent Memory Kernel 的其他配置键。
 
 这些是编译产物。手动改了以后，可以用下面命令回流成 Draft：
 
@@ -270,11 +270,11 @@ cargo run -- observe evolve --target codex --target claude-code --dry-run --proj
 cargo run -- observe evolve --target codex --target claude-code --project .
 ```
 
-这个流程仍然不会自动启用 Skilllet。所有自动提炼的内容都会先进 Draft Inbox，由你批准。
+这个流程仍然不会自动启用 Memory Card。所有自动提炼的内容都会先进 Draft Inbox，由你批准。
 
 ## 7.1 通过 MCP 接入外部 Agent
 
-如果想让支持 MCP 的客户端直接调用 Agent-Kernel，可以在项目根目录启动：
+如果想让支持 MCP 的客户端直接调用 Agent Memory Kernel，可以在项目根目录启动：
 
 ```bash
 cargo run -- mcp --project .
@@ -314,12 +314,12 @@ cargo run -- test-rules --project .
 
 ## 9. 当前边界
 
-当前版本已经适合体验本地 Skilllet 进化闭环，但还有几个刻意保守的边界：
+当前版本已经适合体验本地 Memory Card 进化闭环，但还有几个刻意保守的边界：
 
 - 不会静默启用自动提炼内容，必须先进入 Draft Inbox
 - LLM provider 仍是配置地基，本地提取器是主路径
 - Cursor / Cline 不在当前 MVP 主线
 - Tauri 桌面工作台已经能浏览项目、Review、触发对话进化，并处理 Draft Inbox；更细的 Canvas 拖拽、App Store、Preference Registry 编辑体验仍会继续补强
-- Tauri 桌面工作台已经接入 Skilllet Catalog、Skilllet target matrix、Draft explainability、Draft inline editing 和 Draft merge；后续还需要把包详情编辑、Skilllet remove/disable、lineage 展示做得更顺手
+- Tauri 桌面工作台已经接入 Memory Card Catalog、Memory Card target matrix、Draft explainability、Draft inline editing 和 Draft merge；后续还需要把包详情编辑、Memory Card remove/disable、lineage 展示做得更顺手
 
-下一步最值得补的是更完整的 Skilllet lineage，让审查体验继续靠近一个可解释的进化系统。
+下一步最值得补的是更完整的 Memory Card lineage，让审查体验继续靠近一个可解释的进化系统。

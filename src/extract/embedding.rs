@@ -1,10 +1,10 @@
-//! 语义去重层：优先使用 fastembed，本地不可用时回退到 Jaccard。
+﻿//! 语义去重层：优先使用 fastembed，本地不可用时回退到 Jaccard。
 
 use std::sync::Mutex;
 
 use fastembed::TextEmbedding;
 
-use crate::skilllet::SkillletRecord;
+use crate::memory_card::MemoryCardRecord;
 use crate::textutil;
 
 pub(crate) trait SemanticMatcher: Send + Sync {
@@ -114,13 +114,13 @@ impl SemanticDeduper {
     pub(crate) fn dedup_against_existing(
         &self,
         body: &str,
-        existing_skilllets: &[SkillletRecord],
+        existing_memory_cards: &[MemoryCardRecord],
     ) -> DedupResult {
-        for skilllet in existing_skilllets {
-            let similarity = self.compute_similarity(body, &skilllet.body);
+        for memory_card in existing_memory_cards {
+            let similarity = self.compute_similarity(body, &memory_card.body);
             if similarity > self.existing_threshold {
                 return DedupResult::Duplicate {
-                    similar_id: skilllet.id.clone(),
+                    similar_id: memory_card.id.clone(),
                     similarity,
                 };
             }
@@ -128,19 +128,19 @@ impl SemanticDeduper {
         DedupResult::Unique
     }
 
-    pub(crate) fn top_similar_skilllets(
+    pub(crate) fn top_similar_memory_cards(
         &self,
         body: &str,
-        existing_skilllets: &[SkillletRecord],
+        existing_memory_cards: &[MemoryCardRecord],
         limit: usize,
         min_similarity: f32,
     ) -> Vec<(String, String)> {
-        let mut scored = existing_skilllets
+        let mut scored = existing_memory_cards
             .iter()
-            .filter_map(|skilllet| {
-                let similarity = self.compute_similarity(body, &skilllet.body);
+            .filter_map(|memory_card| {
+                let similarity = self.compute_similarity(body, &memory_card.body);
                 (similarity >= min_similarity)
-                    .then(|| (skilllet.id.clone(), skilllet.body.clone(), similarity))
+                    .then(|| (memory_card.id.clone(), memory_card.body.clone(), similarity))
             })
             .collect::<Vec<_>>();
         scored.sort_by(|left, right| right.2.total_cmp(&left.2));
@@ -292,8 +292,8 @@ mod tests {
     }
 
     #[test]
-    fn semantic_deduper_detects_duplicate_against_existing_skilllet() {
-        let existing = vec![SkillletRecord {
+    fn semantic_deduper_detects_duplicate_against_existing_memory_card() {
+        let existing = vec![MemoryCardRecord {
             schema_version: 1,
             id: "project:prefer-bun".to_string(),
             title: "Prefer Bun".to_string(),

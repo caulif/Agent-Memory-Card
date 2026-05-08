@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document extends the existing high-quality extraction design with a sharper definition of what should become a reviewable Agent-Kernel record.
+This document extends the existing high-quality extraction design with a sharper definition of what should become a reviewable Agent Memory Kernel record.
 
 The previous extraction funnel already establishes the product direction:
 
@@ -20,7 +20,7 @@ The goal is not to extract more. The goal is to extract fewer records with bette
 
 ## Product Principle
 
-Agent-Kernel serves one advanced local developer and their coding agents. A high-quality Candidate is useful only if it prevents a future agent mistake, shortens a future workflow, or preserves a project decision that would otherwise be lost.
+Agent Memory Kernel serves one advanced local developer and their coding agents. A high-quality Candidate is useful only if it prevents a future agent mistake, shortens a future workflow, or preserves a project decision that would otherwise be lost.
 
 Good extraction should answer five questions before creating a Candidate:
 
@@ -41,7 +41,7 @@ The design borrows from current agent instruction systems:
 - Claude/Agent Skills are better for on-demand workflows, scripts, references, and long procedural knowledge that should not always consume context.
 - Cursor/Windsurf-style rules distinguish always-on rules, path-scoped rules, agent-requested rules, manual rules, workflows, skills, and memories.
 
-Agent-Kernel should use these distinctions during extraction rather than treating every useful sentence as the same kind of Skilllet.
+Agent Memory Kernel should use these distinctions during extraction rather than treating every useful sentence as the same kind of Memory Card.
 
 ## Knowledge Classification
 
@@ -328,7 +328,7 @@ Classification:
 Evidence:
 
 ```text
-基于用户确认，项目应该把 AI 生成的高质量项目改善也送入 Candidate/Draft，而不是直接写 Skilllet；这能保留审阅边界。
+基于用户确认，项目应该把 AI 生成的高质量项目改善也送入 Candidate/Draft，而不是直接写 Memory Card；这能保留审阅边界。
 ```
 
 Classification:
@@ -399,7 +399,7 @@ The UI does not need new pages for this phase.
 - The extractor distinguishes always-on rules from workflow Skill material.
 - High-hardness constraints preserve the forbidden action and safer replacement.
 - Generic AI advice and one-off requests remain rejected.
-- Accepted AI-origin improvements can become reviewable Candidates but never direct Skilllets.
+- Accepted AI-origin improvements can become reviewable Candidates but never direct Memory Cards.
 - New structured tags are generated deterministically for new Candidates.
 - Existing tests and build commands remain green.
 

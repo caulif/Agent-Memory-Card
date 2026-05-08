@@ -1,8 +1,8 @@
-# Agent-Kernel Optimization Implementation Plan
+# Agent Memory Kernel Optimization Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Repair extraction quality, maintainability, data lifecycle, automation, and frontend structure across the current local Agent-Kernel baseline.
+**Goal:** Repair extraction quality, maintainability, data lifecycle, automation, and frontend structure across the current local Agent Memory Kernel baseline.
 
 **Architecture:** Start with repository hygiene and shared text utilities, then make extraction quality measurable, split large Rust/Tauri/frontend modules along existing boundaries, and add indexes, migrations, hooks, and optional LLM refinement behind review-first policy gates.
 
@@ -12,7 +12,7 @@
 
 ## Phase 0: Repository Hygiene
 
-- [x] Update `.gitignore` for root and nested Agent-Kernel runtime state.
+- [x] Update `.gitignore` for root and nested Agent Memory Kernel runtime state.
 - [x] Verify `git status --short --untracked-files=all` shows source files and docs, not generated observations, drafts, indexes, audit logs, or Vite logs.
 - [x] Run a lightweight format/check command after ignore changes.
 
@@ -53,7 +53,7 @@
 
 ## Phase 5: Data Indexes And Migrations
 
-- [x] Add schema/version fields to Candidate, Draft, and Skilllet records with serde defaults.
+- [x] Add schema/version fields to Candidate, Draft, and Memory Card records with serde defaults.
 - [x] Add a migration module that upgrades older records in memory before save.
 - [x] Add `.agent-kernel/index.yml` as a rebuildable read-model cache for counts and record metadata.
 - [x] Add Rust and CLI functions to rebuild indexes from source YAML.
@@ -64,7 +64,7 @@
 - [ ] Add provider config for bounded candidate refinement without making it mandatory.
 - [ ] Add tests for prompt construction, redaction, size limits, and failure fallback.
 - [ ] Route only borderline locally prefiltered candidates to the provider.
-- [ ] Write refined output as Candidate/Draft only, never directly as Skilllet.
+- [ ] Write refined output as Candidate/Draft only, never directly as Memory Card.
 
 ## Phase 7: Hook Integration
 
@@ -75,7 +75,7 @@
 
 ## Phase 8: Tauri Command Split
 
-- [ ] Create `src-tauri/src/commands/` with project, candidate, draft, skilllet, assignment, jobs, quality, and settings modules.
+- [ ] Create `src-tauri/src/commands/` with project, candidate, draft, memory_card, assignment, jobs, quality, and settings modules.
 - [x] Move Job Manager state/history logic to `src-tauri/src/jobs.rs`.
 - [x] Move Job Center IPC commands to `src-tauri/src/commands/jobs.rs`.
 - [x] Move command functions out of `src-tauri/src/lib.rs` while preserving Tauri command names.
@@ -89,7 +89,7 @@
 - [x] Split `styles.css` by surface after components are stable.
 - [x] Run Bun tests and build after page extraction.
 
-## Phase 10: Git-Based Skilllet Packs
+## Phase 10: Git-Based Memory Card Packs
 
 - [ ] Extend catalog metadata for Git remote, version, and lockfile fields.
 - [ ] Add sync/update commands that operate on one project or all registered projects.

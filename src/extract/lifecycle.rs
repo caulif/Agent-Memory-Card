@@ -1,8 +1,8 @@
-use serde::{Deserialize, Serialize};
+﻿use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum SkillletOperation {
+pub enum MemoryCardOperation {
     #[default]
     Add,
     Update,
@@ -11,14 +11,14 @@ pub enum SkillletOperation {
     Noop,
 }
 
-impl SkillletOperation {
+impl MemoryCardOperation {
     pub fn as_str(&self) -> &'static str {
         match self {
-            SkillletOperation::Add => "add",
-            SkillletOperation::Update => "update",
-            SkillletOperation::Supersede => "supersede",
-            SkillletOperation::Conflict => "conflict",
-            SkillletOperation::Noop => "noop",
+            MemoryCardOperation::Add => "add",
+            MemoryCardOperation::Update => "update",
+            MemoryCardOperation::Supersede => "supersede",
+            MemoryCardOperation::Conflict => "conflict",
+            MemoryCardOperation::Noop => "noop",
         }
     }
 }

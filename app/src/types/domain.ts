@@ -1,7 +1,7 @@
-import type React from "react";
+﻿import type React from "react";
 
 // ===== 页面标识 =====
-export type PageId = "drafts" | "skilllets" | "agents" | "settings";
+export type PageId = "drafts" | "memory-cards" | "agents" | "settings";
 
 // ===== 项目注册 =====
 export type RegisteredProject = {
@@ -62,7 +62,7 @@ export type CandidateRecord = {
   updated_at?: string;
 };
 
-export type SkillletRecord = {
+export type MemoryCardRecord = {
   id: string;
   title: string;
   kind: string;
@@ -94,11 +94,11 @@ export type ProjectSnapshot = {
   project_path: string;
   candidates?: CandidateRecord[];
   drafts: DraftRecord[];
-  skilllets: SkillletRecord[];
-  global_skilllets?: SkillletRecord[];
+  memory_cards: MemoryCardRecord[];
+  global_memory_cards?: MemoryCardRecord[];
   observations: Array<{ id: string; agent?: string; source_path: string }>;
   catalog_status: { items: CatalogItem[] };
-  target_matrix: { agents: string[]; rows: Array<{ skilllet_id: string; title: string; scope?: string; targets: Record<string, boolean> }> };
+  target_matrix: { agents: string[]; rows: Array<{ memory_card_id: string; title: string; scope?: string; targets: Record<string, boolean> }> };
   rule_ci: { passed: number; failed: number };
   build_preview: { actions: string[]; warnings: string[] };
   status: { warnings: string[] };
@@ -109,9 +109,9 @@ export type ProjectDashboard = {
   project_path: string;
   candidate_count: number;
   draft_count: number;
-  skilllet_count: number;
+  memory_card_count: number;
   observation_count: number;
-  global_skilllet_count: number;
+  global_memory_card_count: number;
   enabled_agents: string[];
   warning_count: number;
 };
@@ -126,17 +126,17 @@ export type ProjectCandidateInbox = {
   candidates: CandidateRecord[];
 };
 
-export type ProjectSkillletLibrary = {
+export type ProjectMemoryCardLibrary = {
   project_path: string;
-  skilllets: SkillletRecord[];
-  global_skilllets: SkillletRecord[];
+  memory_cards: MemoryCardRecord[];
+  global_memory_cards: MemoryCardRecord[];
   catalog_status: { items: CatalogItem[] };
 };
 
 export type ProjectAssignmentView = {
   project_path: string;
   enabled_agents: string[];
-  target_matrix: { agents: string[]; rows: Array<{ skilllet_id: string; title: string; scope?: string; targets: Record<string, boolean> }> };
+  target_matrix: { agents: string[]; rows: Array<{ memory_card_id: string; title: string; scope?: string; targets: Record<string, boolean> }> };
 };
 
 export type ProjectQualityView = {
@@ -144,6 +144,13 @@ export type ProjectQualityView = {
   rule_ci: { passed: number; failed: number };
   build_preview: { actions: string[]; warnings: string[] };
   status: { warnings: string[] };
+};
+
+export type CustomProviderConfig = {
+  enabled: boolean;
+  base_url: string;
+  model: string;
+  api_key_env: string;
 };
 
 // ===== 任务相关 =====
@@ -269,7 +276,7 @@ export type PlanReviewResult = {
 
 // ===== 进化视图 =====
 export type EvolutionInsight = {
-  skilllet_id: string;
+  memory_card_id: string;
   title: string;
   confidence: number;
   stability: number;

@@ -6,7 +6,7 @@
 
 **Architecture:** Keep the existing extraction funnel and add a focused `classify` module beside `scoring`. Classification decides `signal`, `artifact_kind`, `activation`, `hardness`, `control`, and structured tags from an `EvidenceChunk`; scoring consumes that classification to make better reject/candidate decisions; Candidate/Draft metadata stores the classification for UI and future compile targeting.
 
-**Tech Stack:** Rust 2024, serde YAML/JSON, existing Agent-Kernel extraction modules, Bun/Tauri frontend types, file-native YAML records.
+**Tech Stack:** Rust 2024, serde YAML/JSON, existing Agent Memory Kernel extraction modules, Bun/Tauri frontend types, file-native YAML records.
 
 ---
 
@@ -121,21 +121,21 @@ cases:
     expected_tags: []
   - id: english-durable-decision
     origin: user
-    input: "Keep Agent-Kernel file-native for v1. Do not introduce a mandatory vector database; indexes must remain rebuildable caches."
+    input: "Keep Agent Memory Kernel file-native for v1. Do not introduce a mandatory vector database; indexes must remain rebuildable caches."
     expected: candidate
     expected_signal: decision
     expected_artifact_kind: always_on_rule
     expected_hardness: high
     expected_terms: ["file-native", "rebuildable"]
     expected_tags: ["shape:decision", "domain:architecture", "hardness:high"]
-  - id: ai-skilllet-worthy-workflow
+  - id: ai-memory_card-worthy-workflow
     origin: assistant
-    input: "基于用户确认，项目应该把 AI 生成的高质量项目改善也送入 Candidate/Draft，而不是直接写 Skilllet；这能保留审阅边界。"
+    input: "基于用户确认，项目应该把 AI 生成的高质量项目改善也送入 Candidate/Draft，而不是直接写 Memory Card；这能保留审阅边界。"
     expected: candidate
     expected_signal: ai_project_improvement
     expected_artifact_kind: review_only
     expected_hardness: high
-    expected_terms: ["Candidate/Draft", "Skilllet"]
+    expected_terms: ["Candidate/Draft", "Memory Card"]
     expected_tags: ["shape:constraint", "domain:governance", "evidence:accepted-ai", "hardness:high"]
 ```
 
@@ -395,7 +395,7 @@ fn structured_tags(
     if lower.contains("bun") || lower.contains("npm") || lower.contains("package") || lower.contains("脚本") {
         tags.push("domain:build".to_string());
     }
-    if lower.contains("agents.md") || lower.contains("claude.md") || lower.contains("draft") || lower.contains("skilllet") || lower.contains("审阅") {
+    if lower.contains("agents.md") || lower.contains("claude.md") || lower.contains("draft") || lower.contains("memory_card") || lower.contains("审阅") {
         tags.push("domain:governance".to_string());
     }
     if lower.contains("agent") || lower.contains("codex") || lower.contains("claude") || lower.contains("智能体") {
@@ -442,7 +442,7 @@ fn looks_like_accepted_ai_project_improvement(chunk: &EvidenceChunk, lower: &str
     let accepted = lower.contains("用户确认") || lower.contains("基于用户确认") || lower.contains("accepted");
     let project_terms = lower.contains("candidate")
         || lower.contains("draft")
-        || lower.contains("skilllet")
+        || lower.contains("memory_card")
         || lower.contains("evidencechunk")
         || lower.contains("项目");
     let governance_terms = lower.contains("审阅")
@@ -1268,7 +1268,7 @@ $cases = @(
   @{name='preference'; text='以后这个项目的前端 HTTP 请求统一用 Axios，不要再写裸 fetch。'},
   @{name='governance'; text='不要直接覆盖 AGENTS.md；发现漂移时先导入成 Draft，让我确认后再同步。'},
   @{name='workflow'; text='UI 视觉优化先让 Claude Code 做一轮组件和交互建议，再由 Codex 集成验证。这个流程以后保留。'},
-  @{name='accepted-ai'; text='基于用户确认，项目应该把 AI 生成的高质量项目改善也送入 Candidate/Draft，而不是直接写 Skilllet；这能保留审阅边界。'},
+  @{name='accepted-ai'; text='基于用户确认，项目应该把 AI 生成的高质量项目改善也送入 Candidate/Draft，而不是直接写 Memory Card；这能保留审阅边界。'},
   @{name='noise'; text='一般来说，软件项目应该保持代码整洁、测试充分、文档完善。'}
 )
 foreach ($case in $cases) {

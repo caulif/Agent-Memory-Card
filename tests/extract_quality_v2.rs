@@ -61,6 +61,142 @@ fn extraction_quality_smoke_subset_stays_healthy() {
 }
 
 #[test]
+fn default_extract_requires_llm_provider_instead_of_local_candidates() {
+    let temp = tempfile::tempdir().expect("tempdir");
+
+    let report = extract::extract_to_drafts(
+        temp.path(),
+        Some("以后这个项目的前端 HTTP 请求统一用 Axios，不要再写裸 fetch。".to_string()),
+        None,
+        vec!["codex".to_string()],
+        None,
+        true,
+    )
+    .expect("extract");
+
+    assert!(
+        report.candidates.is_empty(),
+        "default extraction should not create heuristic candidates without an LLM provider"
+    );
+    assert!(
+        report
+            .skipped
+            .iter()
+            .any(|item| item.contains("LLM extraction provider unavailable")),
+        "skip reason should explain the mandatory LLM boundary: {:#?}",
+        report.skipped
+    );
+}
+
+#[test]
+fn explicit_local_provider_remains_diagnostic_prefilter_path() {
+    let temp = tempfile::tempdir().expect("tempdir");
+
+    let report = extract::extract_to_drafts(
+        temp.path(),
+        Some("以后这个项目的前端 HTTP 请求统一用 Axios，不要再写裸 fetch。".to_string()),
+        None,
+        vec!["codex".to_string()],
+        Some("local".to_string()),
+        true,
+    )
+    .expect("extract");
+
+    assert!(
+        !report.candidates.is_empty(),
+        "explicit local provider should remain available for deterministic diagnostics"
+    );
+}
+
+#[test]
+fn llm_provider_filters_and_rewrites_candidate_into_memory_card_shape() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(temp.path().join(".agent-kernel")).expect("kernel dir");
+    let script_path = temp.path().join("fake-llm-provider.ps1");
+    std::fs::write(
+        &script_path,
+        r#"
+$prompt = @($input) -join "`n"
+if ($prompt -like '*最终质检与改写器*') {
+  '{"items":[{"index":0,"decision":"keep","title":"保留人工审阅边界","body":"当候选来自 assistant synthesis 时，先确认它有用户明确接受或真实历史证据；目标是避免 AI 自己的建议绕过人工审阅边界。","kind":"procedure","memory_tier":"collaboration_preference","confidence":0.94,"reason":"Rewritten into trigger-action-boundary memory."}]}'
+} elseif ($prompt -like '*binary judge*') {
+  '{"decision":"keep","reason":"Durable accepted AI governance rule.","confidence":0.95,"durability":0.92,"reusability":0.86,"specificity":0.88,"evidence_grounded":0.91,"noise_risk":0.05}'
+} elseif ($prompt -like '*newly extracted atomic memory*') {
+  '{"operation":"add","target_id":null,"body":null,"reason":"New durable memory."}'
+} elseif ($prompt -like '*跨项目方法论*') {
+  '{"abstract_possible":false,"body":null,"memory_tier":null,"reason":"Project governance rule should stay reviewable."}'
+} else {
+  '[{"kind":"procedure","title":"保留人工审阅边界","body":"AI 生成的高质量项目改善应进入 Candidate/Draft，而不是直接写 MemoryCard。","confidence":0.91,"rationale":"User explicitly confirmed this preserves review boundaries.","evidence_quote":"基于用户确认，项目应该把 AI 生成的高质量项目改善也送入 Candidate/Draft，而不是直接写 MemoryCard","language":"zh","memory_tier_guess":"project_rule","reusability_score":0.82,"durability_score":0.91,"specificity_score":0.87,"source_trust_score":0.95,"is_noise":false}]'
+}
+"#,
+    )
+    .expect("script");
+    let script_arg = script_path.display().to_string().replace('\\', "/");
+    std::fs::write(
+        temp.path().join(".agent-kernel").join("providers.yml"),
+        format!(
+            r#"default: local
+extraction_provider: fake-cli
+role_providers:
+  extract: fake-cli
+  judge: fake-cli
+  refine: fake-cli
+  update: fake-cli
+  abstract: fake-cli
+providers:
+  local:
+    type: local-heuristic
+  fake-cli:
+    type: claude-cli
+    binary: powershell
+    extra_args:
+      - -NoProfile
+      - -File
+      - '{}'
+    timeout_secs: 5
+privacy:
+  upload_policy: ask
+  redact_secrets: true
+  include_code_context: false
+  store_prompts_locally: true
+"#,
+            script_arg
+        ),
+    )
+    .expect("providers");
+
+    let report = extract::extract_to_drafts(
+        temp.path(),
+        Some(
+            "基于用户确认，项目应该把 AI 生成的高质量项目改善也送入 Candidate/Draft，而不是直接写 MemoryCard；这能保留审阅边界。"
+                .to_string(),
+        ),
+        None,
+        vec!["codex".to_string()],
+        None,
+        true,
+    )
+    .expect("extract");
+
+    assert_eq!(report.provider, "fake-cli");
+    assert_eq!(report.candidates.len(), 1, "{report:#?}");
+    let candidate = &report.candidates[0];
+    assert_eq!(candidate.memory_tier.as_str(), "collaboration_preference");
+    assert!(
+        candidate
+            .body
+            .starts_with("当候选来自 assistant synthesis 时")
+    );
+    assert!(candidate.body.contains("目标是避免"));
+    assert!(
+        candidate
+            .matched_template
+            .as_deref()
+            .is_some_and(|template| template == "llm-memory-refine")
+    );
+}
+
+#[test]
 #[ignore = "run for milestone validation only: cargo test -- --ignored"]
 fn high_quality_extraction_v2_meets_precision_gate() {
     let fixture: FixtureFile =
@@ -206,7 +342,7 @@ fn dry_run_accepted_ai_improvement_candidate() {
     let report = extract::extract_to_drafts(
         temp.path(),
         Some(
-            "基于用户确认，项目应该把 AI 生成的高质量项目改善也送入 Candidate/Draft，而不是直接写 Skilllet；这能保留审阅边界。"
+            "基于用户确认，项目应该把 AI 生成的高质量项目改善也送入 Candidate/Draft，而不是直接写 MemoryCard；这能保留审阅边界。"
                 .to_string(),
         ),
         None,
@@ -299,9 +435,9 @@ fn dry_run_previews_include_classification_and_tags() {
 }
 
 #[test]
-fn dry_run_duplicate_existing_skilllet_is_suppressed_as_noop() {
+fn dry_run_duplicate_existing_memory_card_is_suppressed_as_noop() {
     let temp = tempfile::tempdir().expect("tempdir");
-    agent_kernel::skilllet::add_skilllet(
+    agent_kernel::memory_card::add_memory_card(
         temp.path(),
         "project:use-axios",
         "Use Axios",
@@ -310,7 +446,7 @@ fn dry_run_duplicate_existing_skilllet_is_suppressed_as_noop() {
         "project",
         vec!["codex".to_string()],
     )
-    .expect("seed skilllet");
+    .expect("seed memory_card");
 
     let report = extract::extract_to_drafts(
         temp.path(),
@@ -324,7 +460,7 @@ fn dry_run_duplicate_existing_skilllet_is_suppressed_as_noop() {
 
     assert!(
         report.candidates.is_empty(),
-        "existing equivalent Skilllets should not reappear as candidate noise"
+        "existing equivalent MemoryCards should not reappear as candidate noise"
     );
     assert!(
         report
@@ -375,7 +511,7 @@ fn dry_run_filters_meta_discussion_questions_about_the_pipeline() {
     let report = extract::extract_to_drafts(
         temp.path(),
         Some(
-            "是否已经把 Skilllet 编译为 hook（例如把 git commit 前必须 cargo clippy 编译成 PreToolUse hook）？"
+            "是否已经把 MemoryCard 编译为 hook（例如把 git commit 前必须 cargo clippy 编译成 PreToolUse hook）？"
                 .to_string(),
         ),
         None,
@@ -387,7 +523,7 @@ fn dry_run_filters_meta_discussion_questions_about_the_pipeline() {
 
     assert!(
         report.candidates.is_empty(),
-        "questions about implementation planning should not become Skilllet candidates"
+        "questions about implementation planning should not become MemoryCard candidates"
     );
     assert!(
         report
@@ -400,9 +536,9 @@ fn dry_run_filters_meta_discussion_questions_about_the_pipeline() {
 }
 
 #[test]
-fn dry_run_hides_exact_duplicate_existing_skilllets_instead_of_showing_new_candidates() {
+fn dry_run_hides_exact_duplicate_existing_memory_cards_instead_of_showing_new_candidates() {
     let temp = tempfile::tempdir().expect("tempdir");
-    agent_kernel::skilllet::add_skilllet(
+    agent_kernel::memory_card::add_memory_card(
         temp.path(),
         "project:use-axios",
         "Use Axios",
@@ -411,7 +547,7 @@ fn dry_run_hides_exact_duplicate_existing_skilllets_instead_of_showing_new_candi
         "project",
         vec!["codex".to_string()],
     )
-    .expect("seed skilllet");
+    .expect("seed memory_card");
 
     let report = extract::extract_to_drafts(
         temp.path(),

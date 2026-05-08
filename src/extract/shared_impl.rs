@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+﻿use std::collections::BTreeMap;
 
 use super::*;
 
@@ -167,16 +167,16 @@ pub(super) fn is_priority_template(candidate: &Candidate) -> bool {
         .is_some_and(|template| template.starts_with("methodology-"))
 }
 
-pub(super) fn scoped_skilllets(
-    existing_skilllets: &[skilllet::SkillletRecord],
+pub(super) fn scoped_memory_cards(
+    existing_memory_cards: &[memory_card::MemoryCardRecord],
     scope: &str,
-) -> Vec<skilllet::SkillletRecord> {
-    existing_skilllets
+) -> Vec<memory_card::MemoryCardRecord> {
+    existing_memory_cards
         .iter()
-        .filter(|skilllet| match scope {
-            "global" => skilllet.scope == "global",
-            "agent" => skilllet.scope == "agent",
-            _ => skilllet.scope != "global",
+        .filter(|memory_card| match scope {
+            "global" => memory_card.scope == "global",
+            "agent" => memory_card.scope == "agent",
+            _ => memory_card.scope != "global",
         })
         .cloned()
         .collect()
@@ -273,11 +273,7 @@ pub(super) fn methodology_pair_candidates(sentence: &str) -> Vec<Candidate> {
         output.push(Candidate {
             title: abstract_title,
             body: abstract_body,
-            kind: if tier == MemoryTier::CrossProjectPrinciple {
-                "principle".to_string()
-            } else {
-                "procedure".to_string()
-            },
+            kind: "procedure".to_string(),
             scope: "global".to_string(),
             memory_tier: tier,
             abstraction_of: None,
@@ -348,11 +344,7 @@ pub(super) fn abstracted_item_from_spec(
     embedding::LlmKnowledgeItem {
         title,
         body: spec.body,
-        kind: if memory_tier == MemoryTier::CrossProjectPrinciple {
-            "principle".to_string()
-        } else {
-            "procedure".to_string()
-        },
+        kind: "procedure".to_string(),
         scope: "global".to_string(),
         memory_tier,
         abstraction_of: None,
@@ -388,6 +380,9 @@ pub(super) fn classification_for_candidate(
             control: "principle".to_string(),
             rationale: "Tier-aware fallback classification for a reusable cross-project principle."
                 .to_string(),
+            placement_reason:
+                "Cross-project principles are compact enough for default agent instructions."
+                    .to_string(),
             tags: vec![
                 "activation:always-on".to_string(),
                 "hardness:medium".to_string(),
@@ -407,6 +402,9 @@ pub(super) fn classification_for_candidate(
             control: "checklist".to_string(),
             rationale: "Tier-aware fallback classification for a durable collaboration preference."
                 .to_string(),
+            placement_reason:
+                "Collaboration preferences are better loaded as workflow Skill guidance."
+                    .to_string(),
             tags: vec![
                 "activation:skill".to_string(),
                 "hardness:medium".to_string(),

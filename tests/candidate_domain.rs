@@ -1,11 +1,11 @@
 use agent_kernel::candidate::{
     CandidateStatus, ExtractionAction, ExtractionMetadata, NewCandidate, add_candidate,
-    approve_candidate_to_skilllet, hide_candidate, list_visible_candidates, load_candidates,
+    approve_candidate_to_memory_card, hide_candidate, list_visible_candidates, load_candidates,
     reject_candidate,
 };
 use agent_kernel::extract::classify::KnowledgeClassification;
-use agent_kernel::extract::lifecycle::SkillletOperation;
-use agent_kernel::{draft, skilllet};
+use agent_kernel::extract::lifecycle::MemoryCardOperation;
+use agent_kernel::{draft, memory_card};
 
 fn new_candidate(id: &str) -> NewCandidate {
     NewCandidate {
@@ -64,26 +64,30 @@ fn visible_candidates_exclude_hidden_rejected_and_promoted_records() {
 }
 
 #[test]
-fn approve_candidate_creates_skilllet_and_marks_candidate_promoted() {
+fn approve_candidate_creates_memory_card_and_marks_candidate_promoted() {
     let temp = tempfile::tempdir().expect("tempdir");
     add_candidate(temp.path(), new_candidate("project:use-axios")).expect("add candidate");
 
-    let skilllet_record =
-        approve_candidate_to_skilllet(temp.path(), "project:use-axios").expect("approve");
+    let memory_card_record =
+        approve_candidate_to_memory_card(temp.path(), "project:use-axios").expect("approve");
     let candidates = load_candidates(temp.path()).expect("load candidates");
-    let skilllets = skilllet::load_skilllets(temp.path()).expect("load skilllets");
+    let memory_cards = memory_card::load_memory_cards(temp.path()).expect("load memory_cards");
     let drafts = draft::load_drafts(temp.path()).expect("load drafts");
 
-    assert_eq!(skilllet_record.id, "project:use-axios");
-    assert_eq!(skilllets.len(), 1);
-    assert!(skilllets[0].brief.contains("前端 HTTP 请求优先使用 Axios"));
-    assert!(skilllets[0].tags.contains(&"axios".to_string()));
+    assert_eq!(memory_card_record.id, "project:use-axios");
+    assert_eq!(memory_cards.len(), 1);
+    assert!(
+        memory_cards[0]
+            .brief
+            .contains("前端 HTTP 请求优先使用 Axios")
+    );
+    assert!(memory_cards[0].tags.contains(&"axios".to_string()));
     assert!(drafts.is_empty());
     assert_eq!(candidates[0].status, CandidateStatus::Promoted);
 }
 
 #[test]
-fn approve_candidate_preserves_extraction_provenance_on_skilllet() {
+fn approve_candidate_preserves_extraction_provenance_on_memory_card() {
     let temp = tempfile::tempdir().expect("tempdir");
     let mut candidate = new_candidate("project:use-axios");
     candidate.extraction = ExtractionMetadata {
@@ -100,6 +104,8 @@ fn approve_candidate_preserves_extraction_provenance_on_skilllet() {
             hardness: "low".to_string(),
             control: "default".to_string(),
             rationale: "project tool preference".to_string(),
+            placement_reason: "Short durable rule suitable for default agent instructions."
+                .to_string(),
             tags: vec!["shape:preference".to_string()],
         }),
         suggested_action: Some(ExtractionAction::new_candidate_for_route("always_on_rule")),
@@ -107,17 +113,21 @@ fn approve_candidate_preserves_extraction_provenance_on_skilllet() {
     };
     add_candidate(temp.path(), candidate).expect("add candidate");
 
-    let skilllet_record =
-        approve_candidate_to_skilllet(temp.path(), "project:use-axios").expect("approve");
+    let memory_card_record =
+        approve_candidate_to_memory_card(temp.path(), "project:use-axios").expect("approve");
 
-    let extraction = skilllet_record.extraction.expect("skilllet provenance");
+    let extraction = memory_card_record
+        .extraction
+        .expect("memory_card provenance");
     assert_eq!(
-        skilllet_record.approved_from.as_deref(),
+        memory_card_record.approved_from.as_deref(),
         Some("project:use-axios")
     );
     assert_eq!(extraction.matched_signal, "preference");
     assert_eq!(extraction.source_observations, vec!["obs:session-1"]);
-    let action = extraction.suggested_action.expect("skilllet route action");
+    let action = extraction
+        .suggested_action
+        .expect("memory_card route action");
     assert_eq!(action.route, "always_on_rule");
     assert_eq!(action.compile_enabled, Some(true));
     assert_eq!(
@@ -130,9 +140,9 @@ fn approve_candidate_preserves_extraction_provenance_on_skilllet() {
 }
 
 #[test]
-fn approve_candidate_updates_existing_skilllet_for_same_concept() {
+fn approve_candidate_updates_existing_memory_card_for_same_concept() {
     let temp = tempfile::tempdir().expect("tempdir");
-    skilllet::add_skilllet(
+    memory_card::add_memory_card(
         temp.path(),
         "project:use-axios",
         "Use Axios",
@@ -141,22 +151,22 @@ fn approve_candidate_updates_existing_skilllet_for_same_concept() {
         "project",
         vec!["codex".to_string()],
     )
-    .expect("seed skilllet");
+    .expect("seed memory_card");
     let mut candidate = new_candidate("project:use-axios");
     candidate.body =
         "Use Axios for frontend HTTP requests and keep request handling consistent.".to_string();
     add_candidate(temp.path(), candidate).expect("add candidate");
 
-    let updated = approve_candidate_to_skilllet(temp.path(), "project:use-axios")
+    let updated = approve_candidate_to_memory_card(temp.path(), "project:use-axios")
         .expect("approve existing update");
 
     let candidates = load_candidates(temp.path()).expect("load candidates");
     assert_eq!(candidates[0].status, CandidateStatus::Promoted);
     assert!(updated.body.contains("keep request handling consistent"));
-    let skilllets = skilllet::load_skilllets(temp.path()).expect("load skilllets");
-    assert_eq!(skilllets.len(), 1);
+    let memory_cards = memory_card::load_memory_cards(temp.path()).expect("load memory_cards");
+    assert_eq!(memory_cards.len(), 1);
     assert!(
-        skilllets[0]
+        memory_cards[0]
             .body
             .contains("keep request handling consistent")
     );
@@ -174,7 +184,7 @@ fn candidate_record_persists_lifecycle_operation_from_suggested_action() {
     add_candidate(temp.path(), candidate).expect("add candidate");
 
     let candidates = load_candidates(temp.path()).expect("load candidates");
-    assert_eq!(candidates[0].operation, SkillletOperation::Update);
+    assert_eq!(candidates[0].operation, MemoryCardOperation::Update);
     assert_eq!(
         candidates[0].duplicate_of.as_deref(),
         Some("project:use-axios")

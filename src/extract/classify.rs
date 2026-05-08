@@ -14,6 +14,8 @@ pub struct KnowledgeClassification {
     pub control: String,
     pub rationale: String,
     #[serde(default)]
+    pub placement_reason: String,
+    #[serde(default)]
     pub tags: Vec<String>,
 }
 
@@ -27,6 +29,7 @@ pub fn classify_chunk(chunk: &EvidenceChunk) -> KnowledgeClassification {
     let hardness = hardness_for(&signal, &artifact_kind, &lower);
     let activation = activation_for(&artifact_kind, &hardness);
     let control = control_for(&signal, &hardness, &lower);
+    let placement_reason = placement_reason_for(&artifact_kind, &activation, &hardness);
     let mut tags = structured_tags(
         &signal,
         &artifact_kind,
@@ -46,6 +49,7 @@ pub fn classify_chunk(chunk: &EvidenceChunk) -> KnowledgeClassification {
         hardness,
         control,
         tags,
+        placement_reason,
     }
 }
 
@@ -246,7 +250,7 @@ fn structured_tags(
     if lower.contains("agents.md")
         || lower.contains("claude.md")
         || lower.contains("draft")
-        || lower.contains("skilllet")
+        || lower.contains("memory_card")
         || lower.contains("审阅")
     {
         tags.push("domain:governance".to_string());
@@ -295,6 +299,30 @@ fn rationale_for(signal: &str, artifact_kind: &str, hardness: &str) -> String {
     format!("Classified as {signal} for {artifact_kind} with {hardness} hardness.")
 }
 
+fn placement_reason_for(artifact_kind: &str, activation: &str, hardness: &str) -> String {
+    match artifact_kind {
+        "always_on_rule" => {
+            "Short durable rule suitable for default agent instructions.".to_string()
+        }
+        "workflow_skill" => {
+            "Reusable procedure or prompt pattern that should be loaded on demand as a Skill."
+                .to_string()
+        }
+        "skill_supplement" => {
+            "Reference or checklist material best attached to an existing Skill.".to_string()
+        }
+        "review_only" => {
+            "Ambiguous or governance-sensitive memory that requires human review before compile."
+                .to_string()
+        }
+        "reject" => "Not durable or actionable agent memory.".to_string(),
+        _ if activation == "manual" || hardness == "critical" => {
+            "Risky memory requires explicit review before use.".to_string()
+        }
+        _ => "Placement inferred from signal, activation, and hardness.".to_string(),
+    }
+}
+
 fn looks_like_noise(lower: &str) -> bool {
     let generic = lower.contains("代码整洁") && lower.contains("文档完善");
     let one_off =
@@ -314,7 +342,7 @@ fn looks_like_accepted_ai_project_improvement(_chunk: &EvidenceChunk, lower: &st
         lower.contains("用户确认") || lower.contains("基于用户确认") || lower.contains("accepted");
     let project_terms = lower.contains("candidate")
         || lower.contains("draft")
-        || lower.contains("skilllet")
+        || lower.contains("memory_card")
         || lower.contains("evidencechunk")
         || lower.contains("项目");
     let governance_terms = lower.contains("审阅")
@@ -363,11 +391,21 @@ fn looks_like_validation(lower: &str) -> bool {
     (lower.contains("cargo test")
         || lower.contains("clippy")
         || lower.contains("fixture")
-        || lower.contains("build"))
+        || lower.contains("build")
+        || lower.contains("测试")
+        || lower.contains("回放")
+        || lower.contains("quality gate")
+        || lower.contains("目标子集")
+        || lower.contains("全量相关测试")
+        || lower.contains("judge"))
         && (lower.contains("以后")
             || lower.contains("always")
             || lower.contains("必须")
-            || lower.contains("before"))
+            || lower.contains("before")
+            || lower.contains("默认")
+            || lower.contains("每次")
+            || lower.contains("先")
+            || lower.contains("需要"))
 }
 
 fn looks_like_template(lower: &str) -> bool {
@@ -420,4 +458,51 @@ fn looks_like_procedure(lower: &str) -> bool {
         || (lower.contains("first") && lower.contains("then"))
         || lower.contains("流程")
         || lower.contains("workflow")
+        || lower.contains("核心路径")
+        || lower.contains("可用主线")
+        || lower.contains("用户视角")
+        || lower.contains("用户体验")
+        || lower.contains("候选质量优先")
+        || lower.contains("质量优先于数量")
+        || lower.contains("审阅")
+        || lower.contains("review 边界")
+        || lower.contains("遗漏风险")
+        || lower.contains("真实历史")
+        || lower.contains("抽象")
+        || lower.contains("provider")
+        || lower.contains("llm")
+        || lower.contains("memory_tier")
+        || lower.contains("evidence_span")
+        || lower.contains("duplicate/noop")
+        || lower.contains("prompt schema")
+        || lower.contains("后台任务")
+        || lower.contains("高价值")
+        || lower.contains("长期规则")
+        || lower.contains("长期记忆")
+        || lower.contains("未来决策")
+        || lower.contains("通用方法论")
+        || lower.contains("真实工作流")
+        || lower.contains("作用域分层")
+        || lower.contains("关键词模板")
+        || lower.contains("稳定偏好")
+        || lower.contains("一次性命令")
+        || lower.contains("复用原则")
+        || lower.contains("路径")
+        || lower.contains("工具名")
+        || lower.contains("判断标准")
+        || lower.contains("最终使用感受")
+        || lower.contains("响应性")
+        || lower.contains("未来返工")
+        || lower.contains("自我修正")
+        || lower.contains("反馈反复拒绝")
+        || lower.contains("降权")
+        || lower.contains("为什么保留")
+        || lower.contains("压低")
+        || lower.contains("gold set")
+        || lower.contains("tier mix")
+        || lower.contains("assistant synthesis")
+        || lower.contains("fallback")
+        || lower.contains("大文件扫描")
+        || lower.contains("输入大小")
+        || lower.contains("handoff prompt")
 }

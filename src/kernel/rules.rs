@@ -66,7 +66,16 @@ fn infer_value(lower: &str, tags: &[String]) -> KernelValue {
         "每次",
     ];
     let high_value_markers = [
-        "复用", "沉淀", "流程", "测试", "handoff", "claude", "codex", "skill", "skilllet", "架构",
+        "复用",
+        "沉淀",
+        "流程",
+        "测试",
+        "handoff",
+        "claude",
+        "codex",
+        "skill",
+        "memory_card",
+        "架构",
     ];
     let noise_markers = ["继续", "优化一下", "修一下", "再来", "改一下", "看一下"];
 
@@ -112,7 +121,7 @@ fn infer_tags(lower: &str) -> Vec<String> {
             &["workflow", "流程", "步骤", "procedure", "checklist"],
         ),
         ("safety", &["safety", "安全", "secret", "redact", "禁止"]),
-        ("skilllet", &["skilllet", "skill", "技能"]),
+        ("memory_card", &["memory_card", "skill", "技能"]),
     ];
     mappings
         .iter()

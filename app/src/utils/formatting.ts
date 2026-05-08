@@ -7,7 +7,7 @@ const agentLabels: Record<string, string> = {
 
 const kindLabels: Record<string, string> = {
   rule: "规则",
-  skilllet: "技能片段",
+  memory_card: "技能片段",
   observation: "观察",
   package: "条目",
   preference: "偏好",

@@ -1,4 +1,4 @@
-use crate::candidate::MemoryTier;
+﻿use crate::candidate::MemoryTier;
 use crate::provider;
 
 use super::{Candidate, llm};
@@ -30,7 +30,10 @@ pub(super) fn build_abstract_prompt(project_candidate: &Candidate) -> provider::
 
 要求：
 - 保留判断标准，也就是什么时候用、为什么重要
-- 仍然命令式、自包含、单句
+- 仍然命令式、自包含、单句，并保留 Trigger + Action + Boundary/Why
+- 只有去掉项目名、路径、工具名后仍可执行，才允许 abstract_possible: true
+- 协作方式（计划、验证、审阅、汇报、反馈处理）优先归为 collaboration_preference
+- 产品/工程判断标准（核心功能、用户体验、跨项目质量）优先归为 cross_project_principle
 - 不允许出现 cargo / Bun / Rust / AGENTS.md / Claude Code / Codex 这类项目或工具专名
 - memory_tier 只能是 cross_project_principle 或 collaboration_preference
 - 只返回 JSON，不要 markdown"#
@@ -98,7 +101,7 @@ pub(super) fn run_candidate_abstraction(
 
 fn abstract_schema() -> provider::ProviderJsonSchema {
     provider::ProviderJsonSchema {
-        name: "SkillletAbstraction".to_string(),
+        name: "MemoryCardAbstraction".to_string(),
         strict: true,
         schema: serde_json::json!({
             "type": "object",
@@ -135,7 +138,7 @@ fn contains_forbidden_project_term(body: &str) -> bool {
         "pnpm",
         "npm",
         "agent-kernel",
-        "skilllet",
+        "memory_card",
         "tauri",
         "react",
         "evidencechunk",
@@ -255,14 +258,14 @@ mod tests {
     #[test]
     fn abstract_prompt_uses_schema_and_project_context() {
         let prompt = build_abstract_prompt(&project_candidate(
-            "This project should focus on Skilllet generation as the core feature.",
+            "This project should focus on MemoryCard generation as the core feature.",
         ));
 
         assert!(prompt.system_prompt.contains("跨项目方法论"));
-        assert!(prompt.user_prompt.contains("Skilllet generation"));
+        assert!(prompt.user_prompt.contains("MemoryCard generation"));
         assert_eq!(
             prompt.json_schema.as_ref().expect("schema").name,
-            "SkillletAbstraction"
+            "MemoryCardAbstraction"
         );
     }
 

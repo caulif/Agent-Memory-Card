@@ -1,13 +1,13 @@
-import { Bell, Boxes, CloudCog, GitBranch } from "lucide-react";
-import type { DraftRecord, SkillletRecord, EditFormData, PageDef } from "../types/domain";
+﻿import { Bell, Boxes, CloudCog, GitBranch } from "lucide-react";
+import type { DraftRecord, MemoryCardRecord, EditFormData, PageDef } from "../types/domain";
 
-export const KIND_OPTIONS = ["rule", "skilllet", "observation", "preference", "constraint", "procedure", "convention"];
+export const KIND_OPTIONS = ["rule", "memory_card", "observation", "preference", "constraint", "procedure", "convention"];
 export const SCOPE_OPTIONS = ["project", "global", "agent"];
 export const EDITABLE_AGENTS = ["codex", "claude-code"];
 
 export const PAGES: PageDef[] = [
   { id: "drafts", label: "审阅", icon: Bell },
-  { id: "skilllets", label: "技能片段", icon: Boxes },
+  { id: "memory-cards", label: "记忆卡", icon: Boxes },
   { id: "agents", label: "分配", icon: GitBranch },
   { id: "settings", label: "设置", icon: CloudCog },
 ];
@@ -24,14 +24,14 @@ export function buildEditFormFromDraft(draft: DraftRecord): EditFormData {
   };
 }
 
-export function buildEditFormFromSkilllet(skilllet: SkillletRecord): EditFormData {
+export function buildEditFormFromMemoryCard(memory_card: MemoryCardRecord): EditFormData {
   return {
-    title: skilllet.title,
-    brief: skilllet.brief ?? "",
-    body: skilllet.body,
-    kind: skilllet.kind,
-    scope: skilllet.scope,
-    tagsInput: (skilllet.tags ?? []).join("，"),
+    title: memory_card.title,
+    brief: memory_card.brief ?? "",
+    body: memory_card.body,
+    kind: memory_card.kind,
+    scope: memory_card.scope,
+    tagsInput: (memory_card.tags ?? []).join("，"),
     targets: [],
   };
 }

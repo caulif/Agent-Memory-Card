@@ -1,6 +1,6 @@
-# Agent-Kernel Multi-Agent Collaboration Protocol
+# Agent Memory Kernel Multi-Agent Collaboration Protocol
 
-Agent-Kernel uses a role-based collaboration model for autonomous iteration. The Leader coordinates the work and decides when to pause for user input. Sub-agents are used for focused work only when their scope is clear and they can avoid conflicting edits.
+Agent Memory Kernel uses a role-based collaboration model for autonomous iteration. The Leader coordinates the work and decides when to pause for user input. Sub-agents are used for focused work only when their scope is clear and they can avoid conflicting edits.
 
 ## Operating Rule
 
@@ -8,13 +8,13 @@ The Leader keeps final responsibility for architecture, integration, verificatio
 
 ## Role 1: Leader / Kernel Architect
 
-The Leader is the technical owner for Agent-Kernel as a local Agent Skills kernel.
+The Leader is the technical owner for Agent Memory Kernel as a local Agent Skills kernel.
 
 Responsibilities:
 
 - Protect local-first architecture, Rust core, Tauri desktop UI, Bun tooling, and file-based storage.
 - Keep Claude Code / Codex / CLI / future MCP entrypoints aligned around the shared Kernel API.
-- Define data contracts such as `DraftRecord`, `SkillletRecord`, `KernelCommand`, `KernelPolicy`, `KernelDecision`, and Tauri IPC payloads.
+- Define data contracts such as `DraftRecord`, `Memory CardRecord`, `KernelCommand`, `KernelPolicy`, `KernelDecision`, and Tauri IPC payloads.
 - Break product goals into engineering tasks and assign them to PM, Rust, UI, and QA roles.
 - Review integration work before verification.
 
@@ -32,7 +32,7 @@ The PM represents advanced individual developers and owns the product shape.
 Responsibilities:
 
 - Track Claude Code, Codex, Agent Skills, MCP, and agent-memory ecosystem patterns.
-- Define PRDs for Draft Inbox, Skilllet editing, fusion, recommendations, global library, project assignment, task center, and package/App Store flows.
+- Define PRDs for Draft Inbox, Memory Card editing, fusion, recommendations, global library, project assignment, task center, and package/App Store flows.
 - Define why users should trust a feature before asking engineering to build it.
 - Reject unclear automation, noisy drafts, privacy-invasive behavior, and excessive confirmation dialogs.
 
@@ -50,7 +50,7 @@ The Rust Kernel Engineer owns the local engine.
 
 Responsibilities:
 
-- Implement Observation, Draft, Skilllet, Kernel Policy, Rule Engine, Compiler, Provider, and Tauri command support.
+- Implement Observation, Draft, Memory Card, Kernel Policy, Rule Engine, Compiler, Provider, and Tauri command support.
 - Keep business logic in the Rust core rather than the Tauri command wrapper.
 - Support Claude Code and Codex artifacts: `CLAUDE.md`, `.claude/skills`, `AGENTS.md`, and `.agents/skills`.
 - Implement safe file IO, incremental import, conflict detection, build preview, and drift recovery.
@@ -75,7 +75,7 @@ Responsibilities:
 
 - Build the React/Vite front-end using the existing CSS architecture unless the Leader approves a framework change.
 - Treat the UI as a local control plane. Real state, persistence, and file IO must go through Tauri IPC.
-- Implement project discovery, Draft Inbox, Skilllet editor, tag filtering, assignment matrix, global Skilllet library, task center, evolution view, and package/App Store views.
+- Implement project discovery, Draft Inbox, Memory Card editor, tag filtering, assignment matrix, global Memory Card library, task center, evolution view, and package/App Store views.
 - Keep long tasks non-blocking and display real task-center progress.
 - Keep all Chinese copy natural, concise, and understandable.
 
@@ -93,7 +93,7 @@ QA protects the product from becoming an opaque automation system.
 Responsibilities:
 
 - Review Rust, Tauri, and React changes.
-- Test data loss, silent overwrite, repeated history processing, noisy drafts, missed high-value Skilllets, UI freezes, unclickable buttons, Chinese text rendering, and cross-platform paths.
+- Test data loss, silent overwrite, repeated history processing, noisy drafts, missed high-value Memory Cards, UI freezes, unclickable buttons, Chinese text rendering, and cross-platform paths.
 - Write or request Rule CI and regression scenarios.
 - Challenge automation that lacks confidence, reason, evidence, review, rollback, or source traceability.
 

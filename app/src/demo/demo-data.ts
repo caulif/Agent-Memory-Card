@@ -1,10 +1,10 @@
-import type {
+﻿import type {
   DesktopAppState,
   ProjectSnapshot,
   ProjectDashboard,
   ProjectReviewInbox,
   ProjectCandidateInbox,
-  ProjectSkillletLibrary,
+  ProjectMemoryCardLibrary,
   ProjectAssignmentView,
   ProjectQualityView,
   RegisteredProject,
@@ -94,12 +94,12 @@ export function createDemoProjectSnapshot(projectPath: string): ProjectSnapshot 
         language: "zh-CN",
       },
     ],
-    skilllets: [
+    memory_cards: [
       {
         id: "preview-mode",
         title: "浏览器预览模式",
         brief: "无原生运行时自动降级为静态数据预览",
-        kind: "skilllet",
+        kind: "memory_card",
         scope: "project",
         body: "检测到没有 Tauri 运行时后，加载静态项目快照，让页面可以继续导航和展示。",
         tags: ["ui-design", "preview"],
@@ -109,14 +109,14 @@ export function createDemoProjectSnapshot(projectPath: string): ProjectSnapshot 
         id: "safe-actions",
         title: "本地安全动作",
         brief: "预览模式下所有写操作只给出中文反馈",
-        kind: "skilllet",
+        kind: "memory_card",
         scope: "agent",
         body: "演示模式中的操作只给出中文反馈，不访问真实文件系统。",
         tags: ["demo", "security"],
         language: "zh-CN",
       },
     ],
-    global_skilllets: [
+    global_memory_cards: [
       {
         id: "global:keep-ui-chinese",
         title: "UI 语言保持中文优先",
@@ -171,12 +171,12 @@ export function createDemoProjectSnapshot(projectPath: string): ProjectSnapshot 
       agents: project.agents,
       rows: [
         {
-          skilllet_id: "preview-mode",
+          memory_card_id: "preview-mode",
           title: "浏览器预览模式",
           targets: { codex: true, "claude-code": project.agents.includes("claude-code") },
         },
         {
-          skilllet_id: "safe-actions",
+          memory_card_id: "safe-actions",
           title: "本地安全动作",
           targets: { codex: true, "claude-code": false },
         },
@@ -203,9 +203,9 @@ export function createDemoProjectDashboard(projectPath: string): ProjectDashboar
     project_path: snapshot.project_path,
     candidate_count: createDemoProjectCandidateInbox(projectPath).candidates.length,
     draft_count: snapshot.drafts.length,
-    skilllet_count: snapshot.skilllets.length,
+    memory_card_count: snapshot.memory_cards.length,
     observation_count: snapshot.observations.length,
-    global_skilllet_count: snapshot.global_skilllets?.length ?? 0,
+    global_memory_card_count: snapshot.global_memory_cards?.length ?? 0,
     enabled_agents: ["claude-code", "codex"],
     warning_count: snapshot.status.warnings.length + snapshot.build_preview.warnings.length,
   };
@@ -243,12 +243,12 @@ export function createDemoProjectCandidateInbox(projectPath: string): ProjectCan
   };
 }
 
-export function createDemoProjectSkillletLibrary(projectPath: string): ProjectSkillletLibrary {
+export function createDemoProjectMemoryCardLibrary(projectPath: string): ProjectMemoryCardLibrary {
   const snapshot = createDemoProjectSnapshot(projectPath);
   return {
     project_path: snapshot.project_path,
-    skilllets: [...snapshot.skilllets],
-    global_skilllets: [...(snapshot.global_skilllets ?? [])],
+    memory_cards: [...snapshot.memory_cards],
+    global_memory_cards: [...(snapshot.global_memory_cards ?? [])],
     catalog_status: snapshot.catalog_status,
   };
 }

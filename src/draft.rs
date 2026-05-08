@@ -9,8 +9,8 @@ use std::collections::BTreeSet;
 use crate::candidate::ExtractionMetadata;
 use crate::config;
 use crate::fsutil;
+use crate::memory_card;
 use crate::provider::{self, ProviderJsonSchema, ProviderRequest};
-use crate::skilllet;
 use crate::textutil;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -239,7 +239,7 @@ pub fn load_drafts(project_root: &Path) -> Result<Vec<DraftRecord>> {
 
 pub fn load_reviewable_drafts(project_root: &Path) -> Result<Vec<DraftRecord>> {
     let root = fsutil::normalize_project_root(project_root)?;
-    let existing = ExistingSkillletIndex::load(&root)?;
+    let existing = ExistingMemoryCardIndex::load(&root)?;
     Ok(load_drafts(&root)?
         .into_iter()
         .filter(|draft| !existing.represents_draft(draft))
@@ -253,18 +253,22 @@ pub fn approve_draft(project_root: &Path, id: &str) -> Result<()> {
         return Err(anyhow!("draft `{id}` does not exist"));
     }
     let draft: DraftRecord = serde_yaml::from_str(&fs::read_to_string(&path)?)?;
-    // 检查同名 skilllet 是否已存在；若是同一概念的更新，则吸收到现有 Skilllet。
-    let existing_skilllets = skilllet::load_skilllets(&root)?;
-    if let Some(existing_skilllet) = existing_skilllets
+    // 检查同名 memory_card 是否已存在；若是同一概念的更新，则吸收到现有 MemoryCard。
+    let existing_memory_cards = memory_card::load_memory_cards(&root)?;
+    if let Some(existing_memory_card) = existing_memory_cards
         .iter()
-        .find(|skilllet| skilllet.id == draft.id)
+        .find(|memory_card| memory_card.id == draft.id)
     {
-        if textutil::jaccard_similarity(&draft.body, &existing_skilllet.body) >= 0.75 {
+        if textutil::jaccard_similarity(&draft.body, &existing_memory_card.body) >= 0.75 {
             fs::remove_file(path)?;
             return Ok(());
         }
-        if skilllet::review_update_matches_existing(existing_skilllet, &draft.title, &draft.body) {
-            skilllet::update_skilllet_from_review(
+        if memory_card::review_update_matches_existing(
+            existing_memory_card,
+            &draft.title,
+            &draft.body,
+        ) {
+            memory_card::update_memory_card_from_review(
                 &root,
                 &draft.id,
                 draft.title.clone(),
@@ -279,23 +283,23 @@ pub fn approve_draft(project_root: &Path, id: &str) -> Result<()> {
             return Ok(());
         }
         return Err(anyhow!(
-            "skilllet id conflict for `{}` (different body); review or merge the existing Skilllet before approving this Draft",
+            "memory_card id conflict for `{}` (different body); review or merge the existing MemoryCard before approving this Draft",
             draft.id
         ));
     }
-    let existing_index = ExistingSkillletIndex::from_records(&root, &existing_skilllets)?;
+    let existing_index = ExistingMemoryCardIndex::from_records(&root, &existing_memory_cards)?;
     if existing_index.represents_draft(&draft) {
         fs::remove_file(path)?;
         return Ok(());
     }
-    skilllet::add_skilllet_with_provenance(
+    memory_card::add_memory_card_with_provenance(
         &root,
         &draft.id,
         &draft.title,
         &draft.body,
         &draft.kind,
         &draft.scope,
-        draft.targets,
+        Vec::new(),
         Some(draft.extraction.clone()),
         Some(draft.id.clone()),
         Some(draft.evidence.clone()),
@@ -305,29 +309,34 @@ pub fn approve_draft(project_root: &Path, id: &str) -> Result<()> {
 }
 
 #[derive(Debug, Default)]
-struct ExistingSkillletIndex {
+struct ExistingMemoryCardIndex {
     ids: BTreeSet<String>,
     id_slugs: BTreeSet<String>,
     title_slugs: BTreeSet<String>,
     bodies: Vec<String>,
 }
 
-impl ExistingSkillletIndex {
+impl ExistingMemoryCardIndex {
     fn load(project_root: &Path) -> Result<Self> {
-        let skilllets = skilllet::load_skilllets(project_root)?;
-        Self::from_records(project_root, &skilllets)
+        let memory_cards = memory_card::load_memory_cards(project_root)?;
+        Self::from_records(project_root, &memory_cards)
     }
 
-    fn from_records(project_root: &Path, skilllets: &[skilllet::SkillletRecord]) -> Result<Self> {
+    fn from_records(
+        project_root: &Path,
+        memory_cards: &[memory_card::MemoryCardRecord],
+    ) -> Result<Self> {
         let mut index = Self::default();
-        for skilllet in skilllets {
-            index.add_id(&skilllet.id);
-            index.title_slugs.insert(review_title_slug(&skilllet.title));
-            index.bodies.push(skilllet.body.clone());
+        for memory_card in memory_cards {
+            index.add_id(&memory_card.id);
+            index
+                .title_slugs
+                .insert(review_title_slug(&memory_card.title));
+            index.bodies.push(memory_card.body.clone());
         }
 
         let project = config::load_or_default_project_config(project_root)?;
-        for included in project.skilllets.include {
+        for included in project.memory_cards.include {
             index.add_id(&included.id);
         }
 
@@ -487,7 +496,7 @@ fn validate_non_empty(label: &str, value: &str) -> Result<()> {
 fn validate_kind(kind: &str) -> Result<()> {
     const KINDS: &[&str] = &[
         "rule",
-        "skilllet",
+        "memory_card",
         "observation",
         "package",
         "preference",
@@ -599,7 +608,7 @@ pub fn merge_drafts(
         .ok_or_else(|| anyhow!("merged draft `{id}` was not written"))
 }
 
-pub fn fuse_skilllets_to_draft(
+pub fn fuse_memory_cards_to_draft(
     project_root: &Path,
     id: &str,
     title: &str,
@@ -607,27 +616,30 @@ pub fn fuse_skilllets_to_draft(
     targets: Vec<String>,
 ) -> Result<DraftRecord> {
     if source_ids.len() < 2 {
-        return Err(anyhow!("at least two source skilllets are required"));
+        return Err(anyhow!("at least two source memory_cards are required"));
     }
 
     let root = fsutil::normalize_project_root(project_root)?;
-    let skilllets = skilllet::skilllet_map(&root)?;
+    let memory_cards = memory_card::memory_card_map(&root)?;
     let mut missing = Vec::new();
     let mut sources = Vec::new();
     for source_id in &source_ids {
-        let Some(skilllet) = skilllets.get(source_id) else {
+        let Some(memory_card) = memory_cards.get(source_id) else {
             missing.push(source_id.clone());
             continue;
         };
-        sources.push(skilllet.clone());
+        sources.push(memory_card.clone());
     }
     if !missing.is_empty() {
-        return Err(anyhow!("missing source skilllets: {}", missing.join(", ")));
+        return Err(anyhow!(
+            "missing source memory_cards: {}",
+            missing.join(", ")
+        ));
     }
 
-    let body = fuse_skilllet_body_with_provider(&root, title, &sources)
-        .unwrap_or_else(|| fuse_skilllet_body_deterministic(title, &sources));
-    let evidence = format!("Fused Skilllets: {}", source_ids.join(", "));
+    let body = fuse_memory_card_body_with_provider(&root, title, &sources)
+        .unwrap_or_else(|| fuse_memory_card_body_deterministic(title, &sources));
+    let evidence = format!("Fused MemoryCards: {}", source_ids.join(", "));
     let confidence = Some(0.8);
     let mut targets = targets;
     targets.sort();
@@ -645,10 +657,10 @@ pub fn fuse_skilllets_to_draft(
             evidence,
             confidence,
             reason: Some(format!(
-                "Synthesized a reviewable fusion candidate from {} skilllets.",
+                "Synthesized a reviewable fusion candidate from {} memory_cards.",
                 sources.len()
             )),
-            matched_template: Some("manual:skilllet-fusion".to_string()),
+            matched_template: Some("manual:memory_card-fusion".to_string()),
             extraction: ExtractionMetadata::default(),
         },
     )?;
@@ -660,30 +672,30 @@ pub fn fuse_skilllets_to_draft(
 }
 
 #[derive(Debug, Deserialize)]
-struct FuseSkillletResponse {
+struct FuseMemoryCardResponse {
     body: String,
 }
 
-fn fuse_skilllet_body_with_provider(
+fn fuse_memory_card_body_with_provider(
     project_root: &Path,
     title: &str,
-    sources: &[skilllet::SkillletRecord],
+    sources: &[memory_card::MemoryCardRecord],
 ) -> Option<String> {
     let cfg = provider::load_or_default_provider_config(project_root).ok()?;
-    let request = build_fuse_skilllet_prompt(title, sources);
+    let request = build_fuse_memory_card_prompt(title, sources);
     let output =
         provider::call_provider_for_role(&cfg, provider::ProviderRole::Refine, &request, 2048)
             .ok()?;
-    let parsed: FuseSkillletResponse = serde_json::from_str(output.trim()).ok()?;
+    let parsed: FuseMemoryCardResponse = serde_json::from_str(output.trim()).ok()?;
     let body = parsed.body.trim().to_string();
     is_valid_fused_body(&body).then_some(body)
 }
 
-fn build_fuse_skilllet_prompt(
+fn build_fuse_memory_card_prompt(
     title: &str,
-    sources: &[skilllet::SkillletRecord],
+    sources: &[memory_card::MemoryCardRecord],
 ) -> ProviderRequest {
-    let skilllets = sources
+    let memory_cards = sources
         .iter()
         .map(|source| {
             serde_json::json!({
@@ -698,22 +710,22 @@ fn build_fuse_skilllet_prompt(
         })
         .collect::<Vec<_>>();
     ProviderRequest {
-        system_prompt: r#"你把多个 Skilllet 融合成一个新的高质量 Draft Skilllet。
+        system_prompt: r#"你把多个 MemoryCard 融合成一个新的高质量 Draft MemoryCard。
 
 要求：
-- 输出一条新的综合规则，不要简单拼接源 Skilllet 标题或 Markdown 小节。
-- 保留每个源 Skilllet 的核心触发条件、动作和边界。
+- 输出一条新的综合规则，不要简单拼接源 MemoryCard 标题或 Markdown 小节。
+- 保留每个源 MemoryCard 的核心触发条件、动作和边界。
 - 删除重复内容，冲突处写成需要 review 的边界。
 - 中文输入优先输出中文；英文输入可输出英文。
 - 只返回 JSON。"#
             .to_string(),
         user_prompt: serde_json::json!({
             "new_title": title,
-            "source_skilllets": skilllets,
+            "source_memory_cards": memory_cards,
         })
         .to_string(),
         json_schema: Some(ProviderJsonSchema {
-            name: "FuseSkilllets".to_string(),
+            name: "FuseMemoryCards".to_string(),
             strict: true,
             schema: serde_json::json!({
                 "type": "object",
@@ -727,14 +739,17 @@ fn build_fuse_skilllet_prompt(
     }
 }
 
-fn fuse_skilllet_body_deterministic(title: &str, sources: &[skilllet::SkillletRecord]) -> String {
+fn fuse_memory_card_body_deterministic(
+    title: &str,
+    sources: &[memory_card::MemoryCardRecord],
+) -> String {
     let bodies = sources
         .iter()
-        .map(|skilllet| skilllet.body.trim().trim_end_matches(['.', '。']))
+        .map(|memory_card| memory_card.body.trim().trim_end_matches(['.', '。']))
         .filter(|body| !body.is_empty())
         .collect::<Vec<_>>();
     format!(
-        "当需要执行“{}”相关流程时，综合遵循这些 Skilllet：{}。目标是把多个片段压缩成一条可审阅、可执行的新规则，而不是保留多个重复草稿。",
+        "当需要执行“{}”相关流程时，综合遵循这些 MemoryCard：{}。目标是把多个片段压缩成一条可审阅、可执行的新规则，而不是保留多个重复草稿。",
         title.trim(),
         bodies.join("；")
     )
@@ -745,8 +760,8 @@ fn is_valid_fused_body(body: &str) -> bool {
     body.chars().count() >= 24
         && body.chars().count() <= 1000
         && !body.lines().any(|line| line.trim_start().starts_with('#'))
-        && !lower.contains("source skilllet")
-        && !lower.contains("源 skilllet")
+        && !lower.contains("source memory_card")
+        && !lower.contains("源 memory_card")
 }
 
 /// 删除指定草稿文件

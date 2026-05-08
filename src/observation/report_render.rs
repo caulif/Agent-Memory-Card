@@ -6,7 +6,7 @@ use super::{
 impl ObservationImportReport {
     pub fn render(&self) -> String {
         let mut out = String::new();
-        out.push_str("Agent-Kernel observation import\n\n");
+        out.push_str("Agent Memory Kernel observation import\n\n");
         out.push_str(&format!("Created observations: {}\n", self.created));
         out.push_str(&format!("Skipped sources: {}\n", self.skipped));
         if !self.observations.is_empty() {
@@ -22,7 +22,7 @@ impl ObservationImportReport {
 impl ObservationSynthesisReport {
     pub fn render(&self) -> String {
         let mut out = String::new();
-        out.push_str("Agent-Kernel observation synthesis\n\n");
+        out.push_str("Agent Memory Kernel observation synthesis\n\n");
         out.push_str(&format!("Engine: {}\n", self.engine));
         out.push_str(&format!("Candidates written: {}\n", self.created));
         out.push_str(&format!("Candidate previews: {}\n", self.candidates));
@@ -49,7 +49,7 @@ impl ObservationSynthesisReport {
 impl ObservationEvolveReport {
     pub fn render(&self) -> String {
         let mut out = String::new();
-        out.push_str("Agent-Kernel local evolution\n\n");
+        out.push_str("Agent Memory Kernel local evolution\n\n");
         out.push_str(&format!("Engine: {}\n", self.engine));
         out.push_str(&format!("Observations imported: {}\n", self.imported));
         out.push_str(&format!("Import skipped: {}\n", self.import_skipped));
@@ -78,7 +78,7 @@ impl ObservationEvolveReport {
 impl ObservationReplayReport {
     pub fn render(&self) -> String {
         let mut out = String::new();
-        out.push_str("Agent-Kernel local replay\n\n");
+        out.push_str("Agent Memory Kernel local replay\n\n");
         out.push_str(&format!("Engine: {}\n", self.engine));
         out.push_str(&format!(
             "Discovered sources: {}\n",

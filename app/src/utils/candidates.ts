@@ -35,7 +35,7 @@ export function projectOverviewMetrics(
   return {
     candidateCount: snapshot?.candidates?.filter((candidate) => candidate.status === "candidate").length ?? dashboard?.candidate_count ?? 0,
     draftCount: snapshot?.drafts.length ?? dashboard?.draft_count ?? 0,
-    skillletCount: snapshot?.skilllets.length ?? dashboard?.skilllet_count ?? 0,
+    memory_cardCount: snapshot?.memory_cards.length ?? dashboard?.memory_card_count ?? 0,
     observationCount: snapshot?.observations.length ?? dashboard?.observation_count ?? 0,
     installedCount,
   };

@@ -1,4 +1,4 @@
-import React from "react";
+﻿import React from "react";
 import {
   cancelJobCommand,
   getJobHistory,
@@ -79,11 +79,11 @@ export function useJobCenter({
       if (job.lifecycle === "completed" && job.key === "扫描") {
         void reloadAppStateFromBackend();
       }
-      if (job.lifecycle === "completed" && (job.key === "整理历史" || job.key === "同步" || job.key === "融合Skilllet")) {
+      if (job.lifecycle === "completed" && (job.key === "整理历史" || job.key === "同步" || job.key === "融合 Memory Card")) {
         const projectPath = selectedProjectRef.current;
         if (projectPath) {
           void loadDashboard(projectPath);
-          if (job.key === "融合Skilllet") {
+          if (job.key === "融合 Memory Card") {
             void loadReadModelsForPage(projectPath, "settings");
           } else {
             void loadReadModelsForPage(projectPath, page);

@@ -1,4 +1,4 @@
-import type { TaskProgress, DesktopTaskStatus } from "../types/domain";
+﻿import type { TaskProgress, DesktopTaskStatus } from "../types/domain";
 
 export function taskProgressForAction(actionKey: string): TaskProgress {
   if (!actionKey) {
@@ -17,7 +17,7 @@ export function taskProgressForAction(actionKey: string): TaskProgress {
       description: "正在递归扫描根目录，发现 AGENTS.md / CLAUDE.md 等项目标记...",
     },
     "整理历史": {
-      label: "提炼高价值 Skilllet",
+      label: "提炼高价值 Memory Card",
       percent: 55,
       description: "正在读取 Claude Code / Codex 历史对话，过滤一次性任务，保留稳定偏好和硬约束...",
     },
@@ -26,10 +26,10 @@ export function taskProgressForAction(actionKey: string): TaskProgress {
       percent: 70,
       description: "正在将已批准的技能片段写入目标智能体的配置文件...",
     },
-    "融合Skilllet": {
+    "融合 Memory Card": {
       label: "生成融合草稿",
       percent: 68,
-      description: "正在把多个 Skilllet 合并为一个待审草稿，原片段会保留不变...",
+      description: "正在把多个 Memory Card 合并为一个待审草稿，原片段会保留不变...",
     },
     "切换项目": {
       label: "切换项目快照",

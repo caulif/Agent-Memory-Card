@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use agent_kernel::{
-    build, candidate, catalog, config, draft, extract, feedback, hooks, index, mcp, migration,
-    observation, project_registry, provider, review, rule_test, scanner, skilllet,
+    build, candidate, catalog, config, draft, extract, feedback, hooks, index, mcp, memory_card,
+    migration, observation, project_registry, provider, review, rule_test, scanner,
 };
 use anyhow::Result;
 use clap::Parser;
@@ -13,7 +13,7 @@ mod cli_tests;
 
 use cli::{
     AgentCommands, CatalogCommands, Cli, Commands, DraftCommands, HookCommands, IndexCommands,
-    ObserveCommands, PreferenceCommands, ProjectCommands, ProviderCommands, SkillletCommands,
+    MemoryCardCommands, ObserveCommands, PreferenceCommands, ProjectCommands, ProviderCommands,
 };
 
 #[tokio::main]
@@ -43,7 +43,7 @@ async fn main() -> Result<()> {
                 if registry.projects.is_empty() {
                     println!("No projects registered. Run `agent-kernel project scan` first.");
                 } else {
-                    println!("Agent-Kernel projects\n");
+                    println!("Agent Memory Kernel projects\n");
                     for project in registry.projects {
                         println!(
                             "- {} [{}]\n  {}",
@@ -103,8 +103,8 @@ async fn main() -> Result<()> {
             let report = build::sync_project(&project)?;
             println!("{}", report.render());
         }
-        Commands::Skilllet { command } => match command {
-            SkillletCommands::Add {
+        Commands::MemoryCard { command } => match command {
+            MemoryCardCommands::Add {
                 id,
                 title,
                 body,
@@ -113,46 +113,46 @@ async fn main() -> Result<()> {
                 targets,
                 project,
             } => {
-                skilllet::add_skilllet(&project, &id, &title, &body, &kind, &scope, targets)?;
-                println!("Added skilllet `{id}`");
+                memory_card::add_memory_card(&project, &id, &title, &body, &kind, &scope, targets)?;
+                println!("Added memory_card `{id}`");
                 println!("Run `agent-kernel build --preview` to inspect generated instructions.");
             }
-            SkillletCommands::List { project } => {
-                let records = skilllet::load_skilllets(&project)?;
+            MemoryCardCommands::List { project } => {
+                let records = memory_card::load_memory_cards(&project)?;
                 if records.is_empty() {
-                    println!("No skilllets found.");
+                    println!("No memory_cards found.");
                 } else {
                     for record in records {
                         println!("- {}: {}", record.id, record.title);
                     }
                 }
             }
-            SkillletCommands::Targets {
+            MemoryCardCommands::Targets {
                 id,
                 targets,
                 project,
             } => {
-                skilllet::set_skilllet_targets(&project, &id, targets)?;
-                println!("Updated targets for skilllet `{id}`");
+                memory_card::set_memory_card_targets(&project, &id, targets)?;
+                println!("Updated targets for memory_card `{id}`");
             }
-            SkillletCommands::Merge {
+            MemoryCardCommands::Merge {
                 id,
                 title,
                 sources,
                 targets,
                 project,
             } => {
-                skilllet::merge_skilllets(&project, &id, &title, sources, targets)?;
-                println!("Merged skilllet `{id}`");
+                memory_card::merge_memory_cards(&project, &id, &title, sources, targets)?;
+                println!("Merged memory_card `{id}`");
                 println!("Run `agent-kernel build --preview` to inspect generated instructions.");
             }
-            SkillletCommands::AttachSkill { id, skill, project } => {
+            MemoryCardCommands::AttachSkill { id, skill, project } => {
                 config::add_skill_supplement(&project, &skill, &id)?;
-                println!("Attached skilllet `{id}` to skill `{skill}`");
+                println!("Attached memory_card `{id}` to skill `{skill}`");
                 println!("Run `agent-kernel sync` to update mirrored skill supplements.");
             }
-            SkillletCommands::Matrix { project } => {
-                let matrix = skilllet::skilllet_target_matrix(&project)?;
+            MemoryCardCommands::Matrix { project } => {
+                let matrix = memory_card::memory_card_target_matrix(&project)?;
                 println!("{}", matrix.render());
             }
         },
@@ -289,7 +289,7 @@ async fn main() -> Result<()> {
                 if templates.is_empty() {
                     println!("No preference templates found.");
                 } else {
-                    println!("Agent-Kernel preference templates\n");
+                    println!("Agent Memory Kernel preference templates\n");
                     for template in templates {
                         println!(
                             "- [{}] {}: {}",
@@ -480,7 +480,7 @@ async fn main() -> Result<()> {
                 project,
             } => {
                 let package = catalog::install_catalog_package(&project, &id, targets)?;
-                println!("Installed catalog package `{}` as Skilllet", package.id);
+                println!("Installed catalog package `{}` as Memory Card", package.id);
                 println!("Run `agent-kernel build --preview` to inspect generated instructions.");
             }
         },

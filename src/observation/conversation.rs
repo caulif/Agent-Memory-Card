@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn extract_jsonl_messages_skips_chinese_ui_agent_task_briefs() {
-        let input = r#"{"type":"user","message":{"role":"user","content":"你是这个项目的 UI 优化代理。请直接修改前端文件，遵守现有中文 Apple-like 风格，不要改 Rust 后端。\n\n当前项目：Agent-Kernel Tauri app，工作目录 C:\\Users\\15893\\Documents\\New project。\n需要实现：\n1. app/src/ui-helpers.ts 增加 DesktopTaskStatus 类型。"}} "#;
+        let input = r#"{"type":"user","message":{"role":"user","content":"你是这个项目的 UI 优化代理。请直接修改前端文件，遵守现有中文 Apple-like 风格，不要改 Rust 后端。\n\n当前项目：Agent Memory Kernel Tauri app，工作目录 C:\\Users\\15893\\Documents\\New project。\n需要实现：\n1. app/src/ui-helpers.ts 增加 DesktopTaskStatus 类型。"}} "#;
 
         assert!(extract_jsonl_messages(input).is_none());
     }

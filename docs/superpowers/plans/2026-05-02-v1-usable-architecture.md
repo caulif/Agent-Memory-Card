@@ -1,8 +1,8 @@
-# Agent-Kernel v1 Usable Architecture Implementation Plan
+# Agent Memory Kernel v1 Usable Architecture Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Re-center Agent-Kernel around a fast, trustworthy project workflow: select project, evolve local evidence into a small review inbox, edit/approve Skilllets, assign them to Claude Code/Codex, then compile and verify artifacts.
+**Goal:** Re-center Agent Memory Kernel around a fast, trustworthy project workflow: select project, evolve local evidence into a small review inbox, edit/approve Memory Cards, assign them to Claude Code/Codex, then compile and verify artifacts.
 
 **Architecture:** Keep the Rust core and file-native storage, but add an Application Service layer between Tauri IPC and core modules. UI reads lightweight dashboard/read-model endpoints first, starts long work as jobs, and loads heavy checks such as Rule CI and build preview only after the first paint.
 
@@ -37,9 +37,9 @@
 pub struct ProjectDashboard {
     pub project_path: String,
     pub draft_count: usize,
-    pub skilllet_count: usize,
+    pub memory_card_count: usize,
     pub observation_count: usize,
-    pub global_skilllet_count: usize,
+    pub global_memory_card_count: usize,
     pub enabled_agents: Vec<String>,
     pub warning_count: usize,
 }
@@ -68,16 +68,16 @@ pub fn load_project_dashboard(project_root: &Path, home: &Path) -> anyhow::Resul
 - [x] Persist recent job history to local JSONL under `~/.agent-kernel/jobs/`.
 - [x] Add retry controls for failed/cancelled scan, evolution, and sync jobs.
 - [x] Store precise job replay payloads in history so retries invoke the original command with the original project path, targets, engine, and policy.
-- [x] Move Skilllet fusion into a non-blocking job with replay metadata and automatic read-model refresh on completion.
+- [x] Move Memory Card fusion into a non-blocking job with replay metadata and automatic read-model refresh on completion.
 - [x] Add Job Center status/type filters and visible precise-retry badges.
 
 ## Task 4.5: Page-Level Read Models
 
 - [x] Add `ProjectReviewInbox` for Draft Inbox-only loading.
-- [x] Add `ProjectSkillletLibrary` for project/global Skilllets and catalog status.
-- [x] Add `ProjectAssignmentView` for enabled agents and Skilllet target matrix.
+- [x] Add `ProjectMemory CardLibrary` for project/global Memory Cards and catalog status.
+- [x] Add `ProjectAssignmentView` for enabled agents and Memory Card target matrix.
 - [x] Add `ProjectQualityView` for Rule CI, build preview, and status warnings.
-- [x] Move Drafts, Skilllets, Catalog, Assignment, and Quality surfaces from full `ProjectSnapshot` to page-level read models with fallback.
+- [x] Move Drafts, Memory Cards, Catalog, Assignment, and Quality surfaces from full `ProjectSnapshot` to page-level read models with fallback.
 
 ## Task 5: Review Inbox Quality Follow-Up
 

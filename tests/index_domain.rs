@@ -1,4 +1,4 @@
-use agent_kernel::{candidate, draft, index, skilllet};
+use agent_kernel::{candidate, draft, index, memory_card};
 
 #[test]
 fn rebuild_project_index_counts_file_native_records() {
@@ -21,7 +21,7 @@ fn rebuild_project_index_counts_file_native_records() {
         },
     )
     .expect("draft");
-    skilllet::add_skilllet(
+    memory_card::add_memory_card(
         temp.path(),
         "project:prefer-axios",
         "Prefer Axios",
@@ -30,14 +30,14 @@ fn rebuild_project_index_counts_file_native_records() {
         "project",
         vec!["codex".to_string()],
     )
-    .expect("skilllet");
+    .expect("memory card");
 
     let report = index::rebuild_project_index(temp.path()).expect("rebuild index");
     let loaded = index::load_project_index(temp.path()).expect("load index");
 
     assert_eq!(report.candidate_count, 1);
     assert_eq!(loaded.draft_count, 1);
-    assert_eq!(loaded.skilllet_count, 1);
+    assert_eq!(loaded.memory_card_count, 1);
 }
 
 fn new_candidate(id: &str) -> candidate::NewCandidate {

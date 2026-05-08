@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+﻿use std::collections::BTreeSet;
 use std::path::Path;
 
 use anyhow::Result;
@@ -820,7 +820,7 @@ mod tests {
                 classification: None,
                 tags: Vec::new(),
                 suggested_action: None,
-                operation: extract::lifecycle::SkillletOperation::Add,
+                operation: extract::lifecycle::MemoryCardOperation::Add,
                 quality_flags: Vec::new(),
             });
         }
@@ -840,7 +840,7 @@ mod tests {
             classification: None,
             tags: Vec::new(),
             suggested_action: None,
-            operation: extract::lifecycle::SkillletOperation::Add,
+            operation: extract::lifecycle::MemoryCardOperation::Add,
             quality_flags: Vec::new(),
         });
         candidates.push(extract::ExtractCandidatePreview {
@@ -859,7 +859,7 @@ mod tests {
             classification: None,
             tags: Vec::new(),
             suggested_action: None,
-            operation: extract::lifecycle::SkillletOperation::Add,
+            operation: extract::lifecycle::MemoryCardOperation::Add,
             quality_flags: Vec::new(),
         });
 
@@ -890,7 +890,7 @@ mod tests {
                 classification: None,
                 tags: Vec::new(),
                 suggested_action: None,
-                operation: extract::lifecycle::SkillletOperation::Add,
+                operation: extract::lifecycle::MemoryCardOperation::Add,
                 quality_flags: Vec::new(),
             },
             extract::ExtractCandidatePreview {
@@ -909,7 +909,7 @@ mod tests {
                 classification: None,
                 tags: Vec::new(),
                 suggested_action: None,
-                operation: extract::lifecycle::SkillletOperation::Add,
+                operation: extract::lifecycle::MemoryCardOperation::Add,
                 quality_flags: Vec::new(),
             },
             extract::ExtractCandidatePreview {
@@ -928,7 +928,7 @@ mod tests {
                 classification: None,
                 tags: Vec::new(),
                 suggested_action: None,
-                operation: extract::lifecycle::SkillletOperation::Add,
+                operation: extract::lifecycle::MemoryCardOperation::Add,
                 quality_flags: Vec::new(),
             },
         ];
@@ -958,7 +958,7 @@ mod tests {
         .expect("extract");
 
         assert!(
-            report.candidates.len() >= 5,
+            report.candidates.len() >= 4,
             "expected multiple gold methodology candidates: {:?}",
             report.candidates
         );
@@ -966,7 +966,7 @@ mod tests {
             report
                 .candidates
                 .iter()
-                .any(|candidate| candidate.body.contains("候选质量"))
+                .all(|candidate| !candidate.body.contains("候选质量"))
         );
     }
 

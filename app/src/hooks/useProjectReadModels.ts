@@ -1,4 +1,4 @@
-import React from "react";
+﻿import React from "react";
 import {
   loadProjectReadModelsFromTauri,
   type ProjectReadModels,
@@ -10,14 +10,14 @@ import {
   createDemoProjectDashboard,
   createDemoProjectQualityView,
   createDemoProjectReviewInbox,
-  createDemoProjectSkillletLibrary,
+  createDemoProjectMemoryCardLibrary,
   type PageId,
   type ProjectAssignmentView,
   type ProjectCandidateInbox,
   type ProjectDashboard,
   type ProjectQualityView,
   type ProjectReviewInbox,
-  type ProjectSkillletLibrary,
+  type ProjectMemoryCardLibrary,
 } from "../ui-helpers";
 
 export function useProjectReadModels({
@@ -34,7 +34,7 @@ export function useProjectReadModels({
   const [dashboard, setDashboard] = React.useState<ProjectDashboard | null>(null);
   const [candidateInbox, setCandidateInbox] = React.useState<ProjectCandidateInbox | null>(null);
   const [reviewInbox, setReviewInbox] = React.useState<ProjectReviewInbox | null>(null);
-  const [skillletLibrary, setSkillletLibrary] = React.useState<ProjectSkillletLibrary | null>(null);
+  const [memory_cardLibrary, setMemoryCardLibrary] = React.useState<ProjectMemoryCardLibrary | null>(null);
   const [assignmentView, setAssignmentView] = React.useState<ProjectAssignmentView | null>(null);
   const [qualityView, setQualityView] = React.useState<ProjectQualityView | null>(null);
   const dashboardRequestRef = React.useRef(0);
@@ -43,7 +43,7 @@ export function useProjectReadModels({
   const clearProjectReadModels = React.useCallback(() => {
     setCandidateInbox(null);
     setReviewInbox(null);
-    setSkillletLibrary(null);
+    setMemoryCardLibrary(null);
     setAssignmentView(null);
     setQualityView(null);
   }, []);
@@ -51,7 +51,7 @@ export function useProjectReadModels({
   const applyReadModels = React.useCallback((models: ProjectReadModels) => {
     if (models.candidates) setCandidateInbox(models.candidates);
     if (models.inbox) setReviewInbox(models.inbox);
-    if (models.library) setSkillletLibrary(models.library);
+    if (models.library) setMemoryCardLibrary(models.library);
     if (models.assignment) setAssignmentView(models.assignment);
     if (models.quality) setQualityView(models.quality);
   }, []);
@@ -61,8 +61,8 @@ export function useProjectReadModels({
       setCandidateInbox(createDemoProjectCandidateInbox(projectPath));
       setReviewInbox(createDemoProjectReviewInbox(projectPath));
     }
-    if (targetPage === "skilllets" || targetPage === "agents" || targetPage === "settings") {
-      setSkillletLibrary(createDemoProjectSkillletLibrary(projectPath));
+    if (targetPage === "memory-cards" || targetPage === "agents" || targetPage === "settings") {
+      setMemoryCardLibrary(createDemoProjectMemoryCardLibrary(projectPath));
     }
     if (targetPage === "agents" || targetPage === "settings") {
       setAssignmentView(createDemoProjectAssignmentView(projectPath));
@@ -123,8 +123,8 @@ export function useProjectReadModels({
     setCandidateInbox,
     reviewInbox,
     setReviewInbox,
-    skillletLibrary,
-    setSkillletLibrary,
+    memory_cardLibrary,
+    setMemoryCardLibrary,
     assignmentView,
     setAssignmentView,
     qualityView,

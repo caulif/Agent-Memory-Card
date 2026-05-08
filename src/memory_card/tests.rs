@@ -1,9 +1,9 @@
 use super::*;
 
 #[test]
-fn skilllet_target_matrix_marks_assigned_agents() {
+fn memory_card_target_matrix_marks_assigned_agents() {
     let temp = tempfile::tempdir().expect("tempdir");
-    add_skilllet(
+    add_memory_card(
         temp.path(),
         "project:use-axios",
         "Use Axios",
@@ -12,20 +12,20 @@ fn skilllet_target_matrix_marks_assigned_agents() {
         "project",
         vec!["codex".to_string(), "claude-code".to_string()],
     )
-    .expect("add skilllet");
+    .expect("add memory_card");
 
-    let matrix = skilllet_target_matrix(temp.path()).expect("matrix");
+    let matrix = memory_card_target_matrix(temp.path()).expect("matrix");
 
-    assert_eq!(matrix.rows[0].skilllet_id, "project:use-axios");
+    assert_eq!(matrix.rows[0].memory_card_id, "project:use-axios");
     assert_eq!(matrix.rows[0].scope, "project");
     assert_eq!(matrix.rows[0].targets.get("codex"), Some(&true));
     assert_eq!(matrix.rows[0].targets.get("claude-code"), Some(&true));
 }
 
 #[test]
-fn new_procedure_skilllet_defaults_to_skill_activation() {
+fn new_procedure_memory_card_defaults_to_skill_activation() {
     let temp = tempfile::tempdir().expect("tempdir");
-    add_skilllet(
+    add_memory_card(
         temp.path(),
         "project:frontend-workflow",
         "Frontend Workflow",
@@ -34,18 +34,18 @@ fn new_procedure_skilllet_defaults_to_skill_activation() {
         "project",
         vec!["claude-code".to_string()],
     )
-    .expect("add skilllet");
+    .expect("add memory_card");
 
-    let records = load_skilllets(temp.path()).expect("records");
+    let records = load_memory_cards(temp.path()).expect("records");
 
     assert_eq!(records[0].activation, "skill");
 }
 
 #[test]
-fn add_skilllet_writes_record_and_project_include() {
+fn add_memory_card_writes_record_and_project_include() {
     let temp = tempfile::tempdir().expect("tempdir");
 
-    add_skilllet(
+    add_memory_card(
         temp.path(),
         "project:use-axios",
         "Use Axios",
@@ -54,9 +54,9 @@ fn add_skilllet_writes_record_and_project_include() {
         "project",
         vec!["codex".to_string()],
     )
-    .expect("add skilllet");
+    .expect("add memory_card");
 
-    let records = load_skilllets(temp.path()).expect("load skilllets");
+    let records = load_memory_cards(temp.path()).expect("load memory_cards");
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].id, "project:use-axios");
     assert!(records[0].brief.contains("Use Axios"));
@@ -64,14 +64,14 @@ fn add_skilllet_writes_record_and_project_include() {
     assert_eq!(records[0].language, "en");
 
     let project = config::load_or_default_project_config(temp.path()).expect("load project");
-    assert_eq!(project.skilllets.include[0].id, "project:use-axios");
-    assert_eq!(project.skilllets.include[0].targets, vec!["codex"]);
+    assert_eq!(project.memory_cards.include[0].id, "project:use-axios");
+    assert_eq!(project.memory_cards.include[0].targets, vec!["codex"]);
 }
 
 #[test]
-fn set_skilllet_targets_updates_project_include() {
+fn set_memory_card_targets_updates_project_include() {
     let temp = tempfile::tempdir().expect("tempdir");
-    add_skilllet(
+    add_memory_card(
         temp.path(),
         "project:use-axios",
         "Use Axios",
@@ -80,9 +80,9 @@ fn set_skilllet_targets_updates_project_include() {
         "project",
         vec!["codex".to_string()],
     )
-    .expect("add skilllet");
+    .expect("add memory_card");
 
-    set_skilllet_targets(
+    set_memory_card_targets(
         temp.path(),
         "project:use-axios",
         vec!["claude-code".to_string(), "codex".to_string()],
@@ -91,15 +91,15 @@ fn set_skilllet_targets_updates_project_include() {
 
     let project = config::load_or_default_project_config(temp.path()).expect("project");
     assert_eq!(
-        project.skilllets.include[0].targets,
+        project.memory_cards.include[0].targets,
         vec!["claude-code", "codex"]
     );
 }
 
 #[test]
-fn set_skilllet_targets_allows_empty_inactive_assignment() {
+fn set_memory_card_targets_allows_empty_inactive_assignment() {
     let temp = tempfile::tempdir().expect("tempdir");
-    add_skilllet(
+    add_memory_card(
         temp.path(),
         "project:use-axios",
         "Use Axios",
@@ -108,21 +108,140 @@ fn set_skilllet_targets_allows_empty_inactive_assignment() {
         "project",
         vec!["codex".to_string()],
     )
-    .expect("add skilllet");
+    .expect("add memory_card");
 
-    set_skilllet_targets(temp.path(), "project:use-axios", Vec::new()).expect("clear targets");
+    set_memory_card_targets(temp.path(), "project:use-axios", Vec::new()).expect("clear targets");
 
     let project = config::load_or_default_project_config(temp.path()).expect("project");
-    assert!(project.skilllets.include[0].targets.is_empty());
-    let matrix = skilllet_target_matrix(temp.path()).expect("matrix");
+    assert!(project.memory_cards.include[0].targets.is_empty());
+    let matrix = memory_card_target_matrix(temp.path()).expect("matrix");
     assert_eq!(matrix.rows[0].targets.get("codex"), Some(&false));
     assert_eq!(matrix.rows[0].targets.get("claude-code"), Some(&false));
 }
 
 #[test]
-fn update_skilllet_updates_body_tags_and_brief_without_changing_created_at() {
+fn delete_memory_card_removes_file_and_project_assignment() {
     let temp = tempfile::tempdir().expect("tempdir");
-    add_skilllet(
+    add_memory_card(
+        temp.path(),
+        "project:use-axios",
+        "Use Axios",
+        "Use Axios for frontend HTTP requests.",
+        "preference",
+        "project",
+        vec!["codex".to_string()],
+    )
+    .expect("add memory_card");
+
+    delete_memory_card(temp.path(), "project:use-axios").expect("delete memory_card");
+
+    assert!(
+        load_memory_cards(temp.path())
+            .expect("memory_cards")
+            .is_empty()
+    );
+    let project = config::load_or_default_project_config(temp.path()).expect("project");
+    assert!(project.memory_cards.include.is_empty());
+    let matrix = memory_card_target_matrix(temp.path()).expect("matrix");
+    assert!(matrix.rows.is_empty());
+}
+
+#[test]
+fn clear_memory_card_targets_removes_one_agent_without_deleting_memory_cards() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    add_memory_card(
+        temp.path(),
+        "project:use-axios",
+        "Use Axios",
+        "Use Axios for frontend HTTP requests.",
+        "preference",
+        "project",
+        vec!["codex".to_string(), "claude-code".to_string()],
+    )
+    .expect("add axios");
+    add_memory_card(
+        temp.path(),
+        "project:prefer-bun",
+        "Prefer Bun",
+        "Use Bun for JavaScript package management and scripts.",
+        "preference",
+        "project",
+        vec!["codex".to_string()],
+    )
+    .expect("add bun");
+
+    let changed =
+        clear_memory_card_targets(temp.path(), Some("codex".to_string())).expect("clear codex");
+
+    assert_eq!(changed, 2);
+    let records = load_memory_cards(temp.path()).expect("memory_cards");
+    assert_eq!(records.len(), 2);
+    let project = config::load_or_default_project_config(temp.path()).expect("project");
+    let axios = project
+        .memory_cards
+        .include
+        .iter()
+        .find(|item| item.id == "project:use-axios")
+        .expect("axios ref");
+    let bun = project
+        .memory_cards
+        .include
+        .iter()
+        .find(|item| item.id == "project:prefer-bun")
+        .expect("bun ref");
+    assert_eq!(axios.targets, vec!["claude-code"]);
+    assert!(bun.targets.is_empty());
+}
+
+#[test]
+fn clear_memory_card_targets_without_agent_clears_every_assignment() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    add_memory_card(
+        temp.path(),
+        "project:use-axios",
+        "Use Axios",
+        "Use Axios for frontend HTTP requests.",
+        "preference",
+        "project",
+        vec!["codex".to_string(), "claude-code".to_string()],
+    )
+    .expect("add axios");
+    add_memory_card(
+        temp.path(),
+        "project:prefer-bun",
+        "Prefer Bun",
+        "Use Bun for JavaScript package management and scripts.",
+        "preference",
+        "project",
+        vec!["codex".to_string()],
+    )
+    .expect("add bun");
+
+    let changed = clear_memory_card_targets(temp.path(), None).expect("clear all");
+
+    assert_eq!(changed, 2);
+    let project = config::load_or_default_project_config(temp.path()).expect("project");
+    assert!(
+        project
+            .memory_cards
+            .include
+            .iter()
+            .all(|item| item.targets.is_empty())
+    );
+    let matrix = memory_card_target_matrix(temp.path()).expect("matrix");
+    assert!(
+        matrix
+            .rows
+            .iter()
+            .flat_map(|row| row.targets.values())
+            .all(|assigned| !assigned)
+    );
+}
+
+#[test]
+fn update_memory_card_updates_body_tags_and_brief_without_changing_created_at() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    add_memory_card(
         temp.path(),
         "project:editable",
         "Editable",
@@ -131,16 +250,16 @@ fn update_skilllet_updates_body_tags_and_brief_without_changing_created_at() {
         "project",
         vec!["codex".to_string()],
     )
-    .expect("add skilllet");
-    let original = skilllet_map(temp.path())
-        .expect("skilllets")
+    .expect("add memory_card");
+    let original = memory_card_map(temp.path())
+        .expect("memory_cards")
         .remove("project:editable")
         .expect("original");
 
-    let updated = update_skilllet(
+    let updated = update_memory_card(
         temp.path(),
         "project:editable",
-        SkillletUpdate {
+        MemoryCardUpdate {
             body: Some("Updated body.".to_string()),
             brief: Some("Short editor summary.".to_string()),
             tags: Some(vec![
@@ -148,10 +267,10 @@ fn update_skilllet_updates_body_tags_and_brief_without_changing_created_at() {
                 "frontend".to_string(),
                 "testing".to_string(),
             ]),
-            ..SkillletUpdate::default()
+            ..MemoryCardUpdate::default()
         },
     )
-    .expect("update skilllet");
+    .expect("update memory_card");
 
     assert_eq!(updated.body, "Updated body.");
     assert_eq!(updated.brief, "Short editor summary.");
@@ -159,8 +278,8 @@ fn update_skilllet_updates_body_tags_and_brief_without_changing_created_at() {
     assert_eq!(updated.created_at, original.created_at);
     assert_ne!(updated.updated_at, original.updated_at);
 
-    let persisted = skilllet_map(temp.path())
-        .expect("skilllets")
+    let persisted = memory_card_map(temp.path())
+        .expect("memory_cards")
         .remove("project:editable")
         .expect("updated");
     assert_eq!(persisted.body, "Updated body.");
@@ -168,9 +287,9 @@ fn update_skilllet_updates_body_tags_and_brief_without_changing_created_at() {
 }
 
 #[test]
-fn skilllet_editing_rejects_invalid_fields_and_targets() {
+fn memory_card_editing_rejects_invalid_fields_and_targets() {
     let temp = tempfile::tempdir().expect("tempdir");
-    let empty_title = add_skilllet(
+    let empty_title = add_memory_card(
         temp.path(),
         "project:empty",
         " ",
@@ -182,7 +301,7 @@ fn skilllet_editing_rejects_invalid_fields_and_targets() {
     .expect_err("empty title should fail");
     assert!(empty_title.to_string().contains("title"));
 
-    let bad_target = add_skilllet(
+    let bad_target = add_memory_card(
         temp.path(),
         "project:bad-target",
         "Bad Target",
@@ -194,7 +313,7 @@ fn skilllet_editing_rejects_invalid_fields_and_targets() {
     .expect_err("unknown target should fail");
     assert!(bad_target.to_string().contains("target agent"));
 
-    add_skilllet(
+    add_memory_card(
         temp.path(),
         "project:editable",
         "Editable",
@@ -203,29 +322,29 @@ fn skilllet_editing_rejects_invalid_fields_and_targets() {
         "project",
         vec!["codex".to_string()],
     )
-    .expect("add skilllet");
-    let bad_kind = update_skilllet(
+    .expect("add memory_card");
+    let bad_kind = update_memory_card(
         temp.path(),
         "project:editable",
-        SkillletUpdate {
+        MemoryCardUpdate {
             kind: Some("mystery".to_string()),
-            ..SkillletUpdate::default()
+            ..MemoryCardUpdate::default()
         },
     )
     .expect_err("unknown kind should fail");
     assert!(bad_kind.to_string().contains("kind"));
 
     let bad_assignment =
-        set_skilllet_targets(temp.path(), "project:editable", vec!["cursor".to_string()])
+        set_memory_card_targets(temp.path(), "project:editable", vec!["cursor".to_string()])
             .expect_err("unknown assignment target should fail");
     assert!(bad_assignment.to_string().contains("target agent"));
 }
 
 #[test]
-fn skilllet_write_paths_reject_malicious_ids() {
+fn memory_card_write_paths_reject_malicious_ids() {
     let temp = tempfile::tempdir().expect("tempdir");
     let home = tempfile::tempdir().expect("home");
-    add_skilllet(
+    add_memory_card(
         temp.path(),
         "project:safe",
         "Safe",
@@ -234,7 +353,7 @@ fn skilllet_write_paths_reject_malicious_ids() {
         "project",
         vec!["codex".to_string()],
     )
-    .expect("add safe skilllet");
+    .expect("add safe memory_card");
 
     for id in [
         "",
@@ -246,7 +365,7 @@ fn skilllet_write_paths_reject_malicious_ids() {
         &"a".repeat(129),
     ] {
         assert!(
-            add_skilllet(
+            add_memory_card(
                 temp.path(),
                 id,
                 "Bad",
@@ -258,22 +377,23 @@ fn skilllet_write_paths_reject_malicious_ids() {
             .is_err()
         );
         assert!(
-            update_skilllet(
+            update_memory_card(
                 temp.path(),
                 id,
-                SkillletUpdate {
+                MemoryCardUpdate {
                     body: Some("Bad body.".to_string()),
-                    ..SkillletUpdate::default()
+                    ..MemoryCardUpdate::default()
                 },
             )
             .is_err()
         );
-        assert!(promote_skilllet_to_global(temp.path(), home.path(), id).is_err());
+        assert!(promote_memory_card_to_global(temp.path(), home.path(), id).is_err());
         assert!(
-            install_global_skilllet_to_project(temp.path(), home.path(), id, Vec::new()).is_err()
+            install_global_memory_card_to_project(temp.path(), home.path(), id, Vec::new())
+                .is_err()
         );
         assert!(
-            merge_skilllets(
+            merge_memory_cards(
                 temp.path(),
                 id,
                 "Merged",
@@ -289,10 +409,10 @@ fn skilllet_write_paths_reject_malicious_ids() {
 }
 
 #[test]
-fn promote_skilllet_to_global_copies_record_with_source_project() {
+fn promote_memory_card_to_global_copies_record_with_source_project() {
     let project = tempfile::tempdir().expect("project");
     let home = tempfile::tempdir().expect("home");
-    add_skilllet(
+    add_memory_card(
             project.path(),
             "project:ui-background-tasks",
             "UI 后台任务",
@@ -301,10 +421,10 @@ fn promote_skilllet_to_global_copies_record_with_source_project() {
             "project",
             vec!["codex".to_string()],
         )
-        .expect("add skilllet");
+        .expect("add memory_card");
 
     let promoted =
-        promote_skilllet_to_global(project.path(), home.path(), "project:ui-background-tasks")
+        promote_memory_card_to_global(project.path(), home.path(), "project:ui-background-tasks")
             .expect("promote");
 
     assert_eq!(promoted.scope, "global");
@@ -313,31 +433,31 @@ fn promote_skilllet_to_global_copies_record_with_source_project() {
         promoted.source_project.as_deref(),
         Some(source_project.as_str())
     );
-    let global = load_global_skilllets(home.path()).expect("global skilllets");
+    let global = load_global_memory_cards(home.path()).expect("global memory_cards");
     assert_eq!(global.len(), 1);
     assert_eq!(global[0].id, "global:ui-background-tasks");
     assert!(global[0].tags.contains(&"ui-design".to_string()));
-    let project_records = load_skilllets(project.path()).expect("project skilllets");
+    let project_records = load_memory_cards(project.path()).expect("project memory_cards");
     assert_eq!(project_records.len(), 1);
     assert_eq!(project_records[0].id, "global:ui-background-tasks");
     let project_config =
         config::load_or_default_project_config(project.path()).expect("project config");
     assert_eq!(
-        project_config.skilllets.include[0].id,
+        project_config.memory_cards.include[0].id,
         "global:ui-background-tasks"
     );
     assert_eq!(
-        project_config.skilllets.include[0].scope.as_deref(),
+        project_config.memory_cards.include[0].scope.as_deref(),
         Some("global")
     );
 }
 
 #[test]
-fn install_global_skilllet_to_project_copies_record_and_targets() {
+fn install_global_memory_card_to_project_copies_record_and_targets() {
     let source = tempfile::tempdir().expect("source");
     let target = tempfile::tempdir().expect("target");
     let home = tempfile::tempdir().expect("home");
-    add_skilllet(
+    add_memory_card(
             source.path(),
             "project:review-before-sync",
             "同步前先审阅",
@@ -346,11 +466,11 @@ fn install_global_skilllet_to_project_copies_record_and_targets() {
             "project",
             vec!["codex".to_string()],
         )
-        .expect("add source skilllet");
-    promote_skilllet_to_global(source.path(), home.path(), "project:review-before-sync")
+        .expect("add source memory_card");
+    promote_memory_card_to_global(source.path(), home.path(), "project:review-before-sync")
         .expect("promote global");
 
-    let installed = install_global_skilllet_to_project(
+    let installed = install_global_memory_card_to_project(
         target.path(),
         home.path(),
         "global:review-before-sync",
@@ -360,21 +480,21 @@ fn install_global_skilllet_to_project_copies_record_and_targets() {
 
     assert_eq!(installed.scope, "global");
     assert!(installed.source_project.is_some());
-    let project_records = load_skilllets(target.path()).expect("target skilllets");
+    let project_records = load_memory_cards(target.path()).expect("target memory_cards");
     assert_eq!(project_records.len(), 1);
     assert_eq!(project_records[0].id, "global:review-before-sync");
     let project = config::load_or_default_project_config(target.path()).expect("target project");
-    assert_eq!(project.skilllets.include[0].targets, vec!["claude-code"]);
+    assert_eq!(project.memory_cards.include[0].targets, vec!["claude-code"]);
     assert_eq!(
-        project.skilllets.include[0].scope.as_deref(),
+        project.memory_cards.include[0].scope.as_deref(),
         Some("global")
     );
 }
 
 #[test]
-fn merge_skilllets_creates_combined_skilllet() {
+fn merge_memory_cards_creates_combined_memory_card() {
     let temp = tempfile::tempdir().expect("tempdir");
-    add_skilllet(
+    add_memory_card(
         temp.path(),
         "project:use-axios",
         "Use Axios",
@@ -384,7 +504,7 @@ fn merge_skilllets_creates_combined_skilllet() {
         vec!["codex".to_string()],
     )
     .expect("add axios");
-    add_skilllet(
+    add_memory_card(
         temp.path(),
         "project:prefer-bun",
         "Prefer Bun",
@@ -395,7 +515,7 @@ fn merge_skilllets_creates_combined_skilllet() {
     )
     .expect("add bun");
 
-    merge_skilllets(
+    merge_memory_cards(
         temp.path(),
         "project:frontend-defaults",
         "Frontend Defaults",
@@ -407,8 +527,8 @@ fn merge_skilllets_creates_combined_skilllet() {
     )
     .expect("merge");
 
-    let merged = skilllet_map(temp.path())
-        .expect("skilllets")
+    let merged = memory_card_map(temp.path())
+        .expect("memory_cards")
         .remove("project:frontend-defaults")
         .expect("merged");
     assert!(
@@ -424,7 +544,7 @@ fn merge_skilllets_creates_combined_skilllet() {
 
     let project = config::load_or_default_project_config(temp.path()).expect("project");
     let merged_ref = project
-        .skilllets
+        .memory_cards
         .include
         .iter()
         .find(|item| item.id == "project:frontend-defaults")

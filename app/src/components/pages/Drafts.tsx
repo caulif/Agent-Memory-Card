@@ -1,12 +1,10 @@
-import React from "react";
-import { ArrowUp, Bell, Check, Circle, Layers3, Pencil, RefreshCw, ShieldAlert, X } from "lucide-react";
+﻿import React from "react";
+import { ArrowUp, Check, Circle, Pencil, RefreshCw, X } from "lucide-react";
 import { ActionButton, EmptyState, Panel } from "../common";
 import {
   buildEditFormFromDraft,
-  type CandidateFilter,
   type CandidateRecord,
   describeDraftForReview,
-  filterCandidatesForInbox,
   sortCandidatesForInbox,
   translateKind,
   translateScope,
@@ -44,23 +42,20 @@ export function Drafts({
   ) => Promise<void>;
   previewMode: boolean;
   projectPath: string;
-  synthesisEngine: "claude-code" | "codex" | "local";
-  onSynthesisEngineChange: (engine: "claude-code" | "codex" | "local") => void;
+  synthesisEngine: "claude-code" | "codex" | "local" | "llm";
+  onSynthesisEngineChange: (engine: "claude-code" | "codex" | "local" | "llm") => void;
   onRefresh: () => void;
 }) {
-  const [candidateFilter, setCandidateFilter] = React.useState<CandidateFilter>("high");
   const [selectedCandidateIds, setSelectedCandidateIds] = React.useState<string[]>([]);
   const [batchRejectReason, setBatchRejectReason] = React.useState("");
   const allCandidates = React.useMemo(() => sortCandidatesForInbox(candidates?.candidates ?? []), [candidates]);
-  const visibleCandidates = React.useMemo(
-    () => filterCandidatesForInbox(allCandidates, candidateFilter),
-    [allCandidates, candidateFilter],
-  );
+  const visibleCandidates = allCandidates;
   const lowConfidenceCount = allCandidates.filter((candidate) => (candidate.confidence ?? 0) < 0.72).length;
   const sourceDrafts = inbox?.drafts ?? snapshot?.drafts ?? [];
   const drafts = visibleDrafts(sourceDrafts);
   const hiddenCount = Math.max(sourceDrafts.length - drafts.length, 0);
   const [editingId, setEditingId] = React.useState<string | null>(null);
+  const [selectedCandidateId, setSelectedCandidateId] = React.useState<string | null>(null);
 
   function startEdit(draft: (typeof drafts)[number]) {
     setEditingId(draft.id);
@@ -87,22 +82,23 @@ export function Drafts({
     setSelectedCandidateIds([]);
   }
 
+  const selectedCandidate = selectedCandidateId
+    ? allCandidates.find((candidate) => candidate.id === selectedCandidateId) ?? null
+    : null;
+
   return (
-    <div className="list">
-      <Panel title="Inbox 工作台" subtitle="系统建议就是待审草稿；你批准后会直接进入 Skilllet，再分配并编译到目标智能体。" icon={Bell}>
-        <div className="engine-row" aria-label="整理引擎">
-          <span>整理引擎</span>
-          <button className={synthesisEngine === "local" ? "active" : ""} onClick={() => onSynthesisEngineChange("local")}>
-            本地极速
-          </button>
-          <button className={synthesisEngine === "claude-code" ? "active" : ""} onClick={() => onSynthesisEngineChange("claude-code")}>
-            Claude Code
-          </button>
-          <button className={synthesisEngine === "codex" ? "active" : ""} onClick={() => onSynthesisEngineChange("codex")}>
-            Codex
-          </button>
-        </div>
-        <div className="command-strip">
+    <div className="stack">
+      {/* ===== 顶部指标行 ===== */}
+      <Panel title="Draft Review" subtitle="Inbox 工作台 — 系统建议就是待审草稿；批准后直接进入 Memory Card，再分配并编译到目标智能体。">
+        <div className="engine-command-row">
+          <div className="engine-row" aria-label="整理引擎">
+            <button className={synthesisEngine === "claude-code" ? "active" : ""} onClick={() => onSynthesisEngineChange("claude-code")}>
+              Claude Code
+            </button>
+            <button className={synthesisEngine === "codex" ? "active" : ""} onClick={() => onSynthesisEngineChange("codex")}>
+              Codex
+            </button>
+          </div>
           <ActionButton
             className="hero-button"
             icon={RefreshCw}
@@ -118,85 +114,145 @@ export function Drafts({
               })
             }
           />
-          <ActionButton
-            className="secondary-action"
-            icon={Layers3}
-            label="编译产物"
-            busyLabel="正在同步"
-            busy={pendingAction === "同步"}
-            disabled={disabled}
-            onClick={() => onAction("同步", "已同步生成产物", "sync_project")}
-          />
-          <ActionButton
-            className="secondary-action"
-            icon={ShieldAlert}
-            label="清理低价值候选"
-            busyLabel="清理中"
-            busy={pendingAction === "清理候选"}
-            disabled={disabled || allCandidates.length === 0}
-            onClick={() => onAction("清理候选", "已清理低价值候选", "gc_candidates")}
-          />
         </div>
       </Panel>
 
-      {allCandidates.length > 0 ? (
-        <Panel title="系统建议" subtitle="本地高价值过滤和少量 AI 精炼后的待审草稿；批准后直接成为 Skilllet。" icon={Bell}>
-          <div className="filter-bar" aria-label="候选筛选">
-            {[
-              ["high", "高置信"],
-              ["all", "全部"],
-              ["low", `低置信 ${lowConfidenceCount}`],
-              ["rule", "规则"],
-              ["preference", "偏好"],
-              ["procedure", "流程"],
-              ["constraint", "约束"],
-            ].map(([id, label]) => (
-              <button
-                key={id}
-                className={candidateFilter === id ? "active" : ""}
-                onClick={() => setCandidateFilter(id as CandidateFilter)}
-              >
-                {label}
-              </button>
-            ))}
+      {/* ===== 三栏布局：候选队列 / 详情 / 质量状态 ===== */}
+      <div className="drafts-grid">
+        {/* 左栏：候选队列 */}
+        <div className="drafts-column">
+          <div className="drafts-column-head">
+            <h3>候选队列</h3>
           </div>
-          <div className="batch-row">
-            <span>{selectedCandidateIds.length > 0 ? `已选择 ${selectedCandidateIds.length} 条` : "选择候选后可批量处理"}</span>
-            <input
-              type="text"
-              value={batchRejectReason}
-              onChange={(event) => setBatchRejectReason(event.target.value)}
-              placeholder="批量拒绝原因"
-            />
-            <button className="secondary-action" disabled={disabled || selectedCandidateIds.length === 0} onClick={() => void runBatch("promote_candidate")}>
-              批量批准
-            </button>
-            <button className="secondary-action" disabled={disabled || selectedCandidateIds.length === 0} onClick={() => void runBatch("hide_candidate")}>
-              批量隐藏
-            </button>
-            <button className="danger-action" disabled={disabled || selectedCandidateIds.length === 0} onClick={() => void runBatch("reject_candidate")}>
-              批量拒绝
-            </button>
-          </div>
-          <div className="list compact-list">
-            {visibleCandidates.map((candidate) => (
-              <CandidateCard
-                key={candidate.id}
-                candidate={candidate}
-                selected={selectedCandidateIds.includes(candidate.id)}
-                onSelectedChange={() => toggleCandidateSelected(candidate.id)}
+
+          {visibleCandidates.length === 0 ? (
+            <p className="empty" style={{ padding: "20px 0", textAlign: "center" }}>
+              暂无候选。
+            </p>
+          ) : (
+            <div className="candidate-queue">
+              {visibleCandidates.map((candidate) => {
+                const isSelected = selectedCandidateIds.includes(candidate.id);
+                const isActive = selectedCandidateId === candidate.id;
+                return (
+                <article
+                  key={candidate.id}
+                  className={`candidate-queue-item ${isActive ? "active" : ""} ${isSelected ? "selected" : ""}`}
+                >
+                  <div className="candidate-queue-head">
+                    <button
+                      className="candidate-open-target"
+                      aria-pressed={isActive}
+                      onClick={() => setSelectedCandidateId(candidate.id === selectedCandidateId ? null : candidate.id)}
+                    >
+                      <strong>{candidate.title}</strong>
+                    </button>
+                    <div className="candidate-queue-head-right">
+                      {candidate.confidence != null ? (
+                        <span className="confidence-badge">
+                          {Math.round(candidate.confidence * 100)}%
+                        </span>
+                      ) : null}
+                      <button
+                        className={`candidate-select-toggle ${isSelected ? "checked" : ""}`}
+                        aria-label={isSelected ? "取消选择" : "选择候选"}
+                        aria-pressed={isSelected}
+                        onClick={(event) => { event.stopPropagation(); toggleCandidateSelected(candidate.id); }}
+                      >
+                        {isSelected ? <Check size={12} /> : <Circle size={12} />}
+                      </button>
+                    </div>
+                  </div>
+                  <button
+                    className="candidate-open-copy"
+                    onClick={() => setSelectedCandidateId(candidate.id === selectedCandidateId ? null : candidate.id)}
+                  >
+                    {candidate.brief ?? candidate.body.slice(0, 80)}
+                  </button>
+                </article>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* 中栏：选中候选详情/审阅 */}
+        <div className="drafts-column drafts-detail">
+          {selectedCandidate ? (
+            <>
+              <div className="drafts-column-head">
+                <h3>审阅详情</h3>
+              </div>
+              <CandidateDetail
+                candidate={selectedCandidate}
                 disabled={disabled}
                 pendingAction={pendingAction}
                 onAction={onAction}
               />
-            ))}
+            </>
+          ) : (
+            <div className="drafts-column-head">
+              <h3>审阅详情</h3>
+              <EmptyState title="选择一个候选" description="从左侧候选队列中选择一条建议来查看详情和操作。" />
+            </div>
+          )}
+        </div>
+
+        {/* 右栏：质量状态 */}
+        <div className="drafts-column">
+          <div className="drafts-column-head">
+            <h3>质量状态</h3>
           </div>
-          {visibleCandidates.length === 0 ? <p className="empty">当前筛选下没有候选。</p> : null}
-        </Panel>
-      ) : null}
-      {drafts.length === 0 ? (
-        <EmptyState title="暂无高价值草稿" description="点击“提炼高价值 Skilllet”后，稳定偏好、硬约束、流程和可复用技能补充会出现在这里等待审核。" />
-      ) : (
+          <div className="drafts-quality-card">
+            <div className="quality-ring">
+              <svg width="72" height="72" viewBox="0 0 72 72">
+                <circle cx="36" cy="36" r="30" fill="none" stroke="var(--color-border)" strokeWidth="5" />
+                <circle
+                  cx="36"
+                  cy="36"
+                  r="30"
+                  fill="none"
+                  stroke="var(--color-accent)"
+                  strokeWidth="5"
+                  strokeDasharray={`${(allCandidates.length > 0 ? drafts.length / Math.max(allCandidates.length, 1) : 0) * 188.5} 188.5`}
+                  strokeLinecap="round"
+                  transform="rotate(-90 36 36)"
+                />
+              </svg>
+              <div className="quality-ring-text">
+                <strong>{drafts.length}</strong>
+                <span>草稿</span>
+              </div>
+            </div>
+            <div className="quality-bars">
+              <div className="quality-bar-row">
+                <span>候选</span>
+                <div className="quality-bar-track">
+                  <div className="quality-bar-fill" style={{ width: `${Math.min(100, allCandidates.length * 20)}%` }} />
+                </div>
+                <strong>{allCandidates.length}</strong>
+              </div>
+              <div className="quality-bar-row">
+                <span>草稿</span>
+                <div className="quality-bar-track">
+                  <div className="quality-bar-fill" style={{ width: `${Math.min(100, drafts.length * 25)}%`, background: "var(--color-accent)" }} />
+                </div>
+                <strong>{drafts.length}</strong>
+              </div>
+              <div className="quality-bar-row">
+                <span>低置信</span>
+                <div className="quality-bar-track">
+                  <div className="quality-bar-fill" style={{ width: `${Math.min(100, lowConfidenceCount * 25)}%`, background: "#d4a23b" }} />
+                </div>
+                <strong>{lowConfidenceCount}</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 草稿列表 */}
+      {drafts.length > 0 ? (
         <>
           {hiddenCount > 0 ? <p className="filter-note">已隐藏 {hiddenCount} 条低置信度或过碎草稿，避免审阅列表失控。</p> : null}
           {drafts.map((draft) => (
@@ -229,7 +285,7 @@ export function Drafts({
                   </p>
                 ) : null}
                 {draft.extraction?.classification ? (
-                  <div className="tag-row classification-chips">
+                  <div className="classification-chips">
                     {draft.extraction.classification.signal ? (
                       <span className="chip chip-signal">{draft.extraction.classification.signal}</span>
                     ) : null}
@@ -247,7 +303,7 @@ export function Drafts({
                   </div>
                 ) : null}
                 {draft.extraction?.suggested_action ? (
-                  <div className="tag-row classification-chips">
+                  <div className="classification-chips">
                     <span className="chip chip-artifact">
                       {routeLabel(draft.extraction.suggested_action.route)}
                     </span>
@@ -266,7 +322,7 @@ export function Drafts({
                   disabled={disabled}
                   onClick={() => startEdit(draft)}
                 >
-                  <Pencil size={15} />
+                  <Pencil size={14} />
                   编辑
                 </button>
                 <ActionButton
@@ -303,22 +359,45 @@ export function Drafts({
             </React.Fragment>
           ))}
         </>
-      )}
+      ) : allCandidates.length === 0 ? (
+        <EmptyState title="暂无高价值草稿" description={'点击「提炼候选」后，稳定偏好、硬约束、流程和可复用技能补充会出现在这里等待审核。'} />
+      ) : null}
+
+      {/* 底部批量操作栏 */}
+      {selectedCandidateIds.length > 0 ? (
+        <div className="batch-bar-sticky">
+          <div className="batch-row" style={{ margin: 0 }}>
+            <span>已选择 {selectedCandidateIds.length} 条候选</span>
+            <input
+              type="text"
+              value={batchRejectReason}
+              onChange={(event) => setBatchRejectReason(event.target.value)}
+              placeholder="批量拒绝原因"
+            />
+            <button className="primary-action" disabled={disabled || selectedCandidateIds.length === 0} onClick={() => void runBatch("promote_candidate")}>
+              批量批准
+            </button>
+            <button className="secondary-action" disabled={disabled || selectedCandidateIds.length === 0} onClick={() => void runBatch("hide_candidate")}>
+              批量隐藏
+            </button>
+            <button className="danger-action" disabled={disabled || selectedCandidateIds.length === 0} onClick={() => void runBatch("reject_candidate")}>
+              批量拒绝
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function CandidateCard({
+/** 候选详情卡片 */
+function CandidateDetail({
   candidate,
-  selected,
-  onSelectedChange,
   disabled,
   pendingAction,
   onAction,
 }: {
   candidate: CandidateRecord;
-  selected: boolean;
-  onSelectedChange: () => void;
   disabled: boolean;
   pendingAction: string;
   onAction: ProjectAction;
@@ -327,7 +406,7 @@ function CandidateCard({
   const candidateTags = candidate.tags ?? [];
   const candidateBrief =
     candidate.brief?.trim() ||
-    `这条系统建议沉淀了“${candidate.title}”，批准后会直接进入 Skilllet。`;
+    `这条系统建议沉淀了"${candidate.title}"，批准后会直接进入 Memory Card。`;
   const suggestedAction = candidate.extraction?.suggested_action;
   const mergeTarget =
     suggestedAction?.action === "merge_into_existing"
@@ -341,64 +420,58 @@ function CandidateCard({
     .filter(Boolean)
     .join(" · ");
   const [rejectReason, setRejectReason] = React.useState("");
+
   return (
-    <article className="record candidate-record">
-      <div className="record-main">
-        <label className="select-row">
-          <input type="checkbox" checked={selected} onChange={onSelectedChange} disabled={disabled} />
-          <span>选择候选</span>
-        </label>
-        <span className="tag">
-          候选 · {translateKind(candidate.kind)} · {translateScope(candidate.scope)}
-          {confidence}
-        </span>
-        <h3>{candidate.title}</h3>
-        <p className="draft-brief">
-          <span className="brief-label">中文概述</span>
-          {candidateBrief}
+    <div className="candidate-detail">
+      <span className="tag">
+        候选 · {translateKind(candidate.kind)} · {translateScope(candidate.scope)}
+        {confidence}
+      </span>
+      <h3>{candidate.title}</h3>
+      <p className="draft-brief">
+        <span className="brief-label">概述</span>
+        {candidateBrief}
+      </p>
+      {candidateTags.length > 0 ? (
+        <div className="tag-row">
+          {candidateTags.map((tag) => (
+            <span key={tag}>{tag}</span>
+          ))}
+        </div>
+      ) : null}
+      {candidate.extraction?.classification || suggestedAction ? (
+        <div className="classification-chips">
+          {candidate.extraction?.classification?.artifact_kind ? (
+            <span className="chip chip-artifact">{routeLabel(candidate.extraction.classification.artifact_kind)}</span>
+          ) : null}
+          {candidate.extraction?.classification?.hardness ? (
+            <span className="chip chip-hardness">{candidate.extraction.classification.hardness}</span>
+          ) : null}
+          {suggestedAction ? (
+            <span className="chip chip-activation">{compileLabel(suggestedAction.compile_enabled)}</span>
+          ) : null}
+          {suggestedAction ? (
+            <span className="chip chip-signal">{actionLabel(suggestedAction.action)}</span>
+          ) : null}
+        </div>
+      ) : null}
+      <p>{candidate.body}</p>
+      {mergeTarget ? (
+        <p className="record-reason">
+          合并建议 · 已存在相近 Memory Card：{mergeTarget}
+          {suggestedAction?.similarity ? ` · 相似度 ${Math.round(suggestedAction.similarity * 100)}%` : ""}
         </p>
-        {candidateTags.length > 0 ? (
-          <div className="tag-row" aria-label="候选标签">
-            {candidateTags.map((tag) => (
-              <span key={tag}>{tag}</span>
-            ))}
-          </div>
-        ) : null}
-        {candidate.extraction?.classification || suggestedAction ? (
-          <div className="tag-row classification-chips">
-            {candidate.extraction?.classification?.artifact_kind ? (
-              <span className="chip chip-artifact">
-                {routeLabel(candidate.extraction.classification.artifact_kind)}
-              </span>
-            ) : null}
-            {candidate.extraction?.classification?.hardness ? (
-              <span className="chip chip-hardness">{candidate.extraction.classification.hardness}</span>
-            ) : null}
-            {suggestedAction ? (
-              <span className="chip chip-activation">{compileLabel(suggestedAction.compile_enabled)}</span>
-            ) : null}
-            {suggestedAction ? (
-              <span className="chip chip-signal">{actionLabel(suggestedAction.action)}</span>
-            ) : null}
-          </div>
-        ) : null}
-        <p>{candidate.body}</p>
-        {mergeTarget ? (
-          <p className="record-reason">
-            合并建议 · 已存在相近 Skilllet：{mergeTarget}
-            {suggestedAction?.similarity ? ` · 相似度 ${Math.round(suggestedAction.similarity * 100)}%` : ""}
-          </p>
-        ) : null}
-        <small>{sourceText}</small>
-        {candidate.extraction?.reason ? (
-          <p className="record-reason">
-            {candidate.extraction.matched_signal ? `${candidate.extraction.matched_signal} · ` : ""}
-            {candidate.extraction.origin ? `${candidate.extraction.origin} · ` : ""}
-            {candidate.extraction.reason}
-          </p>
-        ) : null}
-      </div>
-      <div className="record-actions">
+      ) : null}
+      <small>{sourceText}</small>
+      {candidate.extraction?.reason ? (
+        <p className="record-reason">
+          {candidate.extraction.matched_signal ? `${candidate.extraction.matched_signal} · ` : ""}
+          {candidate.extraction.origin ? `${candidate.extraction.origin} · ` : ""}
+          {candidate.extraction.reason}
+        </p>
+      ) : null}
+
+      <div className="candidate-detail-actions">
         <input
           className="inline-input"
           type="text"
@@ -406,6 +479,7 @@ function CandidateCard({
           onChange={(event) => setRejectReason(event.target.value)}
           placeholder="拒绝原因"
           disabled={disabled}
+          style={{ flex: 1 }}
         />
         <ActionButton
           icon={ArrowUp}
@@ -414,7 +488,7 @@ function CandidateCard({
           busy={pendingAction === `批准-${candidate.id}`}
           disabled={disabled}
           onClick={() =>
-            onAction(`批准-${candidate.id}`, "已批准为 Skilllet", "promote_candidate", { id: candidate.id })
+            onAction(`批准-${candidate.id}`, "已批准为 Memory Card", "promote_candidate", { id: candidate.id })
           }
         />
         <ActionButton
@@ -441,7 +515,7 @@ function CandidateCard({
           }
         />
       </div>
-    </article>
+    </div>
   );
 }
 
@@ -469,12 +543,11 @@ function actionLabel(action?: string | null): string {
     case "merge_into_existing":
       return "合并建议";
     case "new_candidate":
-      return "新 Skilllet";
+      return "新 Memory Card";
     default:
       return "待审";
   }
 }
-
 
 function visibleDrafts(drafts: ProjectSnapshot["drafts"]) {
   return [...drafts]

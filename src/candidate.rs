@@ -9,11 +9,11 @@ use serde::{Deserialize, Serialize};
 use crate::config;
 use crate::draft::{self, DraftUpdate, NewDraft};
 use crate::extract::classify::KnowledgeClassification;
-use crate::extract::lifecycle::SkillletOperation;
+use crate::extract::lifecycle::MemoryCardOperation;
 use crate::extract::memory_gate::{self, MemoryGateDisposition};
 use crate::feedback;
 use crate::fsutil;
-use crate::skilllet::{self, SkillletRecord, SkillletUpdate};
+use crate::memory_card::{self, MemoryCardRecord, MemoryCardUpdate};
 use crate::textutil;
 
 mod action;
@@ -151,7 +151,7 @@ pub struct CandidateRecord {
     #[serde(default)]
     pub extraction: ExtractionMetadata,
     #[serde(default)]
-    pub operation: SkillletOperation,
+    pub operation: MemoryCardOperation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duplicate_of: Option<String>,
     #[serde(default)]
@@ -402,21 +402,22 @@ pub fn promote_candidate_to_draft(project_root: &Path, id: &str) -> Result<draft
     Ok(draft)
 }
 
-pub fn approve_candidate_to_skilllet(project_root: &Path, id: &str) -> Result<SkillletRecord> {
+pub fn approve_candidate_to_memory_card(project_root: &Path, id: &str) -> Result<MemoryCardRecord> {
     let root = fsutil::normalize_project_root(project_root)?;
     let mut candidate = load_candidate(&root, id)?;
+    let approvable_kind = normalize_approvable_candidate_kind(&candidate.kind);
     if candidate.status != CandidateStatus::Candidate {
         return Err(anyhow!(
             "candidate `{id}` cannot be approved from status {:?}",
             candidate.status
         ));
     }
-    // 检查同名 skilllet 是否已存在；若是同一概念的更新，则吸收到现有 Skilllet。
-    if let Some(existing_skilllet) = skilllet::load_skilllets(&root)?
+    // 检查同名 memory_card 是否已存在；若是同一概念的更新，则吸收到现有 MemoryCard。
+    if let Some(existing_memory_card) = memory_card::load_memory_cards(&root)?
         .into_iter()
-        .find(|skilllet| skilllet.id == candidate.id)
+        .find(|memory_card| memory_card.id == candidate.id)
     {
-        if textutil::jaccard_similarity(&candidate.body, &existing_skilllet.body) >= 0.75 {
+        if textutil::jaccard_similarity(&candidate.body, &existing_memory_card.body) >= 0.75 {
             candidate.status = CandidateStatus::Promoted;
             candidate.updated_at = Utc::now().to_rfc3339();
             save_candidate(&root, &candidate)?;
@@ -424,18 +425,18 @@ pub fn approve_candidate_to_skilllet(project_root: &Path, id: &str) -> Result<Sk
                 &root,
                 "candidate",
                 &candidate.id,
-                "approved-existing-skilllet",
+                "approved-existing-memory_card",
                 &candidate.body,
                 None,
             )?;
-            return Ok(existing_skilllet);
+            return Ok(existing_memory_card);
         }
-        if skilllet::review_update_matches_existing(
-            &existing_skilllet,
+        if memory_card::review_update_matches_existing(
+            &existing_memory_card,
             &candidate.title,
             &candidate.body,
         ) {
-            let updated = skilllet::update_skilllet_from_review(
+            let updated = memory_card::update_memory_card_from_review(
                 &root,
                 &candidate.id,
                 candidate.title.clone(),
@@ -443,7 +444,7 @@ pub fn approve_candidate_to_skilllet(project_root: &Path, id: &str) -> Result<Sk
                 candidate.brief.clone(),
                 candidate.tags.clone(),
                 candidate.language.clone(),
-                candidate.kind.clone(),
+                approvable_kind.clone(),
                 candidate.scope.clone(),
             )?;
             candidate.status = CandidateStatus::Promoted;
@@ -453,38 +454,38 @@ pub fn approve_candidate_to_skilllet(project_root: &Path, id: &str) -> Result<Sk
                 &root,
                 "candidate",
                 &candidate.id,
-                "approved-existing-skilllet-update",
+                "approved-existing-memory_card-update",
                 &candidate.body,
                 None,
             )?;
             return Ok(updated);
         }
         return Err(anyhow!(
-            "skilllet id conflict for `{}` (different body); review or merge the existing Skilllet before approving this system suggestion",
+            "memory_card id conflict for `{}` (different body); review or merge the existing MemoryCard before approving this system suggestion",
             candidate.id
         ));
     }
 
-    skilllet::add_skilllet_with_provenance(
+    memory_card::add_memory_card_with_provenance(
         &root,
         &candidate.id,
         &candidate.title,
         &candidate.body,
-        &candidate.kind,
+        &approvable_kind,
         &candidate.scope,
         candidate.targets.clone(),
         Some(candidate.extraction.clone()),
         Some(candidate.id.clone()),
         Some(candidate.evidence.clone()),
     )?;
-    let skilllet = skilllet::update_skilllet(
+    let memory_card = memory_card::update_memory_card(
         &root,
         &candidate.id,
-        SkillletUpdate {
+        MemoryCardUpdate {
             brief: Some(candidate.brief.clone()),
             tags: Some(candidate.tags.clone()),
             language: Some(candidate.language.clone()),
-            ..SkillletUpdate::default()
+            ..MemoryCardUpdate::default()
         },
     )?;
     candidate.status = CandidateStatus::Promoted;
@@ -498,7 +499,16 @@ pub fn approve_candidate_to_skilllet(project_root: &Path, id: &str) -> Result<Sk
         &candidate.body,
         None,
     )?;
-    Ok(skilllet)
+    Ok(memory_card)
+}
+
+fn normalize_approvable_candidate_kind(kind: &str) -> String {
+    match kind {
+        "preference" | "constraint" | "procedure" | "convention" | "correction"
+        | "anti-pattern" | "rule" | "memory_card" | "observation" | "package" => kind.to_string(),
+        "principle" | "decision" | "supplement" => "procedure".to_string(),
+        _ => "procedure".to_string(),
+    }
 }
 
 fn update_candidate_status(
@@ -564,7 +574,7 @@ fn candidate_path_for_scope(project_root: &Path, scope: &str, id: &str) -> Resul
 }
 
 fn enrich_record_defaults(candidate: &mut CandidateRecord) {
-    if candidate.operation == SkillletOperation::Add {
+    if candidate.operation == MemoryCardOperation::Add {
         candidate.operation = operation_from_extraction(&candidate.extraction);
     }
     if candidate.duplicate_of.is_none() {
@@ -595,16 +605,16 @@ fn enrich_record_defaults(candidate: &mut CandidateRecord) {
     }
 }
 
-fn operation_from_extraction(extraction: &ExtractionMetadata) -> SkillletOperation {
+fn operation_from_extraction(extraction: &ExtractionMetadata) -> MemoryCardOperation {
     let Some(action) = extraction.suggested_action.as_ref() else {
-        return SkillletOperation::Add;
+        return MemoryCardOperation::Add;
     };
     match action.action.as_str() {
-        "merge_into_existing" => SkillletOperation::Update,
-        "supersede" => SkillletOperation::Supersede,
-        "conflict" => SkillletOperation::Conflict,
-        "noop" => SkillletOperation::Noop,
-        _ => SkillletOperation::Add,
+        "merge_into_existing" => MemoryCardOperation::Update,
+        "supersede" => MemoryCardOperation::Supersede,
+        "conflict" => MemoryCardOperation::Conflict,
+        "noop" => MemoryCardOperation::Noop,
+        _ => MemoryCardOperation::Add,
     }
 }
 
@@ -822,7 +832,7 @@ mod tests {
 
         hide_candidate(temp.path(), "hide").expect("hidden");
         reject_candidate(temp.path(), "reject", Some("not useful".to_string())).expect("rejected");
-        approve_candidate_to_skilllet(temp.path(), "promote").expect("promoted");
+        approve_candidate_to_memory_card(temp.path(), "promote").expect("promoted");
 
         let visible = list_visible_candidates(temp.path()).expect("visible");
 
@@ -843,7 +853,7 @@ mod tests {
 
         reject_candidate(temp.path(), "reject", Some("too generic".to_string()))
             .expect("reject candidate");
-        approve_candidate_to_skilllet(temp.path(), "approve").expect("approve candidate");
+        approve_candidate_to_memory_card(temp.path(), "approve").expect("approve candidate");
 
         let events = feedback::load_feedback(temp.path()).expect("feedback");
 
@@ -909,21 +919,39 @@ mod tests {
     }
 
     #[test]
-    fn approving_candidate_creates_skilllet_and_preserves_metadata() {
+    fn approving_candidate_creates_memory_card_and_preserves_metadata() {
         let temp = tempfile::tempdir().expect("tempdir");
         let mut candidate = new_candidate("project:use-axios", 0.92, Some("prefer-tool"));
         candidate.title = "Use Axios".to_string();
         candidate.body = "Use Axios for frontend HTTP requests.".to_string();
         add_candidate(temp.path(), candidate).expect("candidate");
 
-        let skilllet =
-            approve_candidate_to_skilllet(temp.path(), "project:use-axios").expect("skilllet");
+        let memory_card = approve_candidate_to_memory_card(temp.path(), "project:use-axios")
+            .expect("memory_card");
         let visible = list_visible_candidates(temp.path()).expect("visible candidates");
 
-        assert_eq!(skilllet.id, "project:use-axios");
-        assert!(skilllet.brief.contains("前端 HTTP 请求优先使用 Axios"));
-        assert!(skilllet.tags.contains(&"axios".to_string()));
+        assert_eq!(memory_card.id, "project:use-axios");
+        assert!(memory_card.brief.contains("前端 HTTP 请求优先使用 Axios"));
+        assert!(memory_card.tags.contains(&"axios".to_string()));
         assert!(visible.is_empty());
         assert!(draft::load_drafts(temp.path()).expect("drafts").is_empty());
+    }
+
+    #[test]
+    fn approving_legacy_principle_candidate_normalizes_kind() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let mut candidate =
+            new_candidate("global:legacy-principle", 0.92, Some("principle-signal"));
+        candidate.title = "Legacy Principle".to_string();
+        candidate.body = "When planning durable changes, verify the main workflow before polishing secondary details.".to_string();
+        candidate.kind = "principle".to_string();
+        candidate.scope = "global".to_string();
+        add_candidate(temp.path(), candidate).expect("candidate");
+
+        let memory_card = approve_candidate_to_memory_card(temp.path(), "global:legacy-principle")
+            .expect("memory_card");
+
+        assert_eq!(memory_card.kind, "procedure");
+        assert_eq!(memory_card.scope, "global");
     }
 }

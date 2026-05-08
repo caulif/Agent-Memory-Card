@@ -1,10 +1,10 @@
-import type { DraftRecord, SkillletRecord, ProjectSnapshot, EvolutionInsight, ProjectCandidateInbox } from "../types/domain";
+﻿import type { DraftRecord, MemoryCardRecord, ProjectSnapshot, EvolutionInsight, ProjectCandidateInbox } from "../types/domain";
 import { translateKind, translateScope } from "./formatting";
 
-export function describeSkillletPlainly(skilllet: SkillletRecord): string {
-  const kindLabel = translateKind(skilllet.kind);
-  const scopeLabel = translateScope(skilllet.scope);
-  return `这是一个${scopeLabel}级别的${kindLabel}：${skilllet.title}。${skilllet.body} 以后遇到类似任务，可以直接复用该片段，无需重新描述。`;
+export function describeMemoryCardPlainly(memory_card: MemoryCardRecord): string {
+  const kindLabel = translateKind(memory_card.kind);
+  const scopeLabel = translateScope(memory_card.scope);
+  return `这是一个${scopeLabel}级别的${kindLabel}：${memory_card.title}。${memory_card.body} 以后遇到类似任务，可以直接复用该片段，无需重新描述。`;
 }
 
 export function describeDraftForReview(draft: DraftRecord): string {
@@ -48,11 +48,11 @@ const evolutionTimestamps = [
   "2026-05-02",
 ];
 
-export function deriveSkillletEvolution(
-  skilllet: SkillletRecord,
+export function deriveMemoryCardEvolution(
+  memory_card: MemoryCardRecord,
   snapshot: ProjectSnapshot,
 ): EvolutionInsight {
-  const targetRow = snapshot.target_matrix.rows.find((r) => r.skilllet_id === skilllet.id);
+  const targetRow = snapshot.target_matrix.rows.find((r) => r.memory_card_id === memory_card.id);
   const agentCount = targetRow
     ? Object.values(targetRow.targets).filter(Boolean).length
     : 0;
@@ -66,24 +66,24 @@ export function deriveSkillletEvolution(
 
   const stability = Math.min(
     0.98,
-    +(0.42 + (skilllet.scope === "global" ? 0.22 : skilllet.scope === "project" ? 0.14 : 0.04) + agentCount * 0.06).toFixed(2),
+    +(0.42 + (memory_card.scope === "global" ? 0.22 : memory_card.scope === "project" ? 0.14 : 0.04) + agentCount * 0.06).toFixed(2),
   );
 
   const activity: "active" | "dormant" = draftCount > 0 || agentCount >= 2 ? "active" : "dormant";
 
   const conflicts: string[] = [];
-  if (agentCount >= 2 && skilllet.scope === "project") {
+  if (agentCount >= 2 && memory_card.scope === "project") {
     conflicts.push("多智能体共享项目级片段，需确认目标智能体对该约束或流程理解一致");
   }
-  if (skilllet.kind === "constraint" && agentCount <= 1) {
+  if (memory_card.kind === "constraint" && agentCount <= 1) {
     conflicts.push("硬约束仅分配给单个智能体，建议扩展覆盖范围以避免约束遗漏");
   }
-  if (skilllet.kind === "procedure" && skilllet.scope === "agent") {
+  if (memory_card.kind === "procedure" && memory_card.scope === "agent") {
     conflicts.push("智能体级流程片段可能与其他智能体的同名流程冲突，需检查一致性");
   }
 
   const promotion_candidate =
-    skilllet.scope === "project" && agentCount >= 2 && confidence > 0.6;
+    memory_card.scope === "project" && agentCount >= 2 && confidence > 0.6;
 
   const timeline: Array<{ date: string; event: string }> = [];
   const baseDateIdx = Math.min(
@@ -92,7 +92,7 @@ export function deriveSkillletEvolution(
   );
   timeline.push({
     date: evolutionTimestamps[baseDateIdx]!,
-    event: `技能片段"${skilllet.title}"被提取并注册`,
+    event: `技能片段"${memory_card.title}"被提取并注册`,
   });
   if (draftCount > 0) {
     timeline.push({
@@ -111,16 +111,16 @@ export function deriveSkillletEvolution(
   });
 
   const evolution_tree: EvolutionInsight["evolution_tree"] = [];
-  if (skilllet.scope === "project" || skilllet.scope === "global") {
+  if (memory_card.scope === "project" || memory_card.scope === "global") {
     evolution_tree.push({
       from: "原始会话任务",
-      to: skilllet.title,
-      label: skilllet.scope === "global" ? "提炼为全局级片段" : "提炼为项目级片段",
+      to: memory_card.title,
+      label: memory_card.scope === "global" ? "提炼为全局级片段" : "提炼为项目级片段",
     });
   } else {
     evolution_tree.push({
       from: "智能体特定任务",
-      to: skilllet.title,
+      to: memory_card.title,
       label: "沉淀为智能体级片段",
     });
   }
@@ -129,7 +129,7 @@ export function deriveSkillletEvolution(
     const last = evolution_tree[evolution_tree.length - 1]!;
     evolution_tree.push({
       from: last.to,
-      to: `${skilllet.title} (多智能体共享)`,
+      to: `${memory_card.title} (多智能体共享)`,
       label: "扩展为多智能体共享",
     });
   }
@@ -138,14 +138,14 @@ export function deriveSkillletEvolution(
     const last = evolution_tree[evolution_tree.length - 1]!;
     evolution_tree.push({
       from: last.to,
-      to: `${skilllet.title} (全局提升)`,
+      to: `${memory_card.title} (全局提升)`,
       label: "候选提升为全局片段",
     });
   }
 
   return {
-    skilllet_id: skilllet.id,
-    title: skilllet.title,
+    memory_card_id: memory_card.id,
+    title: memory_card.title,
     confidence,
     stability,
     timeline,
@@ -156,7 +156,7 @@ export function deriveSkillletEvolution(
   };
 }
 
-export function nextSkillletTargets(current: string[], agent: string, add: boolean): string[] {
+export function nextMemoryCardTargets(current: string[], agent: string, add: boolean): string[] {
   if (add) {
     if (current.includes(agent)) return [...current];
     return [agent, ...current];
@@ -164,7 +164,7 @@ export function nextSkillletTargets(current: string[], agent: string, add: boole
   return current.filter((a) => a !== agent);
 }
 
-export function filterRecordsByTag<T extends DraftRecord | SkillletRecord>(
+export function filterRecordsByTag<T extends DraftRecord | MemoryCardRecord>(
   records: T[],
   tag: string,
 ): T[] {

@@ -1,6 +1,11 @@
+import React from "react";
 import { CloudCog, Monitor, Moon, RefreshCw, Sun } from "lucide-react";
 import { Panel, StatusList } from "../common";
-import { formatAgent, type DesktopAppState, type ProjectSnapshot } from "../../ui-helpers";
+import {
+  formatAgent,
+  type DesktopAppState,
+  type ProjectSnapshot,
+} from "../../ui-helpers";
 
 const THEME_OPTIONS: { key: "light" | "dark" | "system"; label: string; icon: React.ComponentType<{ size?: number }> }[] = [
   { key: "light", label: "浅色", icon: Sun },
@@ -17,7 +22,9 @@ export function Settings({
 }: {
   state: DesktopAppState | null;
   snapshot: ProjectSnapshot | null;
-  synthesisEngine: "claude-code" | "codex" | "local";
+  projectPath: string;
+  previewMode: boolean;
+  synthesisEngine: "claude-code" | "codex" | "local" | "llm";
   theme: "light" | "dark" | "system";
   onThemeChange: (theme: "light" | "dark" | "system") => void;
 }) {
@@ -25,7 +32,7 @@ export function Settings({
     <div className="stack">
       <Panel title="运行环境" subtitle="所有读取和生成都在本机完成。" icon={CloudCog}>
         <StatusList
-          items={[`主目录：${state?.home ?? "读取中"}`, `当前项目：${snapshot?.project_path ?? "未选择"}`, `默认整理引擎：${formatAgent(synthesisEngine)}`]}
+          items={[`主目录：${state?.home ?? "读取中"}`, `当前项目：${snapshot?.project_path ?? "未选择"}`, `默认整理引擎：${synthesisEngine === "llm" ? "LLM" : formatAgent(synthesisEngine)}`]}
           empty="暂无环境信息。"
         />
       </Panel>

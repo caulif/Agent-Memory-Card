@@ -1,7 +1,7 @@
-import { describe, expect, test } from "bun:test";
+﻿import { describe, expect, test } from "bun:test";
 import {
   buildEditFormFromDraft,
-  buildEditFormFromSkilllet,
+  buildEditFormFromMemoryCard,
   buildKernelPlanForEditor,
   buildKernelPlanForInvoke,
   confirmedAgentManagedPolicy,
@@ -11,11 +11,11 @@ import {
   createDemoProjectDashboard,
   createDemoProjectQualityView,
   createDemoProjectReviewInbox,
-  createDemoProjectSkillletLibrary,
+  createDemoProjectMemoryCardLibrary,
   createDemoProjectSnapshot,
   describeDraftForReview,
-  describeSkillletPlainly,
-  deriveSkillletEvolution,
+  describeMemoryCardPlainly,
+  deriveMemoryCardEvolution,
   EDITABLE_AGENTS,
   filterCandidatesForInbox,
   formatAgent,
@@ -37,7 +37,7 @@ import {
   sortCandidatesForInbox,
   isChineseLabel,
   isTauriRuntimeUnavailable,
-  nextSkillletTargets,
+  nextMemoryCardTargets,
   PAGES,
   projectOverviewMetrics,
   translateKind,
@@ -56,7 +56,7 @@ describe("UI helper labels", () => {
 
   test("translates draft kind and scope labels", () => {
     expect(translateKind("rule")).toBe("规则");
-    expect(translateKind("skilllet")).toBe("技能片段");
+    expect(translateKind("memory_card")).toBe("技能片段");
     expect(translateKind("observation")).toBe("观察");
     expect(translateKind("preference")).toBe("偏好");
     expect(translateKind("constraint")).toBe("约束");
@@ -70,7 +70,7 @@ describe("UI helper labels", () => {
   });
 
   test("keeps page labels Chinese-first", () => {
-    expect(PAGES.map((page) => page.label)).toEqual(["审阅", "技能片段", "分配", "设置"]);
+    expect(PAGES.map((page) => page.label)).toEqual(["审阅", "记忆卡", "分配", "设置"]);
     expect(PAGES.every((page) => isChineseLabel(page.label))).toBe(true);
   });
 
@@ -176,7 +176,7 @@ describe("preview mode helpers", () => {
     expect(metrics).toEqual({
       candidateCount: dashboard.candidate_count,
       draftCount: dashboard.draft_count,
-      skillletCount: dashboard.skilllet_count,
+      memory_cardCount: dashboard.memory_card_count,
       observationCount: dashboard.observation_count,
       installedCount: 3,
     });
@@ -186,12 +186,12 @@ describe("preview mode helpers", () => {
     const projectPath = "预览模式/智能体内核";
     const snapshot = createDemoProjectSnapshot(projectPath);
     const inbox = createDemoProjectReviewInbox(projectPath);
-    const library = createDemoProjectSkillletLibrary(projectPath);
+    const library = createDemoProjectMemoryCardLibrary(projectPath);
     const assignment = createDemoProjectAssignmentView(projectPath);
     const quality = createDemoProjectQualityView(projectPath);
 
     expect(inbox.drafts.length).toBe(snapshot.drafts.length);
-    expect(library.skilllets.length).toBe(snapshot.skilllets.length);
+    expect(library.memory_cards.length).toBe(snapshot.memory_cards.length);
     expect(library.catalog_status.items.length).toBe(snapshot.catalog_status.items.length);
     expect(assignment.target_matrix.rows.length).toBe(snapshot.target_matrix.rows.length);
     expect(quality.rule_ci.passed).toBe(snapshot.rule_ci.passed);
@@ -217,10 +217,10 @@ describe("preview mode helpers", () => {
   });
 });
 
-describe("skilllet evolution helpers", () => {
-  test("describes skilllets in plain Chinese", () => {
+describe("memory_card evolution helpers", () => {
+  test("describes memory_cards in plain Chinese", () => {
     expect(
-      describeSkillletPlainly({
+      describeMemoryCardPlainly({
         id: "project:ui-responsive",
         title: "Keep UI Responsive During Long Tasks",
         kind: "procedure",
@@ -232,7 +232,7 @@ describe("skilllet evolution helpers", () => {
 
   test("derives engineering evolution state", () => {
     const snapshot = createDemoProjectSnapshot("预览模式/智能体内核");
-    const insight = deriveSkillletEvolution(snapshot.skilllets[0]!, snapshot);
+    const insight = deriveMemoryCardEvolution(snapshot.memory_cards[0]!, snapshot);
 
     expect(insight.confidence).toBeGreaterThan(0);
     expect(insight.stability).toBeGreaterThan(0);
@@ -240,15 +240,15 @@ describe("skilllet evolution helpers", () => {
     expect(["active", "dormant"]).toContain(insight.activity);
   });
 
-  test("toggles skilllet targets freely and allows inactive empty assignment", () => {
-    expect(nextSkillletTargets(["codex"], "claude-code", true)).toEqual(["claude-code", "codex"]);
-    expect(nextSkillletTargets(["codex", "claude-code"], "codex", false)).toEqual(["claude-code"]);
-    expect(nextSkillletTargets(["codex"], "codex", false)).toEqual([]);
+  test("toggles memory_card targets freely and allows inactive empty assignment", () => {
+    expect(nextMemoryCardTargets(["codex"], "claude-code", true)).toEqual(["claude-code", "codex"]);
+    expect(nextMemoryCardTargets(["codex", "claude-code"], "codex", false)).toEqual(["claude-code"]);
+    expect(nextMemoryCardTargets(["codex"], "codex", false)).toEqual([]);
   });
 
-  test("filters drafts and skilllets by tags", () => {
+  test("filters drafts and memory_cards by tags", () => {
     const snapshot = createDemoProjectSnapshot("预览模式/智能体内核");
-    const records = [...snapshot.drafts, ...snapshot.skilllets];
+    const records = [...snapshot.drafts, ...snapshot.memory_cards];
 
     expect(filterRecordsByTag(records, "ui-design").map((item) => item.title)).toContain("浏览器预览模式");
     expect(filterRecordsByTag(records, "all").length).toBe(records.length);
@@ -390,7 +390,7 @@ describe("skilllet evolution helpers", () => {
     expect(jobCenterSource).toContain('aria-label="按类型筛选"');
     expect(jobCenterSource).toContain("job.replay?.command");
     expect(jobCenterSource).toContain("可重试");
-    expect(jobCenterSource).toContain("融合Skilllet");
+    expect(jobCenterSource).toContain("融合 Memory Card");
   });
 
   test("job retry uses the persisted replay command instead of guessing only by job key", () => {
@@ -407,7 +407,7 @@ describe("skilllet evolution helpers", () => {
     expect(hookSource).toContain("handledJobIdsRef");
     expect(hookSource).toContain("reloadAppStateFromBackend");
     expect(hookSource).toContain('job.key === "扫描"');
-    expect(hookSource).toContain('job.key === "整理历史" || job.key === "同步" || job.key === "融合Skilllet"');
+    expect(hookSource).toContain('job.key === "整理历史" || job.key === "同步" || job.key === "融合 Memory Card"');
     expect(hookSource).not.toContain('if (command === "sync_project" && actionProjectPath === selectedProjectRef.current)');
   });
 
@@ -444,14 +444,14 @@ describe("skilllet evolution helpers", () => {
     const strategySource = readFileSync("src/project-read-models.ts", "utf8");
 
     expect(strategySource).toContain("get_project_review_inbox");
-    expect(strategySource).toContain("get_project_skilllet_library");
+    expect(strategySource).toContain("get_project_memory_card_library");
     expect(strategySource).toContain("get_project_assignment_view");
     expect(strategySource).toContain("get_project_quality_view");
     expect(mainSource).toContain("useProjectReadModels");
     expect(strategySource).toContain("loadProjectReadModelsFromTauri");
     expect(mainSource).toContain("loadReadModelsForPage");
     expect(mainSource).toContain("reviewInbox");
-    expect(mainSource).toContain("skillletLibrary");
+    expect(mainSource).toContain("memory_cardLibrary");
     expect(mainSource).toContain("assignmentView");
     expect(mainSource).toContain("qualityView");
   });
@@ -548,16 +548,16 @@ describe("edit helpers", () => {
     expect(form.targets).toEqual(["codex", "claude-code"]);
   });
 
-  test("builds edit form from skilllet record (no targets)", () => {
-    const skilllet = {
-      id: "test-skilllet",
+  test("builds edit form from memory_card record (no targets)", () => {
+    const memory_card = {
+      id: "test-memory_card",
       title: "测试片段",
       body: "内容",
       kind: "procedure",
       scope: "global",
       tags: ["a"],
     };
-    const form = buildEditFormFromSkilllet(skilllet);
+    const form = buildEditFormFromMemoryCard(memory_card);
     expect(form.title).toBe("测试片段");
     expect(form.targets).toEqual([]);
     expect(form.tagsInput).toBe("a");

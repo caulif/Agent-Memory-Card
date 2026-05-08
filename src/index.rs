@@ -5,7 +5,7 @@ use anyhow::Result;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-use crate::{candidate, config, draft, fsutil, skilllet};
+use crate::{candidate, config, draft, fsutil, memory_card};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectIndex {
@@ -13,7 +13,7 @@ pub struct ProjectIndex {
     pub updated_at: String,
     pub candidate_count: usize,
     pub draft_count: usize,
-    pub skilllet_count: usize,
+    pub memory_card_count: usize,
 }
 
 pub fn rebuild_project_index(project_root: &Path) -> Result<ProjectIndex> {
@@ -24,7 +24,7 @@ pub fn rebuild_project_index(project_root: &Path) -> Result<ProjectIndex> {
         updated_at: Utc::now().to_rfc3339(),
         candidate_count: candidate::load_candidates(&root)?.len(),
         draft_count: draft::load_drafts(&root)?.len(),
-        skilllet_count: skilllet::load_skilllets(&root)?.len(),
+        memory_card_count: memory_card::load_memory_cards(&root)?.len(),
     };
     fs::write(index_path(&root), serde_yaml::to_string(&index)?)?;
     Ok(index)

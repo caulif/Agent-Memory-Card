@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn approves_draft_into_skilllet() {
+fn approves_draft_into_memory_card() {
     let temp = tempfile::tempdir().expect("tempdir");
     add_draft(
         temp.path(),
@@ -24,14 +24,14 @@ fn approves_draft_into_skilllet() {
     approve_draft(temp.path(), "project:prefer-bun").expect("approve");
 
     assert!(load_drafts(temp.path()).expect("drafts").is_empty());
-    let skilllets = skilllet::load_skilllets(temp.path()).expect("skilllets");
-    assert_eq!(skilllets[0].id, "project:prefer-bun");
+    let memory_cards = memory_card::load_memory_cards(temp.path()).expect("memory_cards");
+    assert_eq!(memory_cards[0].id, "project:prefer-bun");
 }
 
 #[test]
-fn approve_draft_updates_existing_skilllet_for_same_concept() {
+fn approve_draft_updates_existing_memory_card_for_same_concept() {
     let temp = tempfile::tempdir().expect("tempdir");
-    skilllet::add_skilllet(
+    memory_card::add_memory_card(
         temp.path(),
         "project:prefer-bun",
         "Prefer Bun",
@@ -40,7 +40,7 @@ fn approve_draft_updates_existing_skilllet_for_same_concept() {
         "project",
         vec!["codex".to_string()],
     )
-    .expect("skilllet");
+    .expect("memory_card");
     add_draft(
         temp.path(),
         NewDraft {
@@ -62,14 +62,45 @@ fn approve_draft_updates_existing_skilllet_for_same_concept() {
     approve_draft(temp.path(), "project:prefer-bun").expect("approve existing update");
 
     assert!(load_drafts(temp.path()).expect("drafts").is_empty());
-    let skilllets = skilllet::load_skilllets(temp.path()).expect("skilllets");
-    assert_eq!(skilllets[0].body, "Use Bun for all JavaScript scripts.");
+    let memory_cards = memory_card::load_memory_cards(temp.path()).expect("memory_cards");
+    assert_eq!(memory_cards[0].body, "Use Bun for all JavaScript scripts.");
 }
 
 #[test]
-fn reviewable_drafts_hide_fusion_already_represented_by_existing_skilllet() {
+fn approve_draft_creates_unassigned_memory_card() {
     let temp = tempfile::tempdir().expect("tempdir");
-    skilllet::add_skilllet(
+    add_draft(
+        temp.path(),
+        NewDraft {
+            id: "project:prefer-bun".to_string(),
+            title: "Prefer Bun".to_string(),
+            body: "Use Bun for JavaScript scripts.".to_string(),
+            kind: "preference".to_string(),
+            scope: "project".to_string(),
+            targets: vec!["codex".to_string()],
+            evidence: "User asked for Bun.".to_string(),
+            confidence: Some(0.9),
+            reason: None,
+            matched_template: None,
+            extraction: ExtractionMetadata::default(),
+        },
+    )
+    .expect("add draft");
+
+    approve_draft(temp.path(), "project:prefer-bun").expect("approve");
+
+    let project = config::load_or_default_project_config(temp.path()).expect("project");
+    assert_eq!(project.memory_cards.include[0].id, "project:prefer-bun");
+    assert!(
+        project.memory_cards.include[0].targets.is_empty(),
+        "approved drafts should wait for manual agent assignment"
+    );
+}
+
+#[test]
+fn reviewable_drafts_hide_fusion_already_represented_by_existing_memory_card() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    memory_card::add_memory_card(
         temp.path(),
         "global:保留人类评审边界",
         "保留人类评审边界",
@@ -78,7 +109,7 @@ fn reviewable_drafts_hide_fusion_already_represented_by_existing_skilllet() {
         "global",
         vec!["codex".to_string()],
     )
-    .expect("skilllet");
+    .expect("memory_card");
     add_draft(
         temp.path(),
         NewDraft {
@@ -89,10 +120,12 @@ fn reviewable_drafts_hide_fusion_already_represented_by_existing_skilllet() {
             kind: "procedure".to_string(),
             scope: "project".to_string(),
             targets: vec!["codex".to_string()],
-            evidence: "Fused Skilllets: global:保留人类评审边界, global:真实输入自检".to_string(),
+            evidence: "Fused MemoryCards: global:保留人类评审边界, global:真实输入自检".to_string(),
             confidence: Some(0.8),
-            reason: Some("Synthesized a reviewable fusion candidate from 2 skilllets.".to_string()),
-            matched_template: Some("manual:skilllet-fusion".to_string()),
+            reason: Some(
+                "Synthesized a reviewable fusion candidate from 2 memory_cards.".to_string(),
+            ),
+            matched_template: Some("manual:memory_card-fusion".to_string()),
             extraction: ExtractionMetadata::default(),
         },
     )
@@ -109,7 +142,7 @@ fn reviewable_drafts_hide_fusion_already_represented_by_existing_skilllet() {
 #[test]
 fn approve_draft_removes_duplicate_with_existing_global_slug() {
     let temp = tempfile::tempdir().expect("tempdir");
-    skilllet::add_skilllet(
+    memory_card::add_memory_card(
         temp.path(),
         "global:真实输入自检后再提交",
         "真实输入自检后再提交",
@@ -118,7 +151,7 @@ fn approve_draft_removes_duplicate_with_existing_global_slug() {
         "global",
         vec!["codex".to_string()],
     )
-    .expect("skilllet");
+    .expect("memory_card");
     add_draft(
         temp.path(),
         NewDraft {
@@ -129,11 +162,13 @@ fn approve_draft_removes_duplicate_with_existing_global_slug() {
             kind: "procedure".to_string(),
             scope: "project".to_string(),
             targets: vec!["codex".to_string()],
-            evidence: "Fused Skilllets: global:编辑前先规划, global:真实输入自检后再提交"
+            evidence: "Fused MemoryCards: global:编辑前先规划, global:真实输入自检后再提交"
                 .to_string(),
             confidence: Some(0.8),
-            reason: Some("Synthesized a reviewable fusion candidate from 2 skilllets.".to_string()),
-            matched_template: Some("manual:skilllet-fusion".to_string()),
+            reason: Some(
+                "Synthesized a reviewable fusion candidate from 2 memory_cards.".to_string(),
+            ),
+            matched_template: Some("manual:memory_card-fusion".to_string()),
             extraction: ExtractionMetadata::default(),
         },
     )
@@ -143,9 +178,9 @@ fn approve_draft_removes_duplicate_with_existing_global_slug() {
         .expect("duplicate approval should be a clean no-op");
 
     assert!(load_drafts(temp.path()).expect("drafts").is_empty());
-    let skilllets = skilllet::load_skilllets(temp.path()).expect("skilllets");
-    assert_eq!(skilllets.len(), 1);
-    assert_eq!(skilllets[0].id, "global:真实输入自检后再提交");
+    let memory_cards = memory_card::load_memory_cards(temp.path()).expect("memory_cards");
+    assert_eq!(memory_cards.len(), 1);
+    assert_eq!(memory_cards[0].id, "global:真实输入自检后再提交");
 }
 
 #[test]
@@ -506,9 +541,9 @@ fn merge_requires_at_least_two_source_drafts() {
 }
 
 #[test]
-fn fuses_skilllets_into_reviewable_draft() {
+fn fuses_memory_cards_into_reviewable_draft() {
     let temp = tempfile::tempdir().expect("tempdir");
-    skilllet::add_skilllet(
+    memory_card::add_memory_card(
         temp.path(),
         "project:ui-background-tasks",
         "UI Background Tasks",
@@ -518,7 +553,7 @@ fn fuses_skilllets_into_reviewable_draft() {
         vec!["codex".to_string()],
     )
     .expect("add ui");
-    skilllet::add_skilllet(
+    memory_card::add_memory_card(
         temp.path(),
         "project:tauri-responsive",
         "Tauri Responsive Shell",
@@ -529,7 +564,7 @@ fn fuses_skilllets_into_reviewable_draft() {
     )
     .expect("add tauri");
 
-    let draft = fuse_skilllets_to_draft(
+    let draft = fuse_memory_cards_to_draft(
         temp.path(),
         "project:responsive-desktop-workflow",
         "Responsive Desktop Workflow",
@@ -544,9 +579,9 @@ fn fuses_skilllets_into_reviewable_draft() {
     assert_eq!(draft.kind, "procedure");
     assert_eq!(
         draft.matched_template.as_deref(),
-        Some("manual:skilllet-fusion")
+        Some("manual:memory_card-fusion")
     );
-    assert!(draft.evidence.contains("Fused Skilllets"));
+    assert!(draft.evidence.contains("Fused MemoryCards"));
     assert!(!draft.body.contains("## UI Background Tasks"));
     assert!(!draft.body.contains("## Tauri Responsive Shell"));
     assert!(draft.body.contains("long UI scans"));
@@ -554,15 +589,15 @@ fn fuses_skilllets_into_reviewable_draft() {
     assert!(draft.brief.contains("Responsive Desktop Workflow"));
     assert!(draft.tags.contains(&"tauri".to_string()));
 
-    let skilllets = skilllet::load_skilllets(temp.path()).expect("skilllets");
+    let memory_cards = memory_card::load_memory_cards(temp.path()).expect("memory_cards");
     assert!(
-        skilllets
+        memory_cards
             .iter()
-            .any(|skilllet| skilllet.id == "project:ui-background-tasks")
+            .any(|memory_card| memory_card.id == "project:ui-background-tasks")
     );
     assert!(
-        skilllets
+        memory_cards
             .iter()
-            .any(|skilllet| skilllet.id == "project:tauri-responsive")
+            .any(|memory_card| memory_card.id == "project:tauri-responsive")
     );
 }

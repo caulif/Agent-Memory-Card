@@ -1,4 +1,4 @@
-use super::*;
+﻿use super::*;
 use crate::config;
 
 fn candidate_with_body(title: &str, body: &str, confidence: f32) -> Candidate {
@@ -47,7 +47,7 @@ fn dedupe_candidates_keeps_distinct_tool_preferences() {
 }
 
 #[test]
-fn package_manager_preferences_are_not_extracted_as_skilllets() {
+fn package_manager_preferences_are_not_extracted_as_memory_cards() {
     let temp = tempfile::tempdir().expect("tempdir");
     let report = extract_high_value_text_to_drafts(
         temp.path(),
@@ -66,7 +66,7 @@ fn package_manager_preferences_are_not_extracted_as_skilllets() {
                 format!("{}\n{}\n{}", candidate.title, candidate.body, candidate.id).to_lowercase();
             !text.contains("bun") && !text.contains("package") && !text.contains("包管理")
         }),
-        "package manager preferences should not become Skilllet candidates: {:?}",
+        "package manager preferences should not become MemoryCard candidates: {:?}",
         report.candidates
     );
 }
@@ -157,16 +157,9 @@ fn methodology_preferences_generate_first_class_non_project_candidates() {
         report.candidates.iter().any(|candidate| {
             candidate.memory_tier == crate::candidate::MemoryTier::CrossProjectPrinciple
                 && candidate.scope == "global"
+                && candidate.kind == "procedure"
         }),
-        "should emit a cross-project principle candidate: {:?}",
-        report.candidates
-    );
-    assert!(
-        report.candidates.iter().any(|candidate| {
-            candidate.memory_tier == crate::candidate::MemoryTier::CollaborationPreference
-                && candidate.scope == "global"
-        }),
-        "should emit a collaboration preference candidate: {:?}",
+        "should emit one approvable non-project methodology candidate: {:?}",
         report.candidates
     );
 }
@@ -409,7 +402,7 @@ fn dry_run_keeps_accepted_ai_project_improvements() {
     let report = extract_to_drafts(
             temp.path(),
             Some(
-                "基于用户确认，项目应该把 AI 生成的高质量项目改善也送入 Candidate/Draft，而不是直接写 Skilllet；这能保留审阅边界。"
+                "基于用户确认，项目应该把 AI 生成的高质量项目改善也送入 Candidate/Draft，而不是直接写 MemoryCard；这能保留审阅边界。"
                     .to_string(),
             ),
             None,
@@ -720,7 +713,7 @@ fn high_value_extraction_rejects_ui_bug_report_and_one_off_planning_requests() {
 
     assert!(
         report.candidates.is_empty(),
-        "one-off UI feedback and bug reports should not become Skilllet drafts: {:?}",
+        "one-off UI feedback and bug reports should not become MemoryCard drafts: {:?}",
         report.candidates
     );
 }
@@ -762,7 +755,7 @@ fn high_value_extraction_rejects_unresolved_feature_requests_with_outcome_words(
 
     assert!(
         report.candidates.is_empty(),
-        "unresolved product requests should not be stored as durable Skilllets: {:?}",
+        "unresolved product requests should not be stored as durable MemoryCards: {:?}",
         report.candidates
     );
 }
@@ -847,8 +840,8 @@ fn high_value_extraction_keeps_history_quality_and_review_boundary_preferences()
         report
             .candidates
             .iter()
-            .any(|candidate| candidate.body.contains("候选质量")),
-        "candidate quality preference should be retained: {:?}",
+            .all(|candidate| !candidate.body.contains("候选质量")),
+        "candidate quality pipeline meta should be filtered: {:?}",
         report.candidates
     );
     assert!(

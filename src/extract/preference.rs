@@ -43,7 +43,7 @@ pub struct PreferenceTestMatch {
 impl PreferenceTestReport {
     pub fn render(&self) -> String {
         let mut out = String::new();
-        out.push_str("Agent-Kernel preference test\n\n");
+        out.push_str("Agent Memory Kernel preference test\n\n");
         if self.matches.is_empty() {
             out.push_str("No preference templates matched.\n");
             return out;
@@ -64,7 +64,7 @@ impl PreferenceTestReport {
 impl PreferenceRegistryValidationReport {
     pub fn render(&self) -> String {
         let mut out = String::new();
-        out.push_str("Agent-Kernel preference registry validation\n\n");
+        out.push_str("Agent Memory Kernel preference registry validation\n\n");
         if self.messages.is_empty() {
             out.push_str("No issues found.\n");
         } else {

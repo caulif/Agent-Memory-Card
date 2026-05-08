@@ -7,7 +7,7 @@ use anyhow::Result;
 use crate::config::{self, ArtifactState, ProjectLock};
 use crate::fsutil;
 use crate::hooks::{self, ClaudeCommandHook, ClaudeHookEvent};
-use crate::skilllet::SkillletRecord;
+use crate::memory_card::MemoryCardRecord;
 
 use super::ensure_generated_artifact_is_safe_to_write;
 
@@ -18,11 +18,11 @@ pub(super) struct CompiledHookArtifacts {
     pub(super) artifacts: Vec<ArtifactState>,
 }
 
-pub(super) fn compile_skilllet_hooks(
+pub(super) fn compile_memory_card_hooks(
     root: &Path,
     agent_name: &str,
-    skilllet_refs: &[config::SkillletRef],
-    skilllets: &BTreeMap<String, SkillletRecord>,
+    memory_card_refs: &[config::MemoryCardRef],
+    memory_cards: &BTreeMap<String, MemoryCardRecord>,
     preview: bool,
     previous_lock: &ProjectLock,
 ) -> Result<CompiledHookArtifacts> {
@@ -32,21 +32,22 @@ pub(super) fn compile_skilllet_hooks(
     }
 
     let mut command_hooks = Vec::new();
-    for item in skilllet_refs {
+    for item in memory_card_refs {
         if !item.targets.iter().any(|target| target == agent_name) {
             continue;
         }
-        let Some(record) = skilllets.get(&item.id) else {
+        let Some(record) = memory_cards.get(&item.id) else {
             continue;
         };
         if record.activation != "hook" {
             continue;
         }
-        match parse_skilllet_hook(record) {
+        match parse_memory_card_hook(record) {
             Ok(parsed) => command_hooks.extend(parsed),
-            Err(warning) => compiled
-                .warnings
-                .push(format!("hook skilllet `{}` skipped: {warning}", record.id)),
+            Err(warning) => compiled.warnings.push(format!(
+                "hook memory_card `{}` skipped: {warning}",
+                record.id
+            )),
         }
     }
 
@@ -87,24 +88,24 @@ pub(super) fn compile_skilllet_hooks(
 pub(super) fn expected_hook_artifact(
     root: &Path,
     agent_name: &str,
-    skilllet_refs: &[config::SkillletRef],
-    skilllets: &BTreeMap<String, SkillletRecord>,
+    memory_card_refs: &[config::MemoryCardRef],
+    memory_cards: &BTreeMap<String, MemoryCardRecord>,
 ) -> Result<Option<(std::path::PathBuf, String)>> {
     if agent_name != "claude-code" {
         return Ok(None);
     }
     let mut command_hooks = Vec::new();
-    for item in skilllet_refs {
+    for item in memory_card_refs {
         if !item.targets.iter().any(|target| target == agent_name) {
             continue;
         }
-        let Some(record) = skilllets.get(&item.id) else {
+        let Some(record) = memory_cards.get(&item.id) else {
             continue;
         };
         if record.activation != "hook" {
             continue;
         }
-        if let Ok(parsed) = parse_skilllet_hook(record) {
+        if let Ok(parsed) = parse_memory_card_hook(record) {
             command_hooks.extend(parsed);
         }
     }
@@ -115,8 +116,8 @@ pub(super) fn expected_hook_artifact(
     Ok(Some((path, content)))
 }
 
-fn parse_skilllet_hook(
-    record: &SkillletRecord,
+fn parse_memory_card_hook(
+    record: &MemoryCardRecord,
 ) -> std::result::Result<Vec<ClaudeCommandHook>, String> {
     let command = record.body.trim();
     if command.is_empty() {

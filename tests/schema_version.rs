@@ -1,9 +1,9 @@
 use agent_kernel::candidate::ExtractionMetadata;
 use agent_kernel::draft::{self, NewDraft};
-use agent_kernel::skilllet;
+use agent_kernel::memory_card;
 
 #[test]
-fn draft_and_skilllet_records_default_to_current_schema_version() {
+fn draft_and_memory_card_records_default_to_current_schema_version() {
     let temp = tempfile::tempdir().expect("tempdir");
 
     draft::add_draft(
@@ -23,7 +23,7 @@ fn draft_and_skilllet_records_default_to_current_schema_version() {
         },
     )
     .expect("draft");
-    skilllet::add_skilllet(
+    memory_card::add_memory_card(
         temp.path(),
         "project:use-axios",
         "Use Axios",
@@ -32,11 +32,11 @@ fn draft_and_skilllet_records_default_to_current_schema_version() {
         "project",
         vec!["codex".to_string()],
     )
-    .expect("skilllet");
+    .expect("memory card");
 
     let drafts = draft::load_drafts(temp.path()).expect("drafts");
-    let skilllets = skilllet::load_skilllets(temp.path()).expect("skilllets");
+    let memory_cards = memory_card::load_memory_cards(temp.path()).expect("memory cards");
 
     assert_eq!(drafts[0].schema_version, 1);
-    assert_eq!(skilllets[0].schema_version, 1);
+    assert_eq!(memory_cards[0].schema_version, 1);
 }

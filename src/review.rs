@@ -11,7 +11,7 @@ use crate::rule_test;
 mod tests {
     use super::*;
     use crate::candidate::ExtractionMetadata;
-    use crate::skilllet;
+    use crate::memory_card;
 
     #[test]
     fn review_report_serializes_pending_drafts() {
@@ -77,7 +77,7 @@ mod tests {
     #[test]
     fn review_summary_counts_artifact_drifts() {
         let temp = tempfile::tempdir().expect("tempdir");
-        skilllet::add_skilllet(
+        memory_card::add_memory_card(
             temp.path(),
             "project:codex-rule",
             "Codex Rule",
@@ -86,7 +86,7 @@ mod tests {
             "project",
             vec!["codex".to_string()],
         )
-        .expect("add skilllet");
+        .expect("add memory_card");
         build::sync_project(temp.path()).expect("sync");
         std::fs::write(temp.path().join("AGENTS.md"), "manual edit").expect("manual edit");
 
@@ -129,7 +129,7 @@ pub struct ReviewDecisionResult {
 impl ReviewReport {
     pub fn render(&self) -> String {
         let mut out = String::new();
-        out.push_str("Agent-Kernel Review\n\n");
+        out.push_str("Agent Memory Kernel Review\n\n");
         out.push_str("## Draft Inbox\n\n");
         if self.drafts.is_empty() {
             out.push_str("No drafts pending.\n");
