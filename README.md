@@ -1,50 +1,78 @@
 # Agent Memory Kernel
 
-Agent Memory Kernel is a local-first Tauri Inbox workspace for turning Claude Code and Codex usage history into reviewable, high-value Memory Cards.
+[简体中文](README.md) | [English](README.en.md)
 
-The product flow is:
+> 面向 Claude Code / Codex 用户的本地优先 Memory Card 工作台：从真实对话、项目规则和 Skills 中提炼高价值内容，经过人工审查后同步回各工具原生 memory 格式。
 
-1. Register or scan local projects.
-2. Open the Tauri Inbox workspace.
-3. Run an Evolve job that imports Observations, removes noise, deduplicates, scores, and writes Candidates.
-4. Review Candidates, promote selected items to Drafts, then approve Drafts into Memory Cards.
-5. Assign Memory Cards to Claude Code / Codex and compile artifacts such as `AGENTS.md`, `CLAUDE.md`, and skill files.
+Agent Memory Kernel 不是聊天记录总结器，也不是替你偷偷写规则的自动记忆系统。它更像一个“Agent memory 编译器”：把散落在本地对话、`AGENTS.md`、`CLAUDE.md`、Skills 和项目约定里的长期知识，整理成可审查、可编辑、可分配、可重新编译的 Memory Cards。
 
-The app is intentionally not a chat-log summarizer. It filters out one-off task chatter and keeps durable agent knowledge: preferences, constraints, reusable workflows, repeated corrections, architecture decisions, and Skill supplement material.
+默认文档语言为中文。English documentation is available in [README.en.md](README.en.md).
 
-Build output is split by activation:
+## 适合谁
 
-- Always-on preferences and constraints compile into `AGENTS.md` and `CLAUDE.md`.
-- Reusable procedures, templates, and workflows compile into Agent Skills under `.agents/skills/<name>/SKILL.md` and `.claude/skills/<name>/SKILL.md`, with full rule text in `references/`.
-- Hook-oriented Memory Cards with `activation: hook` compile into Claude Code project hooks in `.claude/settings.local.json`. Use tags such as `hook:event:stop`, `hook:event:precompact`, `hook:event:session-end`, and optional `hook:matcher:<text>`.
-- Generated Agent Skill folders use the open `SKILL.md` shape: frontmatter with `name` and `description`, plus only `references/`, `scripts/`, and `assets/` support folders.
+- 你长期使用 Claude Code / Codex 做真实项目。
+- 你的 `AGENTS.md`、`CLAUDE.md` 或 Skills 开始变长、重复、冲突。
+- 你经常在对话里告诉 Agent “以后都这样做”，但这些经验很难沉淀。
+- 你希望 memory 是本地、可审查、可 diff、可迁移的文件，而不是黑盒状态。
+- 你想把常驻规则和按需 Skill 分开，让 Agent 少读无关上下文。
 
-## Architecture
+## 它解决什么问题
 
-The v1 domain model is:
+重度使用 Agent 后，高价值信息通常会散落在很多地方：
+
+- 用户偏好：例如“前端请求统一使用 Axios”。
+- 项目约束：例如“发布前必须跑完整质量门禁”。
+- 协作流程：例如“收到 code review 后先验证反馈，再修改代码”。
+- 反复纠正：例如“不要在没有确认的情况下合并、发布或覆盖生成产物”。
+- Skill 素材：例如稳定的调试流程、模板、脚本和检查清单。
+
+Agent Memory Kernel 会先把这些内容提炼成 Draft，再由你确认是否批准为长期 Memory Card。批准后的 Memory Cards 可以被分配给 Claude Code / Codex，并编译成它们能直接识别的文件结构。
+
+## 核心流程
 
 ```text
 Observation -> Candidate -> Draft -> Memory Card -> Assignment -> Artifact
 ```
 
-- `Observation` stores evidence only.
-- `Candidate` stores scored, deduplicated, hideable, rejectable system suggestions.
-- `Draft` stores user-promoted editable review items.
-- `Memory Card` stores approved source facts.
-- `Assignment` maps Memory Cards to target agents.
-- `Artifact` is generated output for Claude Code, Codex, and compatible adapters.
+- `Observation`：从本地对话、规则文件或项目资料中导入的证据。
+- `Candidate`：系统发现的候选记忆，带置信度、原因和分类信息。
+- `Draft`：进入人工审查区的可编辑候选。
+- `Memory Card`：人工批准后的长期记忆源。
+- `Assignment`：把 Memory Card 分配给目标 Agent。
+- `Artifact`：编译生成给 Claude Code / Codex 使用的原生文件。
 
-Candidate storage is file-native YAML under:
+生成产物按激活方式拆分：
 
-```text
-.agent-kernel/candidates/project/*.yml
-```
+- 常驻偏好和约束编译到 `AGENTS.md` / `CLAUDE.md`。
+- 流程、模板和可复用工作流编译到 `.agents/skills/<name>/SKILL.md` / `.claude/skills/<name>/SKILL.md`。
+- Hook 型 Memory Cards 可以编译到 Claude Code 项目 hooks。
 
-The Tauri command layer is kept thin. Business use cases live in application services, and frontend pages load page-level read models instead of full project snapshots. `get_project_snapshot` remains only as a legacy/debug fallback.
+## 主要功能
 
-## Development
+Agent Memory Kernel 的主要入口是 Tauri 桌面工作台。你可以在 UI 里完成核心闭环：
 
-Use Bun for the frontend:
+- 项目列表：扫描、注册和打开多个本地 Claude Code / Codex 项目。
+- Review Dashboard：查看当前项目的 Draft、Memory Cards、artifact drift 和同步状态。
+- Draft Inbox：审查自动提炼出的候选内容，查看置信度、原因、分类和目标 Agent。
+- Memory Library：管理已经批准的 Memory Cards，持续维护长期 agent knowledge。
+- Assignment Matrix：把 Memory Cards 分配给 Codex、Claude Code 或两者。
+- Catalog：安装可复用的 Memory Card packages。
+- Observation Evolve：从本地 Claude Code / Codex 历史中整理高价值候选，先进入 Draft Inbox。
+- Build / Sync：预览并生成 `AGENTS.md`、`CLAUDE.md` 和 Skill 文件夹。
+
+CLI 目前主要作为源码开发和内部验证入口，暂不作为公开 release 产物发布。
+
+## 安装与运行
+
+当前项目处于 pre-1.0 阶段。普通 Windows 用户优先下载 GitHub Releases 中的桌面安装包；开发者可以从源码运行。
+
+准备环境：
+
+- Rust 1.85+
+- Bun 1.3+
+- Claude Code CLI，可选但推荐，因为默认 provider 是 Claude Code
+
+安装依赖并构建前端：
 
 ```bash
 bun install
@@ -52,73 +80,161 @@ bun install --cwd app
 bun run --cwd app build
 ```
 
-Run the Tauri workspace during development:
+运行桌面工作台：
 
 ```bash
 bun run app:dev
 ```
 
-If the Vite frontend is opened directly in a normal browser, it enters preview mode with static demo data. Real scanning, mutation, evolution, and artifact sync require the Tauri runtime.
+启动后，桌面工作台会先展示本地项目列表。选择项目后，你可以在同一个界面里处理 Draft、批准 Memory Cards、调整 Agent 分配、整理本地历史并执行 Build / Sync。
 
-## CLI
-
-The core CLI remains available for automation and scripting:
+确认 CLI 可用：
 
 ```bash
-cargo run -- project scan --root . --max-depth 4
-cargo run -- import --project .
-cargo run -- observe evolve --project . --target codex --target claude-code
-cargo run -- draft list --project .
-cargo run -- memory_card list --project .
-cargo run -- catalog list --project .
-cargo run -- build --preview --project .
-cargo run -- sync --project .
-cargo run -- mcp --project .
+cargo run -- --version
 ```
 
-The `mcp` command serves a minimal stdio MCP endpoint with `list_drafts`, `approve_draft`, and `build_artifacts` tools, so Claude Code or other MCP clients can review and advance the local Draft Inbox without shelling out ad hoc commands.
-
-The old native app and legacy web UI have been removed. New visual work belongs in `app/` and `src-tauri/`.
-
-## Installation
-
-Agent Memory Kernel is currently pre-1.0. The recommended ways to try it are:
-
-- Build the CLI locally with `cargo build --release`.
-- Run the Bun wrapper in development with `bun run start -- <args>`.
-- Install a release artifact from GitHub Releases once tagged builds are published.
-
-Windows desktop releases are built from the Tauri workspace. A local Windows build can be produced with:
+构建 Windows 桌面安装包：
 
 ```bash
 bun run tauri:build
 ```
 
-The generated installer artifacts are written under:
+安装产物会输出到：
 
 ```text
 src-tauri/target/release/bundle/
 ```
 
-Release builds currently package the CLI binary and desktop installer for Windows.
+## 快速开始
 
-## Privacy and Local Data
+推荐先使用桌面 UI 体验完整流程。
 
-Agent Memory Kernel is local-first, but it can inspect local agent history and project configuration when you ask it to import or evolve observations. Generated Drafts and Memory Cards are review-first: they are not meant to be silently enabled without user approval.
+### 1. 启动桌面工作台
 
-Do not commit runtime data from `.agent-kernel/`, generated agent skill folders, local provider configuration, build outputs, or private conversation logs. The repository `.gitignore` excludes these local artifacts for public development.
+```bash
+bun run app:dev
+```
 
-## Verification
+首次打开后：
 
-Recommended local verification:
+1. 点击扫描或添加本地项目。
+2. 选择一个 Claude Code / Codex 项目进入工作台。
+3. 查看 Review Dashboard，了解 Draft、Memory Card、artifact drift 和同步状态。
+
+### 2. 整理本地对话和项目规则
+
+在 UI 中触发 Observation / Evolve 流程。Agent Memory Kernel 会读取本地 Claude Code / Codex 历史和项目上下文，提炼可能长期有用的候选内容。
+
+这些候选不会自动写入 `AGENTS.md` 或 `CLAUDE.md`，而是先进入 Draft Inbox。
+
+### 3. 审查 Draft Inbox
+
+在 Draft Inbox 中逐条检查候选：
+
+- 是否来自真实上下文。
+- 是否值得长期保存。
+- 应该分配给 Codex、Claude Code，还是两者。
+- 应该作为常驻规则，还是按需 Skill。
+
+确认后批准为 Memory Card；不合适的候选可以拒绝或继续编辑。
+
+### 4. 管理 Memory Cards 和 Agent 分配
+
+进入 Memory Library / Assignment Matrix：
+
+- 查看已批准 Memory Cards。
+- 调整目标 Agent。
+- 控制哪些内容进入 `AGENTS.md`、`CLAUDE.md` 或 Skill 文件夹。
+
+### 5. 预览并同步生成产物
+
+在 UI 中先执行 Build Preview，确认将要写入的原生文件，再执行 Sync。
+
+默认生成目标：
+
+- `codex` -> `AGENTS.md` 和 `.agents/skills`
+- `claude-code` -> `CLAUDE.md` 和 `.claude/skills`
+
+## 开发者 CLI
+
+```bash
+cargo run -- import --scan-home --project .
+cargo run -- project add --path .
+```
+
+默认 provider 是 `claude-cli`。如果你只想快速测试本地确定性提取，不想调用 Claude Code，可以显式传入 `--provider local`：
+
+```bash
+cargo run -- extract --text "以后前端请求统一使用 Axios，不要再用 Fetch。" --target codex --provider local --dry-run --project .
+```
+
+少量常用自动化命令：
+
+```bash
+cargo run -- observe evolve --project . --target codex --target claude-code --dry-run
+cargo run -- build --preview --project .
+cargo run -- sync --project .
+cargo run -- mcp --project .
+```
+
+`mcp` 命令提供最小 stdio MCP endpoint，包含 `list_drafts`、`approve_draft` 和 `build_artifacts` 等工具，方便 Claude Code 或其他 MCP 客户端接入本地 Draft Inbox。
+
+## 文档
+
+- [功能介绍](docs/feature-overview.md)
+- [可体验教程](docs/quickstart.md)
+- [平台支持](docs/platform-support.md)
+- [迭代 Backlog](docs/iteration-backlog.md)
+- [相关项目研究](docs/research/related-projects.md)
+
+## 隐私与信任边界
+
+Agent Memory Kernel 是本地优先工具。它会在你触发导入、扫描或 evolve 时读取本地项目和本地 Agent 历史，并把提炼结果放进 Draft Inbox。
+
+默认原则是：
+
+- 自动化负责发现候选。
+- 人类负责批准长期记忆。
+- Memory Cards 是可读、可编辑、可审查的文件化源数据。
+- 生成给 Agent 的文件是 build artifacts，可以重新生成和检查差异。
+
+## 开发
+
+运行测试和检查：
 
 ```bash
 cargo fmt --check
 cargo clippy --quiet -- -D warnings
-cargo clippy --manifest-path src-tauri/Cargo.toml --quiet -- -D warnings
-cargo build --release
-cargo build --manifest-path src-tauri/Cargo.toml --release
 bun run --cwd app build
 ```
 
-Test files are kept for local development and are not published in the public repository.
+Tauri 后端检查：
+
+```bash
+cargo clippy --manifest-path src-tauri/Cargo.toml --quiet -- -D warnings
+cargo build --manifest-path src-tauri/Cargo.toml --release
+```
+
+## Contributing
+
+欢迎提交 issue、讨论使用场景、补充文档、修复 bug 或改进适配器。提交 PR 时请尽量做到：
+
+- 说明这个改动解决了什么用户问题。
+- 保持改动范围清晰，避免把无关重构混在一起。
+- 为核心行为补充验证步骤；测试文件保留在本地开发环境，不上传到公开仓库。
+- UI 改动请附上截图或录屏说明。
+- 涉及隐私、provider、文件写入或 artifact 同步的改动，请说明信任边界和失败处理。
+
+更多细节见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 状态
+
+Agent Memory Kernel 仍在早期快速迭代中。当前重点是把 Claude Code / Codex 的本地对话和规则文件沉淀为高质量、可审查、可长期复用的 Memory Cards。
+
+欢迎试用、提 issue，也欢迎分享你真实的 Agent memory 维护痛点。
+
+## License
+
+MIT
+

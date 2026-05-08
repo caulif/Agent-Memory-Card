@@ -37,8 +37,7 @@ the desktop shell.
 ## Pull Requests
 
 - Keep changes focused and explain the user-visible behavior.
-- Keep local tests outside the public repository.
-- Do not commit local runtime data such as `.agent-kernel/`, `.claude/skills/`,
-  `.codex/`, `.superpowers/`, build outputs, or generated caches.
+- Include verification notes for behavior changes. Keep local test files out of the public repository.
+- Include screenshots or short recordings for UI changes when helpful.
 - Redact private conversation content, credentials, local paths, and API keys
   from issues and screenshots.

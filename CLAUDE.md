@@ -10,4 +10,7 @@ This file is a build artifact for the current project.
 
 ## Enabled Memory Cards
 
-- No Memory Cards are declared for this agent yet.
+### 当候选规则、MemoryCard 或关键变更准备固化时，先交给人类 review 再 merge；Agent 只提出建议，不越过人工审阅边界。
+
+当候选规则、MemoryCard 或关键变更准备固化时，先交给人类 review 再 merge；Agent 只提出建议，不越过人工审阅边界。
+

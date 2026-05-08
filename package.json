@@ -14,7 +14,8 @@
     "bun/agent-kernel.js",
     "bun/agent-kernel-lib.js",
     "bun/cargo.js",
-    "README.md"
+    "README.md",
+    "README.en.md"
   ],
   "scripts": {
     "build": "bun bun/cargo.js build",

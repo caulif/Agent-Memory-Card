@@ -4,19 +4,12 @@ Agent Memory Kernel is currently published for Windows first.
 
 - Windows
 
-## Official Packaged Targets
+## Official Packaged Target
 
-The Bun package looks for these prebuilt binaries first:
+The current public release target is the Windows desktop installer.
 
-| OS | Architecture | Package path |
-| --- | --- | --- |
-| Windows | x64 | `bin/win32-x64/agent-kernel.exe` |
-
-If no packaged binary exists for the current platform, the wrapper falls back to local Cargo outputs:
-
-1. `target/release/agent-kernel[.exe]`
-2. `target/debug/agent-kernel[.exe]`
-3. development fallback through `cargo build`
+CLI binaries and Bun packages are intentionally not published yet. They remain
+developer surfaces until the command-line workflow is more complete.
 
 ## Desktop App
 
@@ -40,7 +33,7 @@ On Windows, Tauri release artifacts are written under:
 src-tauri/target/release/bundle/
 ```
 
-Depending on the installed Tauri bundler toolchain, this directory can contain installer formats such as MSI or NSIS EXE bundles.
+The public release currently uploads the NSIS `*setup.exe` installer only.
 
 ## CI Policy
 
@@ -49,9 +42,9 @@ Every push and pull request runs:
 - Rust format, clippy, and release builds on Windows
 - Frontend production build on Windows
 
-Release builds package the Windows CLI binary and Windows Tauri desktop bundle.
+Release builds package one Windows desktop installer.
 
-Tagged releases also build the Windows Tauri desktop bundle so users can install the app without running the development toolchain.
+Tagged releases build the Windows Tauri desktop installer so users can install the app without running the development toolchain.
 
 ## Current Development Host
 

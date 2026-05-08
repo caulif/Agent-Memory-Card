@@ -33,13 +33,16 @@ struct RefineItem {
 pub(super) fn refine_candidates(
     project_root: &Path,
     candidates: &[Candidate],
+    allow_provider_refine: bool,
 ) -> (Vec<Option<Candidate>>, Vec<String>) {
     if candidates.is_empty() {
         return (Vec::new(), Vec::new());
     }
 
     let mut messages = Vec::new();
-    if let Ok(Some(refined)) = refine_with_provider(project_root, candidates) {
+    if allow_provider_refine
+        && let Ok(Some(refined)) = refine_with_provider(project_root, candidates)
+    {
         return (refined, messages);
     }
 

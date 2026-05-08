@@ -146,7 +146,7 @@ pub fn extract_text_to_drafts(
     });
 
     if provider_name == "local" {
-        return extract_local_text_to_drafts(project_root, input, targets, source, dry_run);
+        return extract_local_text_to_drafts(project_root, input, targets, source, dry_run, false);
     }
 
     extract_llm_text_to_drafts(
@@ -166,6 +166,7 @@ fn extract_local_text_to_drafts(
     targets: Vec<String>,
     source: &str,
     dry_run: bool,
+    allow_provider_refine: bool,
 ) -> Result<ExtractReport> {
     let provider_cfg = provider::load_or_default_provider_config(project_root)?;
     let redacted_input = if provider_cfg.privacy.redact_secrets {
@@ -285,7 +286,8 @@ fn extract_local_text_to_drafts(
             .iter()
             .map(|(candidate, _, _, _)| candidate.clone())
             .collect::<Vec<_>>();
-        let (refined, refine_messages) = refine::refine_candidates(project_root, &originals);
+        let (refined, refine_messages) =
+            refine::refine_candidates(project_root, &originals, allow_provider_refine);
         skipped.extend(refine_messages);
         scored_candidates
             .into_iter()
@@ -445,6 +447,7 @@ pub fn extract_high_value_text_to_drafts(
             source,
             dry_run,
             max_candidates,
+            false,
         );
     }
 
@@ -466,6 +469,7 @@ fn extract_local_high_value_text_to_drafts(
     source: &str,
     dry_run: bool,
     max_candidates: usize,
+    allow_provider_refine: bool,
 ) -> Result<ExtractReport> {
     let provider_cfg = provider::load_or_default_provider_config(project_root)?;
     let redacted_input = if provider_cfg.privacy.redact_secrets {
@@ -553,7 +557,8 @@ fn extract_local_high_value_text_to_drafts(
             .iter()
             .map(|(candidate, _, _)| candidate.clone())
             .collect::<Vec<_>>();
-        let (refined, refine_messages) = refine::refine_candidates(project_root, &originals);
+        let (refined, refine_messages) =
+            refine::refine_candidates(project_root, &originals, allow_provider_refine);
         skipped.extend(refine_messages);
         candidates
             .into_iter()
