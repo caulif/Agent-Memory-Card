@@ -8,7 +8,7 @@ use crate::config::{self, ArtifactState, ProjectLock};
 use crate::fsutil;
 use crate::memory_card::MemoryCardRecord;
 
-use super::ensure_generated_artifact_is_safe_to_write;
+use super::{ExpectedArtifact, ensure_generated_artifact_is_safe_to_write};
 
 #[derive(Debug, Default)]
 pub(super) struct CompiledMemoryCards {
@@ -105,6 +105,64 @@ pub(super) fn compile_memory_cards_as_agent_skills(
         &mut compiled,
     )?;
     Ok(compiled)
+}
+
+pub(super) fn expected_agent_skill_artifacts(
+    root: &Path,
+    agent_name: &str,
+    skills_dir: &str,
+    memory_card_refs: &[config::MemoryCardRef],
+    memory_cards: &BTreeMap<String, MemoryCardRecord>,
+) -> Vec<ExpectedArtifact> {
+    let mut artifacts = Vec::new();
+    for item in memory_card_refs {
+        if !item.targets.iter().any(|target| target == agent_name) {
+            continue;
+        }
+        let Some(record) = memory_cards.get(&item.id) else {
+            continue;
+        };
+        if !memory_card_compiles_to_agent_skill(record) {
+            continue;
+        }
+
+        let skill_name = agent_skill_name(record);
+        let skill_dir = root.join(skills_dir).join(&skill_name);
+        artifacts.push(ExpectedArtifact {
+            agent: agent_name.to_string(),
+            path: skill_dir.join("SKILL.md"),
+            expected_content: render_agent_skill(record, &skill_name),
+            kind: format!("{agent_name}:agent-skill"),
+        });
+        artifacts.push(ExpectedArtifact {
+            agent: agent_name.to_string(),
+            path: skill_dir
+                .join("references")
+                .join(format!("{}.md", safe_file_stem(&record.id))),
+            expected_content: render_agent_skill_reference(record),
+            kind: format!("{agent_name}:agent-skill-reference"),
+        });
+    }
+
+    let skill_dir = root.join(skills_dir).join("agent-kernel-memory-card");
+    artifacts.push(ExpectedArtifact {
+        agent: agent_name.to_string(),
+        path: skill_dir.join("SKILL.md"),
+        expected_content: render_kernel_memory_card_skill(),
+        kind: format!("{agent_name}:agent-kernel-memory-card-skill"),
+    });
+    artifacts.push(ExpectedArtifact {
+        agent: agent_name.to_string(),
+        path: skill_dir.join("references").join("memory-cards.md"),
+        expected_content: render_kernel_memory_card_reference(
+            agent_name,
+            memory_card_refs,
+            memory_cards,
+        ),
+        kind: format!("{agent_name}:agent-kernel-memory-card-reference"),
+    });
+
+    artifacts
 }
 
 fn compile_kernel_memory_card_agent_skill(
@@ -274,11 +332,19 @@ fn agent_skill_name(record: &MemoryCardRecord) -> String {
 
 fn safe_file_stem(value: &str) -> String {
     let stem = kebab_case(value);
-    if stem.is_empty() {
-        "memory_card".to_string()
+    if stem.is_empty() || (!value.is_ascii() && stem.len() <= 16) {
+        format!("memory-card-{}", short_stable_hash(value))
     } else {
         stem
     }
+}
+
+fn short_stable_hash(value: &str) -> String {
+    fsutil::sha256_text(value)
+        .trim_start_matches("sha256:")
+        .chars()
+        .take(12)
+        .collect()
 }
 
 fn kebab_case(value: &str) -> String {

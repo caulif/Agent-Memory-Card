@@ -15,8 +15,13 @@ use crate::memory_card::{self, MemoryCardRecord};
 
 mod agent_skills;
 mod hook_artifacts;
+#[cfg(test)]
+mod tests;
 
-use agent_skills::{compile_memory_cards_as_agent_skills, memory_card_compiles_to_agent_skill};
+use agent_skills::{
+    compile_memory_cards_as_agent_skills, expected_agent_skill_artifacts,
+    memory_card_compiles_to_agent_skill,
+};
 use hook_artifacts::{compile_memory_card_hooks, expected_hook_artifact};
 
 const INSTRUCTION_ARTIFACT_BUDGET_BYTES: usize = 32 * 1024;
@@ -517,6 +522,12 @@ pub fn import_artifact_drifts(project_root: &Path) -> Result<ArtifactImportRepor
         let actual = fs::read_to_string(&artifact.path)
             .with_context(|| format!("read artifact {}", artifact.path.display()))?;
         if fsutil::sha256_text(&actual) == fsutil::sha256_text(&artifact.expected_content) {
+            upsert_artifact_lock(
+                &mut lock,
+                &artifact,
+                fsutil::sha256_text(&artifact.expected_content),
+            );
+            lock_changed = true;
             skipped += 1;
             continue;
         }
@@ -553,21 +564,8 @@ pub fn import_artifact_drifts(project_root: &Path) -> Result<ArtifactImportRepor
                 extraction: ExtractionMetadata::default(),
             },
         )?;
-        let path_label = fsutil::path_to_slash(&artifact.path);
         let current_hash = fsutil::sha256_text(&actual);
-        if let Some(previous) = lock
-            .artifacts
-            .iter_mut()
-            .find(|previous| previous.path == path_label)
-        {
-            previous.hash = current_hash;
-        } else {
-            lock.artifacts.push(ArtifactState {
-                path: path_label,
-                hash: current_hash,
-                kind: format!("{}:imported-artifact", artifact.agent),
-            });
-        }
+        upsert_artifact_lock(&mut lock, &artifact, current_hash);
         lock_changed = true;
         drafts.push(id);
         created += 1;
@@ -679,6 +677,7 @@ struct ExpectedArtifact {
     agent: String,
     path: std::path::PathBuf,
     expected_content: String,
+    kind: String,
 }
 
 fn expected_artifacts(
@@ -701,6 +700,7 @@ fn expected_artifacts(
                     &config.memory_cards.include,
                     memory_cards,
                 ),
+                kind: format!("{agent_name}:instructions"),
             });
         }
         if let Some(rules_dir) = &agent.exports.rules_dir {
@@ -714,7 +714,17 @@ fn expected_artifacts(
                     &config.memory_cards.include,
                     memory_cards,
                 ),
+                kind: format!("{agent_name}:rules"),
             });
+        }
+        if let Some(skills_dir) = &agent.exports.skills_dir {
+            artifacts.extend(expected_agent_skill_artifacts(
+                root,
+                agent_name,
+                skills_dir,
+                &config.memory_cards.include,
+                memory_cards,
+            ));
         }
         if let Some((path, content)) =
             expected_hook_artifact(root, agent_name, &config.memory_cards.include, memory_cards)?
@@ -723,10 +733,29 @@ fn expected_artifacts(
                 agent: agent_name.clone(),
                 path,
                 expected_content: content,
+                kind: "claude-code:hooks".to_string(),
             });
         }
     }
     Ok(artifacts)
+}
+
+fn upsert_artifact_lock(lock: &mut ProjectLock, artifact: &ExpectedArtifact, current_hash: String) {
+    let path_label = fsutil::path_to_slash(&artifact.path);
+    if let Some(previous) = lock
+        .artifacts
+        .iter_mut()
+        .find(|previous| previous.path == path_label)
+    {
+        previous.hash = current_hash;
+        previous.kind = artifact.kind.clone();
+    } else {
+        lock.artifacts.push(ArtifactState {
+            path: path_label,
+            hash: current_hash,
+            kind: artifact.kind.clone(),
+        });
+    }
 }
 
 pub(super) fn ensure_generated_artifact_is_safe_to_write(
