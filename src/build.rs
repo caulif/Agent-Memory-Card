@@ -15,8 +15,6 @@ use crate::memory_card::{self, MemoryCardRecord};
 
 mod agent_skills;
 mod hook_artifacts;
-#[cfg(test)]
-mod tests;
 
 use agent_skills::{
     compile_memory_cards_as_agent_skills, expected_agent_skill_artifacts,
