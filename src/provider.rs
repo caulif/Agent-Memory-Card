@@ -916,16 +916,31 @@ mod tests {
     #[test]
     fn cli_provider_can_round_trip_prompt_via_stdin() {
         let script_dir = tempfile::tempdir().expect("tempdir");
-        let script_path = script_dir.path().join("echo-provider.ps1");
-        std::fs::write(&script_path, "@($input) -join \"`n\" | Write-Output").expect("script");
 
+        #[cfg(windows)]
+        let (binary, args) = {
+            let script_path = script_dir.path().join("echo-provider.ps1");
+            std::fs::write(&script_path, "@($input) -join \"`n\" | Write-Output")
+                .expect("script");
+            (
+                "powershell",
+                vec![
+                    "-NoProfile".to_string(),
+                    "-File".to_string(),
+                    script_path.display().to_string(),
+                ],
+            )
+        };
+
+        #[cfg(not(windows))]
+        let (binary, args) = {
+            let script_path = script_dir.path().join("echo-provider.sh");
+            std::fs::write(&script_path, "cat\n").expect("script");
+            ("sh", vec![script_path.display().to_string()])
+        };
         let output = call_cli_subprocess(
-            "powershell",
-            &[
-                "-NoProfile".to_string(),
-                "-File".to_string(),
-                script_path.display().to_string(),
-            ],
+            binary,
+            &args,
             &ProviderRequest {
                 system_prompt: "system prompt".to_string(),
                 user_prompt: "user prompt".to_string(),

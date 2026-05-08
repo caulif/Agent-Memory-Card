@@ -35,6 +35,7 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
+      - run: bun install --cwd app --frozen-lockfile
       - run: bun run --cwd app test
       - run: bun run --cwd app build
   bun-wrapper:

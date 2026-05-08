@@ -428,7 +428,9 @@ fn promote_memory_card_to_global_copies_record_with_source_project() {
             .expect("promote");
 
     assert_eq!(promoted.scope, "global");
-    let source_project = fsutil::path_to_slash(project.path());
+    let source_project = fsutil::path_to_slash(
+        &fsutil::normalize_project_root(project.path()).expect("canonical project path"),
+    );
     assert_eq!(
         promoted.source_project.as_deref(),
         Some(source_project.as_str())

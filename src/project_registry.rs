@@ -469,12 +469,19 @@ mod tests {
 
         let discovered = discover_agent_projects(home.path()).expect("discover");
 
+        let claude_project_path = fsutil::path_to_slash(
+            &fsutil::normalize_project_root(&claude_project).expect("canonical claude path"),
+        );
+        let codex_project_path = fsutil::path_to_slash(
+            &fsutil::normalize_project_root(&codex_project).expect("canonical codex path"),
+        );
+
         assert!(discovered.iter().any(|project| {
-            project.path == fsutil::path_to_slash(&claude_project)
+            project.path == claude_project_path
                 && project.agents == vec!["claude-code"]
         }));
         assert!(discovered.iter().any(|project| {
-            project.path == fsutil::path_to_slash(&codex_project) && project.agents == vec!["codex"]
+            project.path == codex_project_path && project.agents == vec!["codex"]
         }));
     }
 
