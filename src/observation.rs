@@ -979,6 +979,3 @@ fn count_yml_files(dir: &Path) -> Result<usize> {
     }
     Ok(count)
 }
-
-#[cfg(test)]
-mod tests;

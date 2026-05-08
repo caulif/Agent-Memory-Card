@@ -793,8 +793,6 @@ fn default_language() -> String {
 }
 
 #[cfg(test)]
-mod gc_tests;
-#[cfg(test)]
 mod tests {
     use super::*;
 

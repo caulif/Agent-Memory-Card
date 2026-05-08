@@ -48,7 +48,7 @@ Use Bun for the frontend:
 
 ```bash
 bun install
-bun run --cwd app test
+bun install --cwd app
 bun run --cwd app build
 ```
 
@@ -100,7 +100,7 @@ The generated installer artifacts are written under:
 src-tauri/target/release/bundle/
 ```
 
-Release builds also package the CLI binary for Windows, Linux, and macOS.
+Release builds currently package the CLI binary and desktop installer for Windows.
 
 ## Privacy and Local Data
 
@@ -113,11 +113,12 @@ Do not commit runtime data from `.agent-kernel/`, generated agent skill folders,
 Recommended local verification:
 
 ```bash
-cargo test --quiet
+cargo fmt --check
 cargo clippy --quiet -- -D warnings
-cargo test --manifest-path src-tauri/Cargo.toml --quiet
 cargo clippy --manifest-path src-tauri/Cargo.toml --quiet -- -D warnings
-bun run --cwd app test
+cargo build --release
+cargo build --manifest-path src-tauri/Cargo.toml --release
 bun run --cwd app build
-bun test bun/agent-kernel-lib.test.js
 ```
+
+Test files are kept for local development and are not published in the public repository.

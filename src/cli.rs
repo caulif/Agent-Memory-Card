@@ -104,7 +104,7 @@ pub(crate) enum Commands {
         command: DraftCommands,
     },
 
-    /// Extract local heuristic Draft Inbox candidates from text or a file.
+    /// Extract Draft Inbox candidates from text or a file.
     Extract {
         /// Inline text to extract from.
         #[arg(long, conflicts_with = "file")]
@@ -118,7 +118,7 @@ pub(crate) enum Commands {
         #[arg(long = "target")]
         targets: Vec<String>,
 
-        /// Extraction provider. v0.8 supports local; other providers are config scaffolding.
+        /// Extraction provider. Defaults to provider config; pass local for deterministic diagnostics.
         #[arg(long)]
         provider: Option<String>,
 
@@ -562,7 +562,7 @@ pub(crate) enum PreferenceCommands {
 
 #[derive(Subcommand)]
 pub(crate) enum ProviderCommands {
-    /// Write default local-first provider config.
+    /// Write default Claude Code provider config.
     Init {
         #[arg(long, default_value = ".")]
         project: PathBuf,

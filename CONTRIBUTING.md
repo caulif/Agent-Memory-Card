@@ -8,8 +8,9 @@ Install Rust and Bun, then run:
 
 ```bash
 bun install
-bun run --cwd app test
-cargo test
+bun install --cwd app
+cargo build
+bun run --cwd app build
 ```
 
 Run the desktop workspace during development:
@@ -25,11 +26,9 @@ Before opening a pull request, run the checks that match your change:
 ```bash
 cargo fmt --check
 cargo clippy -- -D warnings
-cargo test
-cargo test --manifest-path src-tauri/Cargo.toml
-bun run --cwd app test
+cargo build --release
+cargo build --manifest-path src-tauri/Cargo.toml --release
 bun run --cwd app build
-bun test bun/agent-kernel-lib.test.js
 ```
 
 For UI changes, also run the Tauri app locally and verify the affected flow in
@@ -38,8 +37,8 @@ the desktop shell.
 ## Pull Requests
 
 - Keep changes focused and explain the user-visible behavior.
-- Include tests for behavior changes when practical.
+- Keep local tests outside the public repository.
 - Do not commit local runtime data such as `.agent-kernel/`, `.claude/skills/`,
   `.codex/`, `.superpowers/`, build outputs, or generated caches.
 - Redact private conversation content, credentials, local paths, and API keys
-  from issues, tests, and screenshots.
+  from issues and screenshots.

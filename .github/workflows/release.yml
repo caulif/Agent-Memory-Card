@@ -7,75 +7,48 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-binaries:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            target: win32-x64
-            artifact: agent-kernel-win32-x64
-            binary: agent-kernel.exe
-          - os: ubuntu-latest
-            target: linux-x64
-            artifact: agent-kernel-linux-x64
-            binary: agent-kernel
-          - os: macos-13
-            target: darwin-x64
-            artifact: agent-kernel-darwin-x64
-            binary: agent-kernel
-          - os: macos-latest
-            target: darwin-arm64
-            artifact: agent-kernel-darwin-arm64
-            binary: agent-kernel
-
-    runs-on: ${{ matrix.os }}
-
+  build-windows:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Install Linux Tauri dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test
+      - run: bun install --frozen-lockfile
+      - run: bun install --cwd app --frozen-lockfile
       - run: cargo build --release
-      - name: Stage binary
-        shell: bash
+      - name: Stage Windows CLI binary
+        shell: pwsh
         run: |
-          mkdir -p "dist/${{ matrix.target }}"
-          cp "target/release/${{ matrix.binary }}" "dist/${{ matrix.target }}/${{ matrix.binary }}"
+          New-Item -ItemType Directory -Force -Path dist/win32-x64 | Out-Null
+          Copy-Item target/release/agent-kernel.exe dist/win32-x64/agent-kernel.exe
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: dist/${{ matrix.target }}
+          name: agent-kernel-win32-x64
+          path: dist/win32-x64
 
-  bun-pack:
-    needs: build-binaries
-    runs-on: ubuntu-latest
+  bun-pack-windows:
+    needs: build-windows
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with:
           path: downloaded
-      - name: Assemble package binaries
+      - name: Assemble Windows package binary
+        shell: pwsh
         run: |
-          mkdir -p bin
-          cp -R downloaded/agent-kernel-win32-x64 bin/win32-x64
-          cp -R downloaded/agent-kernel-linux-x64 bin/linux-x64
-          cp -R downloaded/agent-kernel-darwin-x64 bin/darwin-x64
-          cp -R downloaded/agent-kernel-darwin-arm64 bin/darwin-arm64
-          chmod +x bin/linux-x64/agent-kernel bin/darwin-x64/agent-kernel bin/darwin-arm64/agent-kernel
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+          Copy-Item -Recurse downloaded/agent-kernel-win32-x64 bin/win32-x64
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - run: bun test bun/agent-kernel-lib.test.js
       - run: bun pm pack
       - uses: actions/upload-artifact@v4
         with:
-          name: agent-kernel-bun-package
+          name: agent-kernel-bun-package-windows
           path: agent-kernel-*.tgz
 
   build-tauri-windows:

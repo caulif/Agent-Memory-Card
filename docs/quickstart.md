@@ -8,7 +8,7 @@
 
 ```bash
 cargo run -- --version
-bun run test
+bun run --cwd app build
 ```
 
 如果只想体验命令，不想跑全量测试，可以先确认 CLI 可用：

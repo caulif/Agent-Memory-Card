@@ -139,7 +139,6 @@ pub fn extract_text_to_drafts(
     provider_name: Option<String>,
     dry_run: bool,
 ) -> Result<ExtractReport> {
-    let explicit_provider = provider_name.is_some();
     let provider_name = provider_name.unwrap_or_else(|| {
         provider::load_or_default_provider_config(project_root)
             .map(|cfg| cfg.extraction_provider)
@@ -147,9 +146,6 @@ pub fn extract_text_to_drafts(
     });
 
     if provider_name == "local" {
-        if !explicit_provider {
-            return llm_provider_unavailable_report(project_root, input, dry_run);
-        }
         return extract_local_text_to_drafts(project_root, input, targets, source, dry_run);
     }
 
@@ -435,7 +431,6 @@ pub fn extract_high_value_text_to_drafts(
     dry_run: bool,
     max_candidates: usize,
 ) -> Result<ExtractReport> {
-    let explicit_provider = provider_name.is_some();
     let provider_name = provider_name.unwrap_or_else(|| {
         provider::load_or_default_provider_config(project_root)
             .map(|cfg| cfg.extraction_provider)
@@ -443,9 +438,6 @@ pub fn extract_high_value_text_to_drafts(
     });
 
     if provider_name == "local" {
-        if !explicit_provider {
-            return llm_provider_unavailable_report(project_root, input, dry_run);
-        }
         return extract_local_high_value_text_to_drafts(
             project_root,
             input,
@@ -699,29 +691,6 @@ fn extract_local_high_value_text_to_drafts(
     })
 }
 
-fn llm_provider_unavailable_report(
-    project_root: &Path,
-    input: &str,
-    dry_run: bool,
-) -> Result<ExtractReport> {
-    let provider_cfg = provider::load_or_default_provider_config(project_root)?;
-    let redacted_input = if provider_cfg.privacy.redact_secrets {
-        provider::redact_secrets(input)
-    } else {
-        input.to_string()
-    };
-    Ok(ExtractReport {
-        created: Vec::new(),
-        skipped: vec![
-            "LLM extraction provider unavailable: configure a non-local extraction_provider or pass --provider local for diagnostic prefilter output.".to_string(),
-        ],
-        candidates: Vec::new(),
-        dry_run,
-        provider: "local".to_string(),
-        redacted: redacted_input != input,
-    })
-}
-
 fn route_action_for_classification(
     action: &candidate::ExtractionAction,
     classification: &classify::KnowledgeClassification,
@@ -966,10 +935,3 @@ fn extract_high_value_candidates_with_preferences(
         .filter_map(|index| deduped.get(index).cloned())
         .collect()
 }
-
-#[cfg(test)]
-mod methodology_tests;
-#[cfg(test)]
-mod pipeline_filter_tests;
-#[cfg(test)]
-mod tests;

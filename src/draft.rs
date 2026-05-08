@@ -796,6 +796,3 @@ fn validate_draft_id(id: &str) -> Result<()> {
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests;

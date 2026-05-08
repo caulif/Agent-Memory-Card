@@ -735,9 +735,6 @@ fn dedupe_memory_card_refs(refs: &mut Vec<MemoryCardRef>) {
     refs.retain(|item| seen.insert(item.id.clone()));
 }
 
-#[cfg(test)]
-mod tests;
-
 const MAX_MEMORY_CARD_ID_LEN: usize = 128;
 
 fn memory_card_path(project_root: &Path, id: &str) -> Result<PathBuf> {

@@ -101,7 +101,7 @@ pub enum ProviderRole {
 }
 
 fn default_extraction_provider() -> String {
-    "local".to_string()
+    "claude-cli".to_string()
 }
 
 fn default_max_candidates_per_batch() -> usize {
@@ -291,8 +291,8 @@ impl ProviderConfig {
             },
         );
         Self {
-            default: "local".to_string(),
-            extraction_provider: "local".to_string(),
+            default: "claude-cli".to_string(),
+            extraction_provider: "claude-cli".to_string(),
             role_providers: ProviderRoleConfig::default(),
             fallback_methodology_templates: false,
             max_candidates_per_batch: 20,
@@ -323,15 +323,6 @@ impl ProviderConfig {
                     cache_ttl: Some("1h".to_string()),
                 },
             );
-            cfg.default = "anthropic".to_string();
-            cfg.extraction_provider = "anthropic".to_string();
-            cfg.role_providers = ProviderRoleConfig {
-                extract: Some("anthropic".to_string()),
-                abstract_: Some("anthropic".to_string()),
-                judge: Some("anthropic".to_string()),
-                refine: Some("anthropic".to_string()),
-                update: Some("anthropic".to_string()),
-            };
         }
         cfg
     }
@@ -737,10 +728,13 @@ mod tests {
     }
 
     #[test]
-    fn default_provider_is_local() {
+    fn default_provider_is_claude_cli() {
         with_env_var("ANTHROPIC_API_KEY", None, || {
             let cfg = ProviderConfig::default();
-            assert_eq!(cfg.default, "local");
+            assert_eq!(cfg.default, "claude-cli");
+            assert_eq!(cfg.extraction_provider, "claude-cli");
+            assert_eq!(extraction_provider_name(&cfg), "claude-cli");
+            assert!(cfg.providers.contains_key("claude-cli"));
             assert!(cfg.providers.contains_key("local"));
         });
     }
@@ -767,10 +761,10 @@ mod tests {
     fn default_extraction_config_fields() {
         with_env_var("ANTHROPIC_API_KEY", None, || {
             let cfg = ProviderConfig::default();
-            assert_eq!(cfg.extraction_provider, "local");
+            assert_eq!(cfg.extraction_provider, "claude-cli");
             assert_eq!(
                 extraction_provider_name(&cfg),
-                "local",
+                "claude-cli",
                 "extract role should fall back to legacy extraction_provider"
             );
             assert_eq!(cfg.max_candidates_per_batch, 20);
@@ -781,7 +775,9 @@ mod tests {
     #[test]
     fn local_provider_refuses_remote_call() {
         with_env_var("ANTHROPIC_API_KEY", None, || {
-            let cfg = ProviderConfig::default();
+            let mut cfg = ProviderConfig::default();
+            cfg.default = "local".to_string();
+            cfg.extraction_provider = "local".to_string();
             let result = call_provider(
                 &cfg,
                 &ProviderRequest {
@@ -797,21 +793,21 @@ mod tests {
     }
 
     #[test]
-    fn is_llm_extraction_disabled_by_default() {
+    fn is_llm_extraction_enabled_by_default() {
         with_env_var("ANTHROPIC_API_KEY", None, || {
             let temp = tempfile::tempdir().expect("tempdir");
             let enabled = is_llm_extraction_enabled(temp.path()).expect("check");
-            assert!(!enabled);
+            assert!(enabled);
         });
     }
 
     #[test]
-    fn auto_detect_prefers_anthropic_when_key_present() {
+    fn auto_detect_keeps_claude_cli_default_when_anthropic_key_present() {
         with_env_var("ANTHROPIC_API_KEY", Some("test-key"), || {
             let cfg = ProviderConfig::auto_detect();
-            assert_eq!(cfg.default, "anthropic");
-            assert_eq!(cfg.extraction_provider, "anthropic");
-            assert_eq!(cfg.role_providers.update.as_deref(), Some("anthropic"));
+            assert_eq!(cfg.default, "claude-cli");
+            assert_eq!(cfg.extraction_provider, "claude-cli");
+            assert_eq!(cfg.role_providers.update.as_deref(), None);
             assert!(matches!(
                 cfg.providers.get("anthropic"),
                 Some(Provider::Anthropic { .. })
@@ -920,8 +916,7 @@ mod tests {
         #[cfg(windows)]
         let (binary, args) = {
             let script_path = script_dir.path().join("echo-provider.ps1");
-            std::fs::write(&script_path, "@($input) -join \"`n\" | Write-Output")
-                .expect("script");
+            std::fs::write(&script_path, "@($input) -join \"`n\" | Write-Output").expect("script");
             (
                 "powershell",
                 vec![

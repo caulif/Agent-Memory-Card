@@ -18,10 +18,7 @@
   ],
   "scripts": {
     "build": "bun bun/cargo.js build",
-    "test": "bun test bun/agent-kernel-lib.test.js && bun run --cwd app test && bun bun/cargo.js test",
-    "test:js": "bun test bun/agent-kernel-lib.test.js",
     "app:dev": "bunx tauri dev",
-    "app:test": "bun run --cwd app test",
     "app:build": "bun run --cwd app build",
     "tauri:build": "bunx tauri build",
     "start": "bun bun/cargo.js run --"

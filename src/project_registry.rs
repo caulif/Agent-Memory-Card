@@ -477,8 +477,7 @@ mod tests {
         );
 
         assert!(discovered.iter().any(|project| {
-            project.path == claude_project_path
-                && project.agents == vec!["claude-code"]
+            project.path == claude_project_path && project.agents == vec!["claude-code"]
         }));
         assert!(discovered.iter().any(|project| {
             project.path == codex_project_path && project.agents == vec!["codex"]

@@ -28,3 +28,11 @@
 /app/.vite-codex.log
 /app/.vite-codex.err.log
 /.claude/settings.local.json
+
+# Local-only tests
+/tests/
+/app/tests/
+/app/src/**/*.test.ts
+/bun/*.test.js
+/src/**/tests.rs
+/src/**/*_tests.rs

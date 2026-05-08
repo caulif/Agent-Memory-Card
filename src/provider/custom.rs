@@ -47,8 +47,8 @@ pub fn save_custom_openai_compatible_provider(
         cfg.role_providers.refine = Some("custom-api".to_string());
         cfg.role_providers.update = Some("custom-api".to_string());
     } else if cfg.extraction_provider == "custom-api" {
-        cfg.default = "local".to_string();
-        cfg.extraction_provider = "local".to_string();
+        cfg.default = "claude-cli".to_string();
+        cfg.extraction_provider = "claude-cli".to_string();
         cfg.role_providers = ProviderRoleConfig {
             extract: clear_custom_role(cfg.role_providers.extract),
             abstract_: clear_custom_role(cfg.role_providers.abstract_),
@@ -134,9 +134,9 @@ mod tests {
             )
             .expect("save disabled custom provider");
 
-            assert_eq!(disabled_cfg.extraction_provider, "local");
+            assert_eq!(disabled_cfg.extraction_provider, "claude-cli");
             assert_eq!(disabled_cfg.role_providers.extract, None);
-            assert!(!super::super::is_llm_extraction_enabled(temp.path()).expect("llm disabled"));
+            assert!(super::super::is_llm_extraction_enabled(temp.path()).expect("llm enabled"));
             assert!(disabled_cfg.providers.contains_key("custom-api"));
         });
     }

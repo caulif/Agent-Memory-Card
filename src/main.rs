@@ -8,8 +8,6 @@ use anyhow::Result;
 use clap::Parser;
 
 mod cli;
-#[cfg(test)]
-mod cli_tests;
 
 use cli::{
     AgentCommands, CatalogCommands, Cli, Commands, DraftCommands, HookCommands, IndexCommands,

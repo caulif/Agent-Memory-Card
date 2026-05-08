@@ -1,10 +1,8 @@
 # Platform Support
 
-Agent Memory Kernel is a Rust binary distributed through a Bun wrapper. The goal is to support the three mainstream desktop operating systems:
+Agent Memory Kernel is currently published for Windows first.
 
 - Windows
-- macOS
-- Linux
 
 ## Official Packaged Targets
 
@@ -13,9 +11,6 @@ The Bun package looks for these prebuilt binaries first:
 | OS | Architecture | Package path |
 | --- | --- | --- |
 | Windows | x64 | `bin/win32-x64/agent-kernel.exe` |
-| Linux | x64 | `bin/linux-x64/agent-kernel` |
-| macOS | x64 | `bin/darwin-x64/agent-kernel` |
-| macOS | arm64 | `bin/darwin-arm64/agent-kernel` |
 
 If no packaged binary exists for the current platform, the wrapper falls back to local Cargo outputs:
 
@@ -47,23 +42,17 @@ src-tauri/target/release/bundle/
 
 Depending on the installed Tauri bundler toolchain, this directory can contain installer formats such as MSI or NSIS EXE bundles.
 
-Linux CI installs the native desktop build dependencies needed by Tauri/WebKit and windowing backends:
-
-```bash
-sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
-```
-
 ## CI Policy
 
 Every push and pull request runs:
 
-- Rust format, clippy, and tests on Windows, Linux, and macOS
-- Bun wrapper tests on Windows, Linux, and macOS
+- Rust format, clippy, and release builds on Windows
+- Frontend production build on Windows
 
-Release builds package the four official binary targets listed above.
+Release builds package the Windows CLI binary and Windows Tauri desktop bundle.
 
 Tagged releases also build the Windows Tauri desktop bundle so users can install the app without running the development toolchain.
 
 ## Current Development Host
 
-The current active development and manual verification host is Windows. macOS and Linux support is enforced through GitHub Actions and release packaging.
+The current active development and manual verification host is Windows. macOS and Linux are not release targets yet.
