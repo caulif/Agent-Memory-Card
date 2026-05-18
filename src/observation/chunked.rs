@@ -7,6 +7,7 @@ use crate::candidate::MemoryTier;
 use crate::extract;
 
 use super::ObservationRecord;
+use super::flow;
 
 pub(super) fn synthesis_material(observations: &[ObservationRecord], max_chars: usize) -> String {
     synthesis_material_chunks(observations, max_chars, max_chars)
@@ -63,6 +64,17 @@ pub(super) fn extract_local_chunks_to_report(
         redacted: false,
     };
     let mut seen = BTreeSet::new();
+
+    merge_flow_candidates(
+        project_root,
+        observations,
+        targets.clone(),
+        source,
+        max_candidates,
+        "local".to_string(),
+        &mut merged,
+        &mut seen,
+    )?;
 
     for gold_line in global_methodology_lines(observations, 12) {
         let report = extract::extract_high_value_text_to_drafts(
@@ -305,6 +317,17 @@ pub(super) fn extract_llm_chunks_to_report(
     };
     let mut seen = BTreeSet::new();
 
+    merge_flow_candidates(
+        project_root,
+        observations,
+        targets.clone(),
+        source,
+        max_candidates,
+        "llm".to_string(),
+        &mut merged,
+        &mut seen,
+    )?;
+
     if let Some(gold_snippets) = global_methodology_snippets(observations, 12) {
         let report = extract::extract_high_value_text_to_drafts(
             project_root,
@@ -388,6 +411,49 @@ pub(super) fn extract_llm_chunks_to_report(
 
     balanced_truncate_previews(&mut merged.candidates, max_candidates);
     Ok(merged)
+}
+
+fn merge_flow_candidates(
+    project_root: &Path,
+    observations: &[ObservationRecord],
+    targets: Vec<String>,
+    source: &str,
+    max_candidates: usize,
+    provider_name: String,
+    merged: &mut extract::ExtractReport,
+    seen: &mut BTreeSet<String>,
+) -> Result<()> {
+    let flow_summary = flow::summarize_conversation_flow(observations);
+    if flow_summary.is_empty() {
+        return Ok(());
+    }
+    let flow_material = flow_summary.to_extraction_material();
+    let chunk_source = format!("{source}, global flow prefilter");
+    let provider = if provider_name == "local" {
+        Some("local".to_string())
+    } else {
+        None
+    };
+    let report = extract::extract_high_value_text_to_drafts(
+        project_root,
+        &flow_material,
+        targets,
+        &chunk_source,
+        provider,
+        true,
+        max_candidates,
+    )?;
+    merged.redacted |= report.redacted;
+    merged.skipped.extend(report.skipped);
+    for candidate in report.candidates {
+        if is_rejected_preview(&candidate) {
+            continue;
+        }
+        if seen.insert(candidate.id.clone()) {
+            merged.candidates.push(candidate);
+        }
+    }
+    Ok(())
 }
 
 fn balanced_truncate_previews(
@@ -1032,6 +1098,56 @@ mod tests {
             }),
             "{:?}",
             report.candidates
+        );
+    }
+
+    #[test]
+    fn local_chunk_extraction_surfaces_global_flow_candidates() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let observations = vec![
+            observation(
+                "startup",
+                "2026-01-01T00:00:00Z",
+                "我同意，此外有可以借鉴的开源项目或者任何内容也可以借鉴。",
+            ),
+            observation(
+                "middle",
+                "2026-01-01T01:00:00Z",
+                "不是只看指标，最终质量你也要自己看一下。",
+            ),
+            observation(
+                "end",
+                "2026-01-01T02:00:00Z",
+                "最后用真实历史 dry-run 测试，并从用户视角验收。",
+            ),
+        ];
+
+        let report = extract_local_chunks_to_report(
+            temp.path(),
+            &observations,
+            vec!["codex".to_string()],
+            "test",
+            8,
+        )
+        .expect("report");
+
+        assert!(
+            report.candidates.iter().any(|candidate| {
+                candidate
+                    .matched_template
+                    .as_deref()
+                    .is_some_and(|template| template == "global-flow:reference-research")
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report.candidates.iter().any(|candidate| {
+                candidate
+                    .matched_template
+                    .as_deref()
+                    .is_some_and(|template| template == "global-flow:real-history-validation")
+            }),
+            "{report:#?}"
         );
     }
 }

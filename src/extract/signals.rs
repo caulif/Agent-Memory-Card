@@ -694,6 +694,10 @@ pub(super) fn looks_like_project_improvement_signal(sentence: &str) -> bool {
         .iter()
         .any(|marker| lower.contains(marker));
 
+    if looks_like_code_analysis_noise(trimmed) {
+        return false;
+    }
+
     // 过滤未解决的抱怨（除非有完成标记或显式记忆标记）
     if looks_like_unresolved_user_request(trimmed)
         && !has_completed
@@ -703,6 +707,27 @@ pub(super) fn looks_like_project_improvement_signal(sentence: &str) -> bool {
     }
 
     has_outcome && has_project
+}
+
+fn looks_like_code_analysis_noise(lower: &str) -> bool {
+    let code_symbols = lower.contains("`")
+        || lower.contains("fn ")
+        || lower.contains("src/")
+        || lower.contains(".rs")
+        || lower.contains("::");
+    let analysis_terms = [
+        "函数",
+        "信号检测",
+        "层层递进",
+        "有效地",
+        "区分开",
+        "噪声过滤",
+        "实现细节",
+        "代码中",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker));
+    code_symbols && analysis_terms
 }
 
 /// 检测未解决的用户请求/抱怨

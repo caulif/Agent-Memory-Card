@@ -31,6 +31,19 @@ pub(crate) fn evaluate_candidate_quality(
     let lower = combined.to_lowercase();
     let candidate_text = format!("{}\n{}", candidate.title, candidate.body).to_lowercase();
 
+    if candidate
+        .matched_template
+        .as_deref()
+        .is_some_and(|template| template.starts_with("global-flow:"))
+        && !has_global_flow_support(&lower)
+    {
+        return skip(
+            MemoryCardOperation::Noop,
+            "unsupported-global-flow-inference",
+            "Global-flow candidate lacks direct user, accepted-offer, repeated-pattern, or validation evidence.",
+        );
+    }
+
     if contains_internal_leak(&candidate_text) {
         return skip(
             MemoryCardOperation::Noop,
@@ -44,6 +57,22 @@ pub(crate) fn evaluate_candidate_quality(
             MemoryCardOperation::Noop,
             "generated-instruction-artifact",
             "Candidate came from generated AGENTS/CLAUDE instructions rather than user-authored memory.",
+        );
+    }
+
+    if looks_like_code_analysis_praise(&lower) {
+        return skip(
+            MemoryCardOperation::Noop,
+            "code-analysis-noise",
+            "Candidate describes code analysis or implementation details, not a reusable future rule.",
+        );
+    }
+
+    if looks_like_extraction_taxonomy_artifact(&lower) {
+        return skip(
+            MemoryCardOperation::Noop,
+            "extraction-taxonomy-artifact",
+            "Candidate is an extraction taxonomy/list artifact, not a durable user preference.",
         );
     }
 
@@ -131,7 +160,18 @@ fn is_known_high_value_template(candidate: &Candidate) -> bool {
                 | "deterministic-memory-refine"
                 | "llm-memory-refine"
         )
-    )
+    ) || candidate
+        .matched_template
+        .as_deref()
+        .is_some_and(|template| template.starts_with("global-flow:"))
+}
+
+fn has_global_flow_support(lower: &str) -> bool {
+    lower.contains("signal:user_direct")
+        || lower.contains("signal:accepted_offer")
+        || lower.contains("signal:repeated_pattern")
+        || lower.contains("signal:validation_feedback")
+        || lower.contains("signal:correction")
 }
 
 pub(crate) fn quality_skip_message(id: &str, decision: &QualityGateDecision) -> String {
@@ -252,6 +292,9 @@ fn looks_like_meta_discussion(lower: &str) -> bool {
 }
 
 fn looks_like_generation_quality_acceptance_chatter(lower: &str) -> bool {
+    if looks_like_durable_local_history_validation_workflow(lower) {
+        return false;
+    }
     let generation_surface = [
         "prompt",
         "render",
@@ -307,6 +350,16 @@ fn looks_like_generation_quality_acceptance_chatter(lower: &str) -> bool {
     .any(|marker| lower.contains(marker));
 
     generation_surface && eval_surface && process_instruction
+}
+
+fn looks_like_durable_local_history_validation_workflow(lower: &str) -> bool {
+    (lower.contains("真实历史") || lower.contains("real-history") || lower.contains("dry-run"))
+        && (lower.contains("本地评估") || lower.contains("本地真实历史") || lower.contains("local"))
+        && (lower.contains("不进入 git")
+            || lower.contains("不要提交")
+            || lower.contains("golden set")
+            || lower.contains("只用于本地"))
+        && (lower.contains("提炼质量") || lower.contains("抽取") || lower.contains("候选"))
 }
 
 fn looks_like_generated_instruction_artifact(lower: &str) -> bool {
@@ -387,6 +440,36 @@ fn looks_like_generated_instruction_artifact(lower: &str) -> bool {
     generated_markers
         .iter()
         .any(|marker| lower.contains(marker))
+}
+
+fn looks_like_code_analysis_praise(lower: &str) -> bool {
+    let code_symbols = lower.contains("`")
+        || lower.contains("src/")
+        || lower.contains(".rs")
+        || lower.contains("fn ")
+        || lower.contains("::");
+    let analysis_terms = [
+        "噪声过滤",
+        "信号检测函数",
+        "层层递进",
+        "有效地",
+        "区分开",
+        "实现细节",
+        "代码中",
+        "looks_like",
+        "is_low_value",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker));
+    code_symbols && analysis_terms
+}
+
+fn looks_like_extraction_taxonomy_artifact(lower: &str) -> bool {
+    (lower.contains("优先保留") || lower.contains("只保留"))
+        && lower.contains("稳定偏好")
+        && lower.contains("流程")
+        && lower.contains("约束")
+        && (lower.contains("回归方法") || lower.contains("审阅边界") || lower.contains("质量标准"))
 }
 
 fn looks_like_temporary_task_constraint(lower: &str) -> bool {

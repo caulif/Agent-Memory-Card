@@ -54,13 +54,13 @@ pub use quality::{
 use atomic::split_atomic_sentences;
 use candidate_factory::{
     atomic_exception_candidate, classify_kind, delivery_acceptance_candidate, draft_id,
-    existing_flow_planning_candidate, extraction_metadata_for_chunk, high_value_prompt_candidate,
-    infer_scope, local_only_golden_set_candidate, looks_like_memory_card_signal, looks_like_rule,
-    normalize_body, normalize_project_improvement_body,
-    parallel_agent_github_coordination_candidate, planning_deduplication_candidate,
-    principle_candidates, project_startup_collaboration_candidate, scored_signal_candidate,
-    self_verification_candidate, speed_validation_cadence_candidate, title_from_body,
-    title_from_project_improvement,
+    existing_flow_planning_candidate, extraction_metadata_for_chunk, global_flow_candidates,
+    high_value_prompt_candidate, infer_scope, local_only_golden_set_candidate,
+    looks_like_memory_card_signal, looks_like_rule, normalize_body,
+    normalize_project_improvement_body, parallel_agent_github_coordination_candidate,
+    planning_deduplication_candidate, principle_candidates,
+    project_startup_collaboration_candidate, scored_signal_candidate, self_verification_candidate,
+    speed_validation_cadence_candidate, title_from_body, title_from_project_improvement,
 };
 use dedupe::dedupe_candidates;
 use llm_pipeline_impl::extract_llm_text_to_drafts;
@@ -736,6 +736,7 @@ fn extract_candidates_with_preferences(
     fallback_methodology_templates: bool,
 ) -> Vec<Candidate> {
     let mut candidates = Vec::new();
+    candidates.extend(global_flow_candidates(input));
     if should_try_whole_input_candidate(input)
         && let Some(candidate) = project_startup_collaboration_candidate(input)
     {
@@ -861,6 +862,7 @@ fn extract_high_value_candidates_with_preferences(
     fallback_methodology_templates: bool,
 ) -> Vec<Candidate> {
     let mut candidates = Vec::new();
+    candidates.extend(global_flow_candidates(input));
     if should_try_whole_input_candidate(input)
         && let Some(candidate) = project_startup_collaboration_candidate(input)
     {
@@ -1255,6 +1257,66 @@ mod tests {
             "one-off /goal execution directives and local phase choices should not become global cards: {:?}; skipped={:?}",
             report.candidates,
             report.skipped
+        );
+    }
+
+    #[test]
+    fn high_value_extraction_rejects_code_analysis_noise() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            "**噪声过滤细致** — `extract.rs` 中的信号检测函数（`looks_like_rule`、`looks_like_skilllet_signal`）层层递进，有效地把一次性请求和持久规则区分开。",
+            vec!["codex".to_string()],
+            "observation synthesis, chunk 1/1",
+            Some("local".to_string()),
+            true,
+            8,
+        )
+        .expect("extract");
+
+        assert!(
+            report.candidates.is_empty(),
+            "code analysis praise should not become a project-improvement card: {report:#?}"
+        );
+    }
+
+    #[test]
+    fn high_value_extraction_rejects_code_analysis_validation_signal() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            "**噪声过滤细致** — `extract.rs` 中的信号检测函数（`looks_like_rule`、`looks_like_skilllet_signal`、`is_low_value_task_sentence`、`looks_like_unresolved_user_request`）层层递进，有效地把\"继续优化UI\"这种一次性求和\"所有Rust项目必须运行cargo test\"这种持久规则区分开",
+            vec!["codex".to_string()],
+            "observation synthesis, chunk 1/1",
+            Some("local".to_string()),
+            true,
+            8,
+        )
+        .expect("extract");
+
+        assert!(
+            report.candidates.is_empty(),
+            "code analysis validation signal should be filtered: {report:#?}"
+        );
+    }
+
+    #[test]
+    fn high_value_extraction_rejects_extraction_taxonomy_artifacts() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            "- 优先保留稳定偏好、流程、约束、质量标准、回归方法、审阅边界",
+            vec!["codex".to_string()],
+            "observation synthesis, chunk 1/1",
+            Some("local".to_string()),
+            true,
+            8,
+        )
+        .expect("extract");
+
+        assert!(
+            report.candidates.is_empty(),
+            "extraction taxonomy bullet should be filtered: {report:#?}"
         );
     }
 }

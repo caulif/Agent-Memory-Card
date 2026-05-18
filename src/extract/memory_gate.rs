@@ -174,6 +174,9 @@ fn looks_like_current_task_state(lower: &str) -> bool {
 }
 
 fn looks_like_memory_pipeline_meta(lower: &str) -> bool {
+    if looks_like_durable_local_history_validation_workflow(lower) {
+        return false;
+    }
     let candidate_pipeline_rule = lower.contains("候选记忆")
         || (lower.contains("候选质量") && lower.contains("候选数量"))
         || lower.contains("候选被判定为无长期价值")
@@ -199,6 +202,16 @@ fn looks_like_memory_pipeline_meta(lower: &str) -> bool {
         || (memory_pipeline_terms && lower.contains("候选"))
         || generic_planning_principle
         || generation_quality_acceptance
+}
+
+fn looks_like_durable_local_history_validation_workflow(lower: &str) -> bool {
+    (lower.contains("真实历史") || lower.contains("real-history") || lower.contains("dry-run"))
+        && (lower.contains("本地评估") || lower.contains("本地真实历史") || lower.contains("local"))
+        && (lower.contains("不进入 git")
+            || lower.contains("不要提交")
+            || lower.contains("golden set")
+            || lower.contains("只用于本地"))
+        && (lower.contains("提炼质量") || lower.contains("抽取") || lower.contains("候选"))
 }
 
 fn looks_like_generation_quality_acceptance_chatter(lower: &str) -> bool {

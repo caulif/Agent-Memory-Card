@@ -3,6 +3,115 @@ use crate::textutil;
 
 use super::{Candidate, chunk, classify, scoring, signals};
 
+pub(super) fn global_flow_candidates(input: &str) -> Vec<Candidate> {
+    if !input.contains("ConversationFlowSummary:") {
+        return Vec::new();
+    }
+    let lower = input.to_lowercase();
+    let mut candidates = Vec::new();
+
+    if contains_any(&lower, &["stage:startup", "accepted_offer"])
+        && contains_any(&lower, &["开源项目", "同类产品", "参考", "借鉴"])
+    {
+        candidates.push(global_flow_candidate(
+            "项目规划前参考外部样例",
+            "项目启动或规划新功能时，先检查已有上下文，并参考可借鉴的开源项目、同类产品或相关资料，再制定方案。",
+            input,
+            "reference-research",
+            0.88,
+        ));
+    }
+
+    if contains_any(&lower, &["stage:startup", "accepted_offer"])
+        && contains_any(&lower, &["可视化", "mockup", "对比图", "流程图", "架构图"])
+    {
+        candidates.push(global_flow_candidate(
+            "用可视化辅助方案讨论",
+            "项目启动或方案讨论涉及界面、布局、架构或流程时，优先用轻量 mockup、对比图或流程图辅助讨论；简单文本决策不必强行可视化。",
+            input,
+            "visual-planning",
+            0.88,
+        ));
+    }
+
+    if contains_any(&lower, &["真实历史", "dry-run", "dry run"])
+        && contains_any(
+            &lower,
+            &["提炼", "抽取", "生成", "最终质量", "用户视角", "质量"],
+        )
+    {
+        candidates.push(global_flow_candidate(
+            "用真实历史验证提炼质量",
+            "修改提炼质量相关代码时，先跑合成测试和本地真实历史 dry-run，再阅读最终候选或卡片文本；真实历史只用于本地评估，不进入 Git 或 Golden Set。",
+            input,
+            "real-history-validation",
+            0.91,
+        ));
+    }
+
+    if contains_any(
+        &lower,
+        &[
+            "人工看",
+            "自己看",
+            "最终质量",
+            "用户视角",
+            "需求覆盖",
+            "验收",
+        ],
+    ) && contains_any(
+        &lower,
+        &["测试", "指标", "分数", "green tests", "tests pass"],
+    ) {
+        candidates.push(global_flow_candidate(
+            "验收时人工检查真实质量",
+            "交付或验收时，把测试和指标作为证据之一，还要从用户视角检查最终结果是否覆盖需求、文本是否清楚、体验是否可信。",
+            input,
+            "delivery-acceptance",
+            0.89,
+        ));
+    }
+
+    if contains_any(&lower, &["github", "issue", "pr"])
+        && contains_any(
+            &lower,
+            &["另一个 agent", "另一个agent", "不要重复", "已有规划"],
+        )
+    {
+        candidates.push(global_flow_candidate(
+            "并行 GitHub 工作先查重",
+            "多人或多 agent 并行使用 GitHub 工作时，先检查已有 Issue、PR 和规划，只补充缺口，避免重复规划或重复修改。",
+            input,
+            "github-deduplication",
+            0.87,
+        ));
+    }
+
+    candidates
+}
+
+fn global_flow_candidate(
+    title: &str,
+    body: &str,
+    evidence: &str,
+    template: &str,
+    confidence: f32,
+) -> Candidate {
+    Candidate {
+        title: title.to_string(),
+        body: body.to_string(),
+        kind: "procedure".to_string(),
+        scope: "global".to_string(),
+        memory_tier: crate::candidate::MemoryTier::CollaborationPreference,
+        abstraction_of: None,
+        abstracted_from: None,
+        evidence: evidence.to_string(),
+        confidence: Some(confidence),
+        reason: Some("Inferred from cross-stage conversation flow with evidence.".to_string()),
+        matched_template: Some(format!("global-flow:{template}")),
+    }
+}
+
 pub(super) fn high_value_prompt_candidate(sentence: &str) -> Option<Candidate> {
     if !looks_like_high_value_prompt_signal(sentence) {
         return None;
@@ -889,7 +998,15 @@ pub(super) fn title_from_body(body: &str) -> String {
     if words.len() >= 3 {
         return words.iter().take(6).copied().collect::<Vec<_>>().join(" ");
     }
-    body.chars().take(24).collect()
+    trim_title_boundary_punctuation(&body.chars().take(24).collect::<String>())
+}
+
+fn trim_title_boundary_punctuation(title: &str) -> String {
+    title
+        .trim()
+        .trim_end_matches(['，', '、', ',', '；', ';', '。', ':', '：'])
+        .trim()
+        .to_string()
 }
 
 pub(super) fn title_from_project_improvement(body: &str) -> String {

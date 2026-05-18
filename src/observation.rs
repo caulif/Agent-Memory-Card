@@ -17,6 +17,7 @@ use crate::textutil;
 mod agent_engine_impl;
 pub(crate) mod chunked;
 mod conversation;
+mod flow;
 mod incremental;
 mod replay;
 mod report_render;
@@ -67,6 +68,18 @@ pub struct AutoEvolveReport {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct CandidatePreviewText {
+    pub id: String,
+    pub title: String,
+    pub body: String,
+    pub scope: String,
+    pub kind: String,
+    pub memory_tier: String,
+    pub confidence: Option<f32>,
+    pub matched_template: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ObservationSynthesisReport {
     pub engine: String,
     pub created: usize,
@@ -74,6 +87,7 @@ pub struct ObservationSynthesisReport {
     pub candidates: usize,
     pub drafts: Vec<String>,
     pub candidate_drafts: Vec<String>,
+    pub candidate_previews: Vec<CandidatePreviewText>,
     pub dry_run: bool,
 }
 
@@ -87,6 +101,7 @@ pub struct ObservationEvolveReport {
     pub synthesis_skipped: usize,
     pub drafts: Vec<String>,
     pub candidate_drafts: Vec<String>,
+    pub candidate_previews: Vec<CandidatePreviewText>,
     pub dry_run: bool,
 }
 
@@ -305,6 +320,7 @@ pub fn synthesize_observations_to_drafts_with_engine(
         candidates: 0,
         drafts: Vec::new(),
         candidate_drafts: Vec::new(),
+        candidate_previews: Vec::new(),
         dry_run,
     };
 
@@ -468,6 +484,23 @@ pub fn synthesize_observations_to_drafts_with_engine(
             .iter()
             .map(|candidate| candidate.id.clone()),
     );
+    report
+        .candidate_previews
+        .extend(
+            synthesized_candidates
+                .iter()
+                .take(20)
+                .map(|candidate| CandidatePreviewText {
+                    id: candidate.id.clone(),
+                    title: candidate.title.clone(),
+                    body: candidate.body.clone(),
+                    scope: candidate.scope.clone(),
+                    kind: candidate.kind.clone(),
+                    memory_tier: candidate.memory_tier.as_str().to_string(),
+                    confidence: candidate.confidence,
+                    matched_template: candidate.matched_template.clone(),
+                }),
+        );
     report.skipped += skipped_count;
     report.candidates += candidate_count;
     if created_count == 0 && candidate_count == 0 {
@@ -582,6 +615,7 @@ fn synthesize_with_agent_engine(
         candidates: candidates.len(),
         drafts: Vec::new(),
         candidate_drafts: Vec::new(),
+        candidate_previews: Vec::new(),
         dry_run,
     };
 
@@ -612,6 +646,21 @@ fn synthesize_with_agent_engine(
         let scope = normalize_candidate_scope(&candidate.scope);
         let id = format!("{}:{}", scope, textutil::slug(&candidate.title));
         report.candidate_drafts.push(id.clone());
+        report.candidate_previews.push(CandidatePreviewText {
+            id: id.clone(),
+            title: candidate.title.clone(),
+            body: candidate.body.clone(),
+            scope: scope.clone(),
+            kind: normalize_candidate_kind(&candidate.kind),
+            memory_tier: if scope == "global" {
+                candidate::MemoryTier::CrossProjectPrinciple.as_str()
+            } else {
+                candidate::MemoryTier::ProjectRule.as_str()
+            }
+            .to_string(),
+            confidence: candidate.confidence,
+            matched_template: Some(format!("agent-synthesis:{engine}")),
+        });
         if dry_run {
             continue;
         }
@@ -855,6 +904,7 @@ fn evolve_local_conversations_from_files_with_engine(
         synthesis_skipped: synthesized.skipped,
         drafts: synthesized.drafts,
         candidate_drafts: synthesized.candidate_drafts,
+        candidate_previews: synthesized.candidate_previews,
         dry_run,
     })
 }
