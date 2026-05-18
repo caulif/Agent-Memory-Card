@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::{self, ArtifactState, MirrorState, ProjectLock, SkillRecord};
 use crate::fsutil;
 use crate::memory_card::{self, MemoryCardRecord};
+use crate::rule_test::{self, RuleTestReport};
 
 mod agent_skills;
 mod artifact_drift;
@@ -37,6 +38,7 @@ pub struct BuildReport {
     actions: Vec<String>,
     warnings: Vec<String>,
     artifact_previews: Vec<ArtifactPreviewRow>,
+    verification: Option<SyncVerificationReport>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -44,6 +46,7 @@ pub struct StatusReport {
     rows: Vec<StatusRow>,
     artifact_rows: Vec<ArtifactStatusRow>,
     warnings: Vec<String>,
+    last_sync: Option<SyncCheckpoint>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -59,6 +62,31 @@ struct ArtifactStatusRow {
     path: String,
     kind: String,
     status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncCheckpoint {
+    pub id: String,
+    pub created_at: String,
+    pub artifact_count: usize,
+    pub artifacts: Vec<SyncCheckpointArtifact>,
+    pub memory_card_ids: Vec<String>,
+    pub rollback_instructions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncCheckpointArtifact {
+    pub path: String,
+    pub kind: String,
+    pub hash: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SyncVerificationReport {
+    pub rule_ci: RuleTestReport,
+    pub status: String,
+    pub next_actions: Vec<String>,
+    pub reload_prompt: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -321,7 +349,13 @@ pub fn build_project(project_root: &Path, preview: bool) -> Result<BuildReport> 
 
     if !preview {
         config::save_lock(&root, &lock)?;
+        write_sync_checkpoint(&root, &lock, &config.memory_cards.include)?;
     }
+    let verification = if preview {
+        None
+    } else {
+        Some(verify_sync_completion(&root, &lock)?)
+    };
 
     Ok(BuildReport {
         preview,
@@ -332,7 +366,46 @@ pub fn build_project(project_root: &Path, preview: bool) -> Result<BuildReport> 
         } else {
             Vec::new()
         },
+        verification,
     })
+}
+
+pub fn verify_sync_completion(
+    project_root: &Path,
+    lock: &ProjectLock,
+) -> Result<SyncVerificationReport> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    let rule_ci = rule_test::run_rule_tests(&root)?;
+    let status = if rule_ci.failed == 0 { "pass" } else { "fail" }.to_string();
+    let mut next_actions = Vec::new();
+    if rule_ci.failed > 0 {
+        next_actions.push(
+            "Open failing Rule CI rows and update the Memory Card or generated artifact before relying on this sync."
+                .to_string(),
+        );
+    }
+    if lock.artifacts.is_empty() {
+        next_actions.push(
+            "Assign at least one Memory Card to an enabled Agent, then sync again.".to_string(),
+        );
+    }
+    if next_actions.is_empty() {
+        next_actions
+            .push("Ask the active Agent session to reload generated instructions.".to_string());
+    }
+    Ok(SyncVerificationReport {
+        rule_ci,
+        status,
+        next_actions,
+        reload_prompt: reload_agent_instructions_prompt(&root),
+    })
+}
+
+pub fn reload_agent_instructions_prompt(project_root: &Path) -> String {
+    format!(
+        "请重新读取本项目的 AGENTS.md / CLAUDE.md 以及 .agents/.claude skills，并在当前会话中遵循最新 Enabled Memory Cards。项目路径：{}",
+        fsutil::path_to_slash(project_root)
+    )
 }
 
 fn rules_artifact_file_name(_agent_name: &str) -> &'static str {
@@ -587,7 +660,65 @@ pub fn status_project(project_root: &Path) -> Result<StatusReport> {
         rows,
         artifact_rows,
         warnings,
+        last_sync: load_last_sync_checkpoint(&root)?,
     })
+}
+
+pub fn load_last_sync_checkpoint(project_root: &Path) -> Result<Option<SyncCheckpoint>> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    let path = sync_checkpoint_path(&root);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    serde_json::from_str(&raw)
+        .with_context(|| format!("parse {}", path.display()))
+        .map(Some)
+}
+
+fn write_sync_checkpoint(
+    root: &Path,
+    lock: &ProjectLock,
+    memory_card_refs: &[config::MemoryCardRef],
+) -> Result<()> {
+    let created_at = Utc::now().to_rfc3339();
+    let artifacts = lock
+        .artifacts
+        .iter()
+        .map(|artifact| SyncCheckpointArtifact {
+            path: artifact.path.clone(),
+            kind: artifact.kind.clone(),
+            hash: artifact.hash.clone(),
+        })
+        .collect::<Vec<_>>();
+    let memory_card_ids = memory_card_refs
+        .iter()
+        .map(|item| item.id.clone())
+        .collect::<Vec<_>>();
+    let checkpoint = SyncCheckpoint {
+        id: format!("sync-{}", Utc::now().format("%Y%m%dT%H%M%SZ")),
+        created_at,
+        artifact_count: artifacts.len(),
+        artifacts,
+        memory_card_ids,
+        rollback_instructions: vec![
+            "Review the listed artifact paths and hashes before changing files.".to_string(),
+            "Use artifact drift import/keep/discard actions to reconcile manual changes file by file.".to_string(),
+            "To recover generated content, rerun sync after restoring or reassigning the linked Memory Cards.".to_string(),
+        ],
+    };
+    let path = sync_checkpoint_path(root);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    fs::write(&path, serde_json::to_string_pretty(&checkpoint)?)
+        .with_context(|| format!("write {}", path.display()))
+}
+
+fn sync_checkpoint_path(project_root: &Path) -> std::path::PathBuf {
+    config::kernel_dir(project_root)
+        .join("sync-checkpoints")
+        .join("latest.json")
 }
 
 pub(super) struct ExpectedArtifact {

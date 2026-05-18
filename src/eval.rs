@@ -17,8 +17,10 @@ use crate::provider::{
 mod golden;
 mod qa;
 pub use golden::{
-    GoldenCaseEval, GoldenSetEvalReport, run_golden_set_eval,
-    run_golden_set_eval_with_induce_provider, run_golden_set_eval_with_provider,
+    GoldenCaseEval, GoldenSetEvalReport, GoldenSetEvalRunRecord, load_latest_golden_set_eval_run,
+    run_golden_set_eval, run_golden_set_eval_with_induce_provider,
+    run_golden_set_eval_with_provider, write_latest_golden_set_eval_run,
+    write_provider_evidence_failure_fixtures,
 };
 pub use qa::{RunQAReport, append_seen_memory_signatures, score_pipeline_report};
 

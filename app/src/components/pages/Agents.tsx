@@ -7,6 +7,7 @@ import {
   translateKind,
   type ProjectAssignmentView,
   type ProjectMemoryCardLibrary,
+  type ProjectQualityView,
   type ProjectSnapshot,
   type PanelPageProps,
   type RegisteredProject,
@@ -17,6 +18,7 @@ export function Agents({
   snapshot,
   assignment,
   library,
+  quality,
   pendingAction,
   disabled,
   onAction,
@@ -24,6 +26,7 @@ export function Agents({
 }: PanelPageProps & {
   assignment: ProjectAssignmentView | null;
   library: ProjectMemoryCardLibrary | null;
+  quality: ProjectQualityView | null;
   projects: RegisteredProject[];
 }) {
   const agents = assignment?.target_matrix.agents ?? snapshot?.target_matrix.agents ?? [];
@@ -46,6 +49,8 @@ export function Agents({
   const assignmentDisabled = disabled;
   const syncBusy = pendingAction === "写入-Agent-文件";
   const clearAllBusy = pendingAction === "清空-全部分配";
+  const verification = quality?.build_preview.verification ?? null;
+  const ruleCi = verification?.rule_ci ?? quality?.rule_ci ?? snapshot?.rule_ci ?? null;
 
   React.useEffect(() => {
     setHasUnwrittenChanges(false);
@@ -139,7 +144,7 @@ export function Agents({
   }
 
   async function copyReloadPrompt() {
-    const prompt = `请重新读取本项目的 AGENTS.md / CLAUDE.md 以及 .agents/.claude skills，并在当前会话中遵循最新 Enabled Memory Cards。项目路径：${projectPath}`;
+    const prompt = verification?.reload_prompt ?? `请重新读取本项目的 AGENTS.md / CLAUDE.md 以及 .agents/.claude skills，并在当前会话中遵循最新 Enabled Memory Cards。项目路径：${projectPath}`;
     try {
       await navigator.clipboard.writeText(prompt);
       setReloadPromptStatus("已复制重读提示");
@@ -211,6 +216,17 @@ export function Agents({
               </div>
             </div>
             {reloadPromptStatus ? <div className="target-apply-note">{reloadPromptStatus}</div> : null}
+            <div className={`sync-verification-card ${verification?.status ?? "pending"}`}>
+              <div>
+                <span>Sync Verification</span>
+                <strong>
+                  Rule CI {ruleCi?.passed ?? 0} passed / {ruleCi?.failed ?? 0} failed
+                </strong>
+              </div>
+              {(verification?.next_actions ?? ["写入 Agent 文件后，这里会显示验证结果和下一步。"]).slice(0, 2).map((action) => (
+                <p key={action}>{action}</p>
+              ))}
+            </div>
             <div className="loadout-grid">
               {agents.map((agent) => {
                 const equipped = getEquippedFor(agent);
@@ -251,7 +267,7 @@ export function Agents({
                     </h3>
                     {equipped.length === 0 ? (
                       <p className="empty" style={{ textAlign: "center", padding: "12px 0" }}>
-                        暂无装备的技能片段
+                        暂无装备的 Memory Card
                       </p>
                     ) : (
                       equipped.map((row) => (
@@ -293,14 +309,14 @@ export function Agents({
         )}
       </Panel>
 
-      {/* ===== 技能池 ===== */}
+      {/* ===== Memory Card 池 ===== */}
       <div className="skill-pool">
         <div className="skill-pool-head">
-          <h3>可用技能池</h3>
-          <span>拖到上方智能体完成分配</span>
+          <h3>可用 Memory Cards</h3>
+          <span>拖到上方智能体完成 Loadout 配置</span>
         </div>
         {allAvailable.length === 0 ? (
-          <EmptyState title="暂无可用技能" description="批准草稿后，这里会显示可分配的技能片段。" />
+          <EmptyState title="暂无可用 Memory Card" description="批准建议后，这里会显示可配置到 Loadout 的 Memory Card。" />
         ) : (
           <div className="pool-groups">
             {(["rule", "procedure", "constraint", "preference", "other"] as const).map((kind) => {
@@ -345,12 +361,12 @@ export function Agents({
       </div>
 
       {/* ===== 分配矩阵（原有功能保留） ===== */}
-      <Panel title="分配矩阵" subtitle="精细管理每个 Memory Card 到每个智能体的分配关系。" icon={GitBranch}>
+      <Panel title="Loadout Matrix" subtitle="精细管理每个 Memory Card 到每个智能体的分配关系。" icon={GitBranch}>
         {rows.length === 0 ? (
-          <EmptyState title="暂无分配数据" description="安装包或批准技能片段后，这里会显示目标智能体矩阵。" />
+          <EmptyState title="暂无 Loadout 数据" description="安装包或批准 Memory Card 后，这里会显示目标智能体矩阵。" />
         ) : (
           <div className="matrix" style={{ gridTemplateColumns: `minmax(180px, 1fr) repeat(${Math.max(agents.length, 1)}, 100px)` }}>
-            <div className="matrix-head">技能片段</div>
+            <div className="matrix-head">Memory Card</div>
             {agents.map((agent) => (
               <div className="matrix-head" key={agent}>
                 {formatAgent(agent)}

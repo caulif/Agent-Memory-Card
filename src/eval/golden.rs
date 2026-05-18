@@ -2,10 +2,12 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 use crate::extract::cluster::ClusterOptions;
 use crate::extract::pipeline::{InduceMode, PipelineOptions, run_pipeline_with};
+use crate::extract::{CardQualityFailure, quality_report_for_crystallized_card};
 use crate::observation::ObservationRecord;
 use crate::provider::{ProviderConfig, ProviderRequest};
 
@@ -24,12 +26,22 @@ pub struct GoldenSetEvalReport {
     pub duplicate_cluster_risk_percent: f32,
     pub evidence_valid_count: usize,
     pub evidence_valid_percent: f32,
+    pub card_quality_passed_count: usize,
+    pub card_quality_passed_percent: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_evidence_valid_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_evidence_valid_percent: Option<f32>,
     pub positive_cases: Vec<GoldenCaseEval>,
     pub negative_cases: Vec<GoldenCaseEval>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GoldenSetEvalRunRecord {
+    pub report: GoldenSetEvalReport,
+    pub provider: String,
+    pub pipeline_version: u32,
+    pub timestamp: String,
 }
 
 impl GoldenSetEvalReport {
@@ -60,6 +72,10 @@ impl GoldenSetEvalReport {
             "- evidence validity: {:.0}% ({}/{})\n",
             self.evidence_valid_percent, self.evidence_valid_count, self.positive_total
         ));
+        out.push_str(&format!(
+            "- card quality baseline: {:.0}% ({}/{})\n",
+            self.card_quality_passed_percent, self.card_quality_passed_count, self.positive_total
+        ));
         if let (Some(count), Some(percent)) = (
             self.provider_evidence_valid_count,
             self.provider_evidence_valid_percent,
@@ -81,13 +97,27 @@ impl GoldenSetEvalReport {
                     }
                 })
                 .unwrap_or("");
+            let card_quality = case
+                .card_quality_passed
+                .map(|passed| {
+                    if passed {
+                        ", card_quality=pass".to_string()
+                    } else {
+                        format!(
+                            ", card_quality=fail({})",
+                            format_failures(&case.card_quality_failures)
+                        )
+                    }
+                })
+                .unwrap_or_default();
             out.push_str(&format!(
-                "- `{}`: stripped={}, clusters={}, evidence={}{} -> {}\n",
+                "- `{}`: stripped={}, clusters={}, evidence={}{}{} -> {}\n",
                 case.id,
                 case.stripped_count,
                 case.cluster_count,
                 if case.evidence_valid { "valid" } else { "weak" },
                 provider_evidence,
+                card_quality,
                 if case.passed { "hit" } else { "miss" }
             ));
         }
@@ -105,6 +135,28 @@ impl GoldenSetEvalReport {
     }
 }
 
+impl GoldenSetEvalRunRecord {
+    pub fn new(report: GoldenSetEvalReport, provider: String) -> Self {
+        Self {
+            report,
+            provider,
+            pipeline_version: 1,
+            timestamp: Utc::now().to_rfc3339(),
+        }
+    }
+}
+
+fn format_failures(failures: &[CardQualityFailure]) -> String {
+    if failures.is_empty() {
+        return "none".to_string();
+    }
+    failures
+        .iter()
+        .map(|failure| format!("{failure:?}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GoldenCaseEval {
     pub id: String,
@@ -112,8 +164,24 @@ pub struct GoldenCaseEval {
     pub cluster_count: usize,
     pub evidence_valid: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card_quality_passed: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub card_quality_failures: Vec<CardQualityFailure>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_evidence_valid: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_evidence_failure_category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_failure_fixture: Option<GoldenFailureFixtureProposal>,
     pub passed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GoldenFailureFixtureProposal {
+    pub id: String,
+    pub description: String,
+    pub failure_category: String,
+    pub user_messages: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -163,8 +231,12 @@ impl crate::extract::induce::InduceProvider for EchoEvidenceInduceProvider {
   "when": "从历史会话提炼长期记忆",
   "what": "必须引用原始 observation 中的字面证据",
   "why": "确保最终 Memory Card 可被审查和回溯",
+  "boundary": "只用于验证证据回溯，不代表最终自然语言质量",
   "kind": "constraint",
   "scope": "global",
+  "memory_tier": "cross_project_principle",
+  "abstraction_level": "good",
+  "support_level": "strong",
   "evidence_quotes": [{{"observation_id": "{}", "text": "{}"}}],
   "temporal_status": "stable",
   "confidence": 0.9
@@ -229,6 +301,55 @@ pub fn run_golden_set_eval(workspace_root: &Path) -> Result<GoldenSetEvalReport>
     run_golden_set_eval_internal(workspace_root, None)
 }
 
+pub fn write_latest_golden_set_eval_run(
+    workspace_root: &Path,
+    run: &GoldenSetEvalRunRecord,
+) -> Result<()> {
+    let root = crate::fsutil::normalize_project_root(workspace_root)?;
+    let dir = crate::config::kernel_dir(&root).join("evals");
+    fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+    let path = dir.join("latest-golden.json");
+    let raw = serde_json::to_string_pretty(run)?;
+    fs::write(&path, raw).with_context(|| format!("write {}", path.display()))
+}
+
+pub fn write_provider_evidence_failure_fixtures(
+    workspace_root: &Path,
+    report: &GoldenSetEvalReport,
+) -> Result<usize> {
+    let fixtures = report
+        .positive_cases
+        .iter()
+        .filter_map(|case| case.provider_failure_fixture.clone())
+        .collect::<Vec<_>>();
+    if fixtures.is_empty() {
+        return Ok(0);
+    }
+    let root = crate::fsutil::normalize_project_root(workspace_root)?;
+    let dir = crate::config::kernel_dir(&root).join("evals");
+    fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+    let path = dir.join("provider-evidence-failure-fixtures.yml");
+    let raw = serde_yaml::to_string(&fixtures)?;
+    fs::write(&path, raw).with_context(|| format!("write {}", path.display()))?;
+    Ok(fixtures.len())
+}
+
+pub fn load_latest_golden_set_eval_run(
+    workspace_root: &Path,
+) -> Result<Option<GoldenSetEvalRunRecord>> {
+    let root = crate::fsutil::normalize_project_root(workspace_root)?;
+    let path = crate::config::kernel_dir(&root)
+        .join("evals")
+        .join("latest-golden.json");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    serde_json::from_str(&raw)
+        .with_context(|| format!("parse {}", path.display()))
+        .map(Some)
+}
+
 pub fn run_golden_set_eval_with_provider(
     workspace_root: &Path,
     provider_override: Option<&str>,
@@ -282,6 +403,10 @@ fn run_golden_set_eval_internal(
         .iter()
         .filter(|case| case.evidence_valid)
         .count();
+    let card_quality_passed_count = positive_cases
+        .iter()
+        .filter(|case| case.card_quality_passed == Some(true))
+        .count();
     let provider_evidence_valid_count = provider.map(|_| {
         positive_cases
             .iter()
@@ -302,6 +427,8 @@ fn run_golden_set_eval_internal(
         duplicate_cluster_risk_percent: percent(duplicate_cluster_risk_count, positive_total),
         evidence_valid_count,
         evidence_valid_percent: percent(evidence_valid_count, positive_total),
+        card_quality_passed_count,
+        card_quality_passed_percent: percent(card_quality_passed_count, positive_total),
         provider_evidence_valid_count,
         provider_evidence_valid_percent: provider_evidence_valid_count
             .map(|count| percent(count, positive_total)),
@@ -355,11 +482,12 @@ fn eval_golden_case(
     } else {
         true
     };
-    let provider_evidence_valid = if positive {
+    let provider_evidence_check = if positive {
         match provider {
-            Some(provider) => Some(provider_quote_evidence_valid(
+            Some(provider) => Some(provider_quote_evidence_check(
                 &observations,
-                cluster_options,
+                case,
+                cluster_options.clone(),
                 provider,
             )?),
             None => None,
@@ -367,6 +495,25 @@ fn eval_golden_case(
     } else {
         None
     };
+    let card_quality_reports = if positive {
+        card_quality_reports_for_case(&observations, cluster_options.clone(), provider)?
+    } else {
+        Vec::new()
+    };
+    let card_quality_passed = if positive {
+        Some(
+            !card_quality_reports.is_empty()
+                && card_quality_reports.iter().all(|report| report.passed),
+        )
+    } else {
+        None
+    };
+    let card_quality_failures = card_quality_reports
+        .iter()
+        .flat_map(|report| report.failures.iter().cloned())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
     let passed = if positive {
         report.stripped_kept >= 2 && report.clusters_in < report.stripped_kept
     } else {
@@ -377,7 +524,13 @@ fn eval_golden_case(
         stripped_count: report.stripped_kept,
         cluster_count: report.clusters_in,
         evidence_valid,
-        provider_evidence_valid,
+        card_quality_passed,
+        card_quality_failures,
+        provider_evidence_valid: provider_evidence_check.as_ref().map(|check| check.valid),
+        provider_evidence_failure_category: provider_evidence_check
+            .as_ref()
+            .and_then(|check| check.failure_category.clone()),
+        provider_failure_fixture: provider_evidence_check.and_then(|check| check.fixture_proposal),
         passed,
     })
 }
@@ -407,11 +560,38 @@ fn final_quote_evidence_valid(
     }))
 }
 
-fn provider_quote_evidence_valid(
+fn card_quality_reports_for_case(
     observations: &[ObservationRecord],
     cluster_options: ClusterOptions,
+    provider: Option<&dyn crate::extract::induce::InduceProvider>,
+) -> Result<Vec<crate::extract::CardQualityReport>> {
+    let options = PipelineOptions {
+        cluster: cluster_options,
+        induce: InduceMode::PerCluster,
+        skip_induce: false,
+    };
+    let noop_provider = EchoEvidenceInduceProvider;
+    let provider = provider.unwrap_or(&noop_provider);
+    let report = run_pipeline_with(observations, provider, &options)?;
+    Ok(report
+        .cards
+        .iter()
+        .map(quality_report_for_crystallized_card)
+        .collect())
+}
+
+struct ProviderEvidenceCheck {
+    valid: bool,
+    failure_category: Option<String>,
+    fixture_proposal: Option<GoldenFailureFixtureProposal>,
+}
+
+fn provider_quote_evidence_check(
+    observations: &[ObservationRecord],
+    case: &GoldenCase,
+    cluster_options: ClusterOptions,
     provider: &dyn crate::extract::induce::InduceProvider,
-) -> Result<bool> {
+) -> Result<ProviderEvidenceCheck> {
     let options = PipelineOptions {
         cluster: cluster_options,
         induce: InduceMode::PerCluster,
@@ -419,18 +599,77 @@ fn provider_quote_evidence_valid(
     };
     let report = run_pipeline_with(observations, provider, &options)?;
     if report.cards.is_empty() {
-        return Ok(false);
+        let category = provider_failure_category_from_preview(&report.failures_preview)
+            .unwrap_or("provider-no-card");
+        return Ok(provider_evidence_failure(
+            case,
+            category,
+            "Provider did not produce a Memory Card for a positive golden case.",
+        ));
     }
-    Ok(report.cards.iter().all(|card| {
-        !card.evidence_quotes.is_empty()
-            && card.evidence_quotes.iter().all(|quote| {
-                observations.iter().any(|observation| {
-                    observation.id == quote.observation_id
-                        && !quote.text.trim().is_empty()
-                        && observation.body.contains(quote.text.trim())
-                })
-            })
-    }))
+    for card in &report.cards {
+        if card.evidence_quotes.is_empty() {
+            return Ok(provider_evidence_failure(
+                case,
+                "provider-missing-evidence",
+                "Provider produced a Memory Card without evidence quotes.",
+            ));
+        }
+        for quote in &card.evidence_quotes {
+            let grounded = observations.iter().any(|observation| {
+                observation.id == quote.observation_id
+                    && !quote.text.trim().is_empty()
+                    && observation.body.contains(quote.text.trim())
+            });
+            if !grounded {
+                return Ok(provider_evidence_failure(
+                    case,
+                    "provider-untraceable-evidence",
+                    "Provider evidence quote could not be traced to the source observations.",
+                ));
+            }
+        }
+    }
+    Ok(ProviderEvidenceCheck {
+        valid: true,
+        failure_category: None,
+        fixture_proposal: None,
+    })
+}
+
+fn provider_failure_category_from_preview(preview: &[String]) -> Option<&'static str> {
+    preview.iter().find_map(|line| {
+        let lower = line.to_lowercase();
+        if lower.contains("evidence")
+            && (lower.contains("ground")
+                || lower.contains("trace")
+                || lower.contains("not in source")
+                || lower.contains("observation"))
+        {
+            Some("provider-untraceable-evidence")
+        } else if lower.contains("evidence") {
+            Some("provider-missing-evidence")
+        } else {
+            None
+        }
+    })
+}
+
+fn provider_evidence_failure(
+    case: &GoldenCase,
+    category: &str,
+    description: &str,
+) -> ProviderEvidenceCheck {
+    ProviderEvidenceCheck {
+        valid: false,
+        failure_category: Some(category.to_string()),
+        fixture_proposal: Some(GoldenFailureFixtureProposal {
+            id: format!("provider-evidence-{}", case.id),
+            description: description.to_string(),
+            failure_category: category.to_string(),
+            user_messages: case.user_messages.clone(),
+        }),
+    }
 }
 
 fn percent(part: usize, whole: usize) -> f32 {

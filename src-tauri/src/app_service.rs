@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 use std::thread;
 
 use agent_kernel::{
-    build, candidate, catalog, config, draft, fsutil, kernel, observation, project_registry,
-    rule_test, scanner, memory_card,
+    build, candidate, catalog, config, draft, eval, fsutil, kernel, memory_card, observation,
+    project_registry, rule_test, scanner,
 };
 use serde::Serialize;
 
@@ -57,6 +57,31 @@ pub struct ProjectQualityView {
     pub rule_ci: rule_test::RuleTestReport,
     pub build_preview: build::BuildReport,
     pub status: build::StatusReport,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProjectEvalMetricView {
+    pub label: String,
+    pub percent: Option<f32>,
+    pub count: usize,
+    pub total: usize,
+    pub status: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProjectEvalRunView {
+    pub project_path: String,
+    pub status: String,
+    pub provider: Option<String>,
+    pub pipeline_version: Option<u32>,
+    pub timestamp: Option<String>,
+    pub recall: Option<ProjectEvalMetricView>,
+    pub precision: Option<ProjectEvalMetricView>,
+    pub one_off_false_positive: Option<ProjectEvalMetricView>,
+    pub duplicate_cluster_risk: Option<ProjectEvalMetricView>,
+    pub evidence_validity: Option<ProjectEvalMetricView>,
+    pub provider_evidence_validity: Option<ProjectEvalMetricView>,
+    pub recommendations: Vec<String>,
 }
 
 pub fn load_project_dashboard(
@@ -389,6 +414,150 @@ pub fn load_project_quality_view(project_root: &Path) -> anyhow::Result<ProjectQ
     })
 }
 
+pub fn load_project_eval_run_view(project_root: &Path) -> anyhow::Result<ProjectEvalRunView> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    let Some(run) = eval::load_latest_golden_set_eval_run(&root)? else {
+        return Ok(ProjectEvalRunView {
+            project_path: fsutil::path_to_slash(&root),
+            status: "missing".to_string(),
+            provider: None,
+            pipeline_version: None,
+            timestamp: None,
+            recall: None,
+            precision: None,
+            one_off_false_positive: None,
+            duplicate_cluster_risk: None,
+            evidence_validity: None,
+            provider_evidence_validity: None,
+            recommendations: vec![
+                "Run `cargo run --quiet -- eval --golden-set --project . --json` to create the first eval baseline.".to_string(),
+            ],
+        });
+    };
+    let report = run.report;
+    let provider_evidence_validity = match (
+        report.provider_evidence_valid_count,
+        report.provider_evidence_valid_percent,
+    ) {
+        (Some(count), Some(percent)) => Some(metric(
+            "Provider evidence validity",
+            Some(percent),
+            count,
+            report.positive_total,
+            percent >= 80.0,
+        )),
+        _ => None,
+    };
+    let recall = metric(
+        "Recall",
+        Some(report.positive_recall_percent),
+        report.positive_hits,
+        report.positive_total,
+        report.positive_recall_percent >= 85.0,
+    );
+    let precision = metric(
+        "Precision",
+        Some(report.negative_precision_percent),
+        report.negative_rejected,
+        report.negative_total,
+        report.negative_precision_percent >= 90.0,
+    );
+    let one_off_false_positive = metric(
+        "One-off false positives",
+        Some(report.one_off_false_positive_percent),
+        report.one_off_false_positive_count,
+        report.negative_total,
+        report.one_off_false_positive_count == 0,
+    );
+    let duplicate_cluster_risk = metric(
+        "Duplicate risk",
+        Some(report.duplicate_cluster_risk_percent),
+        report.duplicate_cluster_risk_count,
+        report.positive_total,
+        report.duplicate_cluster_risk_count == 0,
+    );
+    let evidence_validity = metric(
+        "Evidence validity",
+        Some(report.evidence_valid_percent),
+        report.evidence_valid_count,
+        report.positive_total,
+        report.evidence_valid_percent >= 95.0,
+    );
+    let recommendations = eval_recommendations(
+        &recall,
+        &precision,
+        &one_off_false_positive,
+        &duplicate_cluster_risk,
+        &evidence_validity,
+        provider_evidence_validity.as_ref(),
+    );
+    let status = if recommendations.is_empty() {
+        "passing"
+    } else {
+        "attention"
+    };
+    Ok(ProjectEvalRunView {
+        project_path: fsutil::path_to_slash(&root),
+        status: status.to_string(),
+        provider: Some(run.provider),
+        pipeline_version: Some(run.pipeline_version),
+        timestamp: Some(run.timestamp),
+        recall: Some(recall),
+        precision: Some(precision),
+        one_off_false_positive: Some(one_off_false_positive),
+        duplicate_cluster_risk: Some(duplicate_cluster_risk),
+        evidence_validity: Some(evidence_validity),
+        provider_evidence_validity,
+        recommendations,
+    })
+}
+
+fn metric(
+    label: &str,
+    percent: Option<f32>,
+    count: usize,
+    total: usize,
+    passed: bool,
+) -> ProjectEvalMetricView {
+    ProjectEvalMetricView {
+        label: label.to_string(),
+        percent,
+        count,
+        total,
+        status: if passed { "pass" } else { "fail" }.to_string(),
+    }
+}
+
+fn eval_recommendations(
+    recall: &ProjectEvalMetricView,
+    precision: &ProjectEvalMetricView,
+    one_off_false_positive: &ProjectEvalMetricView,
+    duplicate_cluster_risk: &ProjectEvalMetricView,
+    evidence_validity: &ProjectEvalMetricView,
+    provider_evidence_validity: Option<&ProjectEvalMetricView>,
+) -> Vec<String> {
+    let mut recommendations = Vec::new();
+    if recall.status == "fail" {
+        recommendations.push("Review missed positive golden cases before trusting new extraction changes.".to_string());
+    }
+    if precision.status == "fail" {
+        recommendations.push("Tighten rejection rules for negative golden cases to reduce noisy suggestions.".to_string());
+    }
+    if one_off_false_positive.status == "fail" {
+        recommendations.push("Inspect one-off leaks and raise recurrence requirements for temporary preferences.".to_string());
+    }
+    if duplicate_cluster_risk.status == "fail" {
+        recommendations.push("Tune clustering/deduplication before approving duplicate-looking Memory Cards.".to_string());
+    }
+    if evidence_validity.status == "fail" {
+        recommendations.push("Fix final evidence quote grounding before showing suggestions as review-ready.".to_string());
+    }
+    if provider_evidence_validity.is_some_and(|metric| metric.status == "fail") {
+        recommendations.push("Rerun with provider evidence checks and inspect hallucinated or weak provider quotes.".to_string());
+    }
+    recommendations
+}
+
 pub fn start_evolve_project_job(
     task_store: DesktopTaskStore,
     project_path: String,
@@ -602,13 +771,36 @@ pub fn start_sync_project_job(
         );
         match sync_project_importing_artifact_drifts(Path::new(&background_project_path)) {
             Ok(report) => {
+                let checkpoint = build::load_last_sync_checkpoint(Path::new(&background_project_path))
+                    .ok()
+                    .flatten();
+                let rule_ci = rule_test::run_rule_tests(Path::new(&background_project_path)).ok();
+                let verification_note = rule_ci
+                    .map(|report| format!("Rule CI {} passed / {} failed", report.passed, report.failed))
+                    .unwrap_or_else(|| "Rule CI 状态待刷新".to_string());
                 if report.created > 0 {
                     background_store.finish_job(
                         &job_id,
-                        &format!("已导入 {} 条漂移草稿并同步生成产物", report.created),
+                        &format!(
+                            "已导入 {} 条漂移草稿并同步生成产物；{}；checkpoint {}",
+                            report.created,
+                            verification_note,
+                            checkpoint
+                                .map(|item| item.id)
+                                .unwrap_or_else(|| "未记录".to_string())
+                        ),
                     );
                 } else {
-                    background_store.finish_job(&job_id, "已同步生成产物");
+                    background_store.finish_job(
+                        &job_id,
+                        &format!(
+                            "已同步生成产物；{}；checkpoint {}",
+                            verification_note,
+                            checkpoint
+                                .map(|item| item.id)
+                                .unwrap_or_else(|| "未记录".to_string())
+                        ),
+                    );
                 }
             }
             Err(error) => background_store.finish_job(&job_id, &format!("同步失败：{error}")),

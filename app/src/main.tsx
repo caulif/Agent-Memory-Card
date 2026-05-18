@@ -40,6 +40,7 @@ import {
 import "./styles.css";
 import "./styles/jobs-progress.css";
 import "./styles/project-detail.css";
+import "./styles/settings.css";
 import "./styles/themes.css";
 import {
   buildEditFormFromDraft,
@@ -119,6 +120,7 @@ function App() {
     memory_cardLibrary,
     assignmentView,
     qualityView,
+    evalRunView,
     clearProjectReadModels,
     loadDashboard,
     loadReadModelsForPage,
@@ -401,7 +403,13 @@ function App() {
 
         {/* 概览指标条 — 仅审阅页显示 */}
         {page === "drafts" ? (
-          <ProjectOverviewStrip snapshot={snapshot} dashboard={dashboard} installedCount={installedCount} />
+          <ProjectOverviewStrip
+            snapshot={snapshot}
+            dashboard={dashboard}
+            installedCount={installedCount}
+            runningJobCount={actionableJobCount}
+            onNavigate={handleNavClick}
+          />
         ) : null}
 
         {/* 内容区 */}
@@ -420,6 +428,7 @@ function App() {
                       assignment={assignmentView}
                       library={memory_cardLibrary}
                       quality={qualityView}
+                      evalRun={evalRunView}
                       pendingAction={pendingAction}
                       disabled={!candidateInbox && !reviewInbox && !snapshot}
                       onAction={projectAction}
@@ -453,6 +462,7 @@ function App() {
                       snapshot={snapshot}
                       assignment={assignmentView}
                       library={memory_cardLibrary}
+                      quality={qualityView}
                       pendingAction={pendingAction}
                       disabled={!assignmentView && !snapshot}
                       onAction={projectAction}

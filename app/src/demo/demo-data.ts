@@ -6,6 +6,7 @@
   ProjectCandidateInbox,
   ProjectMemoryCardLibrary,
   ProjectAssignmentView,
+  ProjectEvalRunView,
   ProjectQualityView,
   RegisteredProject,
 } from "../types/domain";
@@ -269,5 +270,24 @@ export function createDemoProjectQualityView(projectPath: string): ProjectQualit
     rule_ci: snapshot.rule_ci,
     build_preview: snapshot.build_preview,
     status: snapshot.status,
+  };
+}
+
+export function createDemoProjectEvalRunView(projectPath: string): ProjectEvalRunView {
+  return {
+    project_path: projectPath,
+    status: "attention",
+    provider: "deterministic",
+    pipeline_version: 1,
+    timestamp: "2026-05-18T12:00:00+08:00",
+    recall: { label: "Recall", percent: 86, count: 12, total: 14, status: "pass" },
+    precision: { label: "Precision", percent: 94, count: 15, total: 16, status: "pass" },
+    one_off_false_positive: { label: "One-off false positives", percent: 6, count: 1, total: 16, status: "fail" },
+    duplicate_cluster_risk: { label: "Duplicate risk", percent: 0, count: 0, total: 14, status: "pass" },
+    evidence_validity: { label: "Evidence validity", percent: 100, count: 14, total: 14, status: "pass" },
+    provider_evidence_validity: null,
+    recommendations: [
+      "Inspect one-off leaks and raise recurrence requirements for temporary preferences.",
+    ],
   };
 }

@@ -153,6 +153,86 @@ use super::*;
         let quality = app_service::load_project_quality_view(project.path()).expect("quality");
         assert_eq!(quality.project_path, dashboard.project_path);
         assert_eq!(quality.rule_ci.failed, 0);
+
+        let missing_eval =
+            app_service::load_project_eval_run_view(project.path()).expect("missing eval");
+        assert_eq!(missing_eval.status, "missing");
+        assert!(missing_eval.recommendations[0].contains("eval --golden-set"));
+
+        let run = agent_kernel::eval::GoldenSetEvalRunRecord {
+            provider: "deterministic".to_string(),
+            pipeline_version: 1,
+            timestamp: "2026-05-18T12:00:00+08:00".to_string(),
+            report: agent_kernel::eval::GoldenSetEvalReport {
+                positive_total: 2,
+                positive_hits: 1,
+                positive_recall_percent: 50.0,
+                negative_total: 2,
+                negative_rejected: 2,
+                negative_precision_percent: 100.0,
+                one_off_false_positive_count: 0,
+                one_off_false_positive_percent: 0.0,
+                duplicate_cluster_risk_count: 1,
+                duplicate_cluster_risk_percent: 50.0,
+                evidence_valid_count: 2,
+                evidence_valid_percent: 100.0,
+                card_quality_passed_count: 1,
+                card_quality_passed_percent: 50.0,
+                provider_evidence_valid_count: None,
+                provider_evidence_valid_percent: None,
+                positive_cases: Vec::new(),
+                negative_cases: Vec::new(),
+            },
+        };
+        agent_kernel::eval::write_latest_golden_set_eval_run(project.path(), &run)
+            .expect("write eval run");
+        let eval_run = app_service::load_project_eval_run_view(project.path()).expect("eval run");
+        assert_eq!(eval_run.status, "attention");
+        assert_eq!(eval_run.provider.as_deref(), Some("deterministic"));
+        assert_eq!(eval_run.recall.expect("recall").status, "fail");
+        assert_eq!(
+            eval_run
+                .duplicate_cluster_risk
+                .expect("duplicate risk")
+                .status,
+            "fail"
+        );
+        assert!(eval_run.recommendations.iter().any(|item| item.contains("missed positive")));
+    }
+
+    #[test]
+    fn provider_status_reports_missing_remote_key_as_actionable_failure() {
+        let project = tempfile::tempdir().expect("project");
+        unsafe { std::env::remove_var("AGENT_KERNEL_TEST_MISSING_KEY") };
+        crate::provider_config::save_custom_provider_config(
+            project.path(),
+            crate::provider_config::CustomProviderConfig {
+                enabled: true,
+                protocol: "openai-compatible".to_string(),
+                base_url: "https://api.example.invalid/v1".to_string(),
+                model: "example-model".to_string(),
+                api_key_env: "AGENT_KERNEL_TEST_MISSING_KEY".to_string(),
+                api_key: None,
+            },
+        )
+        .expect("save provider");
+
+        let status =
+            crate::provider_config::provider_status(project.path(), false).expect("status");
+
+        assert_eq!(status.status, "fail");
+        assert!(status.checks.iter().any(|item| {
+            item.label == "API key"
+                && item.status == "fail"
+                && item
+                    .next_action
+                    .as_deref()
+                    .is_some_and(|action| action.contains("SK"))
+        }));
+        assert!(status
+            .next_actions
+            .iter()
+            .any(|action| action.contains("AGENT_KERNEL_TEST_MISSING_KEY")));
     }
 
     #[test]

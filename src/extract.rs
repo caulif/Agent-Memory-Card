@@ -45,7 +45,11 @@ pub use preference::{
     PreferenceTestReport, init_preference_registry, preference_templates, test_preference_text,
     validate_preference_registry,
 };
-pub use quality::{QualityReport, QualityTextCase, quality_report_for_text_cases};
+pub use quality::{
+    CardQualityFailure, CardQualityInput, CardQualityReport, CardQualityScores, QualityReport,
+    QualityTextCase, quality_report_for_card, quality_report_for_crystallized_card,
+    quality_report_for_text_cases,
+};
 
 use atomic::split_atomic_sentences;
 use candidate_factory::{

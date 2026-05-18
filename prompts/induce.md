@@ -25,9 +25,13 @@
   "title": "8-30 字简体中文动宾结构",
   "when": "在...时 / 当...时 的场景描述",
   "what": "agent 应该做或不做什么",
-  "why": "目标或边界（从证据归纳）",
+  "why": "目标；证据不足时写 null 或空字符串，不要硬编",
+  "boundary": "适用边界、例外、不要过度应用的场景",
   "kind": "preference | constraint | procedure",
   "scope": "global | project",
+  "memory_tier": "project_rule | cross_project_principle | collaboration_preference",
+  "abstraction_level": "too_low | good | too_high",
+  "support_level": "strong | medium | weak",
   "evidence_quotes": [{"observation_id": "obs:...", "text": "簇内消息的字面短句"}],
   "temporal_status": "stable | reversed | refined",
   "confidence": 0.5-1.0
@@ -38,9 +42,19 @@
 
 硬约束：
 - evidence_quotes 至少 1 条；每条 text 必须是某条输入消息的字面子串
+- when 必须是可触发场景，不要写“在项目中”“总是”这类空话
+- what 必须是下一次 agent 能执行或避免的动作，不要只写“提高质量”“注意规范”
+- boundary 必须说明适用边界、例外或不要过度应用的情况
+- support_level=weak 或 abstraction_level != good 时优先 reject，不要把弱证据包装成好卡
 - recurrence=1 的簇也允许接受，但 confidence 应 < 0.85
 - scope 判定：适用于所有项目、所有开发任务或通用 agent 工作方式时必须用 "global"；只有依赖本项目文件、产品、架构、发布范围或工具约定时才用 "project"
 - 当一句话同时包含项目细节和通用方法论时，低层产品/实现细节只作为证据背景；Memory Card 应抽取可复用的项目工作流或跨项目方法论
 - 多消息簇按时序看：用户后面改变态度时 temporal_status="reversed"，规则用最新表达
 - 后期细化时 temporal_status="refined"，规则用最细那条
 - 严禁编造 evidence_quotes 中没有的事实
+
+输出前自检：
+- evidence 是否直接支撑 what？
+- why 是否能从 evidence 推出？不能推出就留空，不要合理化。
+- boundary 是否来自证据或保守隐私/适用范围约束？
+- 抽象层级是否刚好：不是低层产品细节，也不是空泛原则？

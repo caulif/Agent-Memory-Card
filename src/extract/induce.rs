@@ -31,6 +31,10 @@ pub struct InducedCandidate {
     /// 目的或边界
     pub why: String,
 
+    /// 适用边界或例外；新 prompt 会要求，旧 provider 输出可为空。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary: Option<String>,
+
     /// `preference` / `constraint` / `procedure`
     pub kind: String,
 
@@ -39,6 +43,18 @@ pub struct InducedCandidate {
 
     /// 至少 1 条；每条 text 必须是簇内某条消息的字面子串
     pub evidence_quotes: Vec<EvidenceQuote>,
+
+    /// `project_rule` / `cross_project_principle` / `collaboration_preference`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_tier: Option<String>,
+
+    /// `too_low` / `good` / `too_high`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abstraction_level: Option<String>,
+
+    /// `strong` / `medium` / `weak`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub support_level: Option<String>,
 
     /// `stable` / `reversed` / `refined`（V2 修订 5）
     pub temporal_status: String,
@@ -266,7 +282,7 @@ Also include memory-governance, validation, review-boundary, and candidate-quali
 Merge duplicate concepts instead of emitting near-duplicates.\n\
 Treat product details, numeric thresholds, UI entry points, tutorial copy, storage keys, enum names, and one-off feature settings as evidence context, not Memory Cards.\n\
 If a project-specific workflow rule is present, prefer a concrete project-scoped workflow card over a low-level product-detail card.\n\
-Return only valid JSON with this shape: {{\"candidates\": [{{\"cluster_id\":\"...\",\"title\":\"...\",\"when\":\"...\",\"what\":\"...\",\"why\":\"...\",\"kind\":\"preference|constraint|procedure\",\"scope\":\"global|project\",\"evidence_quotes\":[{{\"observation_id\":\"...\",\"text\":\"literal quote\"}}],\"temporal_status\":\"stable|reversed|refined\",\"confidence\":0.0}}]}}.\n\
+Return only valid JSON with this shape: {{\"candidates\": [{{\"cluster_id\":\"...\",\"title\":\"...\",\"when\":\"...\",\"what\":\"...\",\"why\":\"...\",\"boundary\":\"...\",\"kind\":\"preference|constraint|procedure\",\"scope\":\"global|project\",\"memory_tier\":\"project_rule|cross_project_principle|collaboration_preference\",\"abstraction_level\":\"too_low|good|too_high\",\"support_level\":\"strong|medium|weak\",\"evidence_quotes\":[{{\"observation_id\":\"...\",\"text\":\"literal quote\"}}],\"temporal_status\":\"stable|reversed|refined\",\"confidence\":0.0}}]}}.\n\
 Do not include markdown fences or explanatory text. Each item must cite literal evidence_quotes from the messages.\n\
 Use cluster_id from one cited cluster as the candidate cluster_id when you include it.\n\
 If no durable rule exists, return {{\"candidates\": []}}.\n\n\
@@ -302,8 +318,12 @@ fn induce_schema() -> ProviderJsonSchema {
                 "when": {"type": "string"},
                 "what": {"type": "string"},
                 "why": {"type": "string"},
+                "boundary": {"type": "string"},
                 "kind": {"enum": ["preference", "constraint", "procedure"]},
                 "scope": {"enum": ["global", "project"]},
+                "memory_tier": {"enum": ["project_rule", "cross_project_principle", "collaboration_preference"]},
+                "abstraction_level": {"enum": ["too_low", "good", "too_high"]},
+                "support_level": {"enum": ["strong", "medium", "weak"]},
                 "evidence_quotes": {
                     "type": "array",
                     "items": {
@@ -343,8 +363,12 @@ fn parse_induce_response(
     let when = require_string(&value, "when")?;
     let what = require_string(&value, "what")?;
     let why = require_string(&value, "why")?;
+    let boundary = optional_nonempty_string(&value, "boundary");
     let kind = require_string(&value, "kind")?;
     let scope = require_string(&value, "scope")?;
+    let memory_tier = optional_nonempty_string(&value, "memory_tier");
+    let abstraction_level = optional_nonempty_string(&value, "abstraction_level");
+    let support_level = optional_nonempty_string(&value, "support_level");
     let temporal_status = value
         .get("temporal_status")
         .and_then(|v| v.as_str())
@@ -385,9 +409,13 @@ fn parse_induce_response(
         when,
         what,
         why,
+        boundary,
         kind,
         scope,
         evidence_quotes,
+        memory_tier,
+        abstraction_level,
+        support_level,
         temporal_status,
         confidence,
     };
@@ -446,8 +474,12 @@ fn candidate_from_value(
     let when = require_string(value, "when")?;
     let what = require_string(value, "what")?;
     let why = require_string(value, "why")?;
+    let boundary = optional_nonempty_string(value, "boundary");
     let kind = require_string(value, "kind")?;
     let scope = require_string(value, "scope")?;
+    let memory_tier = optional_nonempty_string(value, "memory_tier");
+    let abstraction_level = optional_nonempty_string(value, "abstraction_level");
+    let support_level = optional_nonempty_string(value, "support_level");
     let temporal_status = value
         .get("temporal_status")
         .and_then(|v| v.as_str())
@@ -487,9 +519,13 @@ fn candidate_from_value(
         when,
         what,
         why,
+        boundary,
         kind,
         scope,
         evidence_quotes,
+        memory_tier,
+        abstraction_level,
+        support_level,
         temporal_status,
         confidence,
     })
@@ -570,6 +606,15 @@ fn require_string(value: &serde_json::Value, field: &str) -> Result<String> {
         .and_then(|v| v.as_str())
         .with_context(|| format!("missing field `{field}`"))?
         .to_string())
+}
+
+fn optional_nonempty_string(value: &serde_json::Value, field: &str) -> Option<String> {
+    value
+        .get(field)
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
 }
 
 /// 校验 evidence_quotes：每条 text 必须出现在簇内对应 observation_id 的消息中。
@@ -717,8 +762,12 @@ mod tests {
             "when": "在评估提炼质量或修改提炼逻辑时",
             "what": "优先使用真实历史会话做回归验证",
             "why": "让规则接受真实数据检验",
+            "boundary": "只在评估提炼质量时使用，不把真实对话写入可提交 fixture",
             "kind": "procedure",
             "scope": "global",
+            "memory_tier": "cross_project_principle",
+            "abstraction_level": "good",
+            "support_level": "strong",
             "evidence_quotes": [
                 {"observation_id": "o1", "text": "优先用真实历史会话做回归"},
                 {"observation_id": "o2", "text": "不要只依赖样例"}
@@ -735,6 +784,13 @@ mod tests {
             InductionOutcome::Accepted(c) => {
                 assert_eq!(c.title, "评估提炼优先用真实历史回归");
                 assert_eq!(c.kind, "procedure");
+                assert_eq!(
+                    c.boundary.as_deref(),
+                    Some("只在评估提炼质量时使用，不把真实对话写入可提交 fixture")
+                );
+                assert_eq!(c.memory_tier.as_deref(), Some("cross_project_principle"));
+                assert_eq!(c.abstraction_level.as_deref(), Some("good"));
+                assert_eq!(c.support_level.as_deref(), Some("strong"));
                 assert_eq!(c.evidence_quotes.len(), 2);
                 assert!((c.confidence - 0.85).abs() < 1e-3);
             }
@@ -751,6 +807,42 @@ mod tests {
         };
         let outcomes = induce_with_provider(&provider, &[cluster]);
         assert!(matches!(outcomes[0], InductionOutcome::Rejected { .. }));
+    }
+
+    #[test]
+    fn parse_legacy_accept_response_keeps_optional_quality_fields_empty() {
+        let cluster = cluster_with(vec![
+            truncated("o1", "评估提炼时优先用合成样例回归质量门"),
+            truncated("o2", "不要让质量评估依赖私人对话原文"),
+        ]);
+        let response = r#"{
+            "title": "评估质量门优先合成回归",
+            "when": "评估 Memory Card 质量门时",
+            "what": "优先使用合成样例覆盖边界行为",
+            "why": "避免测试依赖私人对话原文",
+            "kind": "procedure",
+            "scope": "global",
+            "evidence_quotes": [
+                {"observation_id": "o1", "text": "优先用合成样例回归质量门"}
+            ],
+            "temporal_status": "stable",
+            "confidence": 0.84
+        }"#;
+        let provider = StubProvider {
+            response: response.to_string(),
+        };
+
+        let outcomes = induce_with_provider(&provider, &[cluster]);
+
+        match &outcomes[0] {
+            InductionOutcome::Accepted(c) => {
+                assert_eq!(c.boundary, None);
+                assert_eq!(c.memory_tier, None);
+                assert_eq!(c.abstraction_level, None);
+                assert_eq!(c.support_level, None);
+            }
+            other => panic!("expected accept, got {:?}", other),
+        }
     }
 
     #[test]

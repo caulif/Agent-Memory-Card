@@ -133,11 +133,26 @@ fn render_body(candidate: &InducedCandidate) -> String {
         .trim_end_matches(';')
         .trim_end_matches('。');
     let why = candidate.why.trim().trim_end_matches('。');
+    let boundary = candidate
+        .boundary
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.trim_end_matches('。'));
 
-    match candidate.kind.as_str() {
+    let rendered = match candidate.kind.as_str() {
         "preference" => render_body_preference(when, what, why),
         "constraint" => render_body_constraint(when, what, why),
         _ => render_body_procedure(when, what, why),
+    };
+    if let Some(boundary) = boundary {
+        format!(
+            "{}；边界是{}。",
+            rendered.trim_end_matches('。').trim_end_matches('；'),
+            boundary
+        )
+    } else {
+        rendered
     }
 }
 
@@ -429,12 +444,16 @@ mod tests {
             when: when.to_string(),
             what: what.to_string(),
             why: why.to_string(),
+            boundary: None,
             kind: kind.to_string(),
             scope: "global".to_string(),
             evidence_quotes: vec![EvidenceQuote {
                 observation_id: "o1".to_string(),
                 text: "evidence text".to_string(),
             }],
+            memory_tier: None,
+            abstraction_level: None,
+            support_level: None,
             temporal_status: "stable".to_string(),
             confidence: 0.8,
         }
@@ -647,6 +666,31 @@ mod tests {
         let outcome = crystallize_one(&c);
 
         assert!(matches!(outcome, CrystallizationOutcome::Accepted(_)));
+    }
+
+    #[test]
+    fn body_renders_candidate_boundary_when_present() {
+        let mut c = candidate(
+            "生成卡片前确认隐私边界",
+            "优化 Memory Card 生成链路时",
+            "先区分合成测试、脱敏样例和本地私有评估",
+            "保护真实对话不进入仓库或运行时参考",
+            "procedure",
+            2,
+        );
+        c.boundary = Some("真实对话只用于本地聚合评估，不写入 Git 或 GitHub".to_string());
+
+        let outcome = crystallize_one(&c);
+
+        match outcome {
+            CrystallizationOutcome::Accepted(card) => {
+                assert!(card.body.contains("边界是"));
+                assert!(card.body.contains("不写入 Git 或 GitHub"));
+            }
+            CrystallizationOutcome::Rejected { reasons, .. } => {
+                panic!("should accept, got rejection: {reasons:?}")
+            }
+        }
     }
 
     #[test]

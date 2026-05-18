@@ -290,6 +290,16 @@ fn main() -> Result<()> {
                 } else {
                     eval::run_golden_set_eval(&project)?
                 };
+                let run = eval::GoldenSetEvalRunRecord::new(
+                    report.clone(),
+                    provider
+                        .clone()
+                        .unwrap_or_else(|| "deterministic".to_string()),
+                );
+                eval::write_latest_golden_set_eval_run(&project, &run)?;
+                if provider.is_some() {
+                    eval::write_provider_evidence_failure_fixtures(&project, &report)?;
+                }
                 if json {
                     println!("{}", serde_json::to_string_pretty(&report)?);
                 } else {

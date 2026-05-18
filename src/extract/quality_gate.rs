@@ -47,6 +47,14 @@ pub(crate) fn evaluate_candidate_quality(
         );
     }
 
+    if looks_like_generation_quality_acceptance_chatter(&lower) {
+        return skip(
+            MemoryCardOperation::Noop,
+            "memory-pipeline-meta",
+            "Candidate is about Memory Card generation/evaluation mechanics, not durable user preference.",
+        );
+    }
+
     if looks_like_meta_discussion(&lower) {
         return skip(
             MemoryCardOperation::Noop,
@@ -233,6 +241,64 @@ fn looks_like_meta_discussion(lower: &str) -> bool {
         || candidate_pipeline_rule
         || generic_planning_principle
         || current_product_feedback
+}
+
+fn looks_like_generation_quality_acceptance_chatter(lower: &str) -> bool {
+    let generation_surface = [
+        "prompt",
+        "render",
+        "rewrite",
+        "llm",
+        "模型",
+        "卡片",
+        "最终卡片",
+        "成品卡片",
+        "改写器",
+        "memory card",
+        "candidate",
+        "候选",
+        "生成",
+        "提炼",
+        "筛选",
+    ]
+    .iter()
+    .filter(|marker| lower.contains(**marker))
+    .count()
+        >= 2;
+    let eval_surface = [
+        "抽样",
+        "最终卡片",
+        "分数",
+        "指标",
+        "人工看",
+        "人工审阅",
+        "质量",
+        "评估",
+        "golden",
+        "eval",
+        "score",
+        "metric",
+        "sample",
+    ]
+    .iter()
+    .filter(|marker| lower.contains(**marker))
+    .count()
+        >= 2;
+    let process_instruction = [
+        "要",
+        "不要",
+        "不能只",
+        "不应该只",
+        "必须",
+        "should",
+        "must",
+        "not only",
+        "don't just",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker));
+
+    generation_surface && eval_surface && process_instruction
 }
 
 fn looks_like_generated_instruction_artifact(lower: &str) -> bool {
@@ -564,6 +630,20 @@ mod tests {
 
         assert_eq!(decision.disposition, QualityDisposition::Skip);
         assert_eq!(decision.flags, vec!["meta-discussion"]);
+    }
+
+    #[test]
+    fn rejects_generation_quality_acceptance_chatter() {
+        let decision = evaluate_candidate_quality(
+            &candidate(
+                "修改卡片改写器要抽样审阅成品",
+                "修改卡片改写器时，必须抽样审阅最终卡片，不要只看质量分。",
+            ),
+            &ExtractionAction::new_candidate(),
+        );
+
+        assert_eq!(decision.disposition, QualityDisposition::Skip);
+        assert_eq!(decision.flags, vec!["memory-pipeline-meta"]);
     }
 
     #[test]

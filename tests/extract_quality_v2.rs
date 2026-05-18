@@ -510,6 +510,35 @@ fn dry_run_filters_meta_discussion_questions_about_the_pipeline() {
 }
 
 #[test]
+fn dry_run_filters_generation_quality_acceptance_chatter() {
+    let temp = tempfile::tempdir().expect("tempdir");
+
+    let report = extract::extract_to_drafts(
+        temp.path(),
+        Some("修改卡片改写器时，必须抽样审阅最终卡片，不要只看质量分。".to_string()),
+        None,
+        vec!["codex".to_string()],
+        Some("local".to_string()),
+        true,
+    )
+    .expect("extract");
+
+    assert!(
+        report.candidates.is_empty(),
+        "local eval acceptance chatter should not become a durable Memory Card: {:#?}",
+        report.candidates
+    );
+    assert!(
+        report
+            .skipped
+            .iter()
+            .any(|item| item.contains("memory-pipeline-meta") || item.contains("meta-discussion")),
+        "quality gate should explain the generation-quality rejection: {:#?}",
+        report.skipped
+    );
+}
+
+#[test]
 fn dry_run_hides_exact_duplicate_existing_memory_cards_instead_of_showing_new_candidates() {
     let temp = tempfile::tempdir().expect("tempdir");
     agent_kernel::memory_card::add_memory_card(

@@ -21,5 +21,19 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy -- -D warnings
       - run: cargo build --release
+      - run: cargo test --test eval_golden_report -- --nocapture
       - run: cargo build --manifest-path src-tauri/Cargo.toml --release
+      - run: cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture
       - run: bun run --cwd app build
+      - name: Smoke CLI binary
+        shell: pwsh
+        run: |
+          $cli = "target/release/agent-kernel.exe"
+          if (!(Test-Path $cli)) { throw "Missing CLI binary: $cli" }
+          & $cli --version
+      - name: Smoke desktop frontend bundle
+        shell: pwsh
+        run: |
+          if (!(Test-Path "app/dist/index.html")) { throw "Missing frontend bundle app/dist/index.html" }
+          $assets = Get-ChildItem "app/dist/assets" -File -ErrorAction Stop
+          if ($assets.Count -eq 0) { throw "Frontend bundle has no assets" }

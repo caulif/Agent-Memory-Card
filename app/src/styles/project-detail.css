@@ -460,6 +460,45 @@
   font-style: normal;
 }
 
+.artifact-sync-checkpoint {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(45, 125, 70, 0.22);
+  border-radius: var(--radius-md);
+  background: rgba(45, 125, 70, 0.06);
+}
+
+.artifact-sync-checkpoint div {
+  display: grid;
+  gap: 3px;
+}
+
+.artifact-sync-checkpoint span,
+.artifact-sync-checkpoint small,
+.artifact-sync-checkpoint li {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.artifact-sync-checkpoint strong {
+  color: var(--color-text-primary);
+  font-size: 12px;
+}
+
+.artifact-sync-checkpoint summary {
+  cursor: pointer;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.artifact-sync-checkpoint ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
 .artifact-preview-diffs {
   grid-column: 1 / -1;
   display: grid;
@@ -523,6 +562,94 @@
   border-top: 1px solid var(--color-border);
   flex-wrap: wrap;
   align-items: center;
+}
+
+.candidate-queue-item.needs-review {
+  border-color: rgba(212, 162, 59, 0.35);
+}
+
+.candidate-queue-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.candidate-queue-evidence span {
+  padding: 2px 6px;
+  border-radius: var(--radius-pill);
+  background: var(--color-canvas);
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.confidence-badge.review {
+  color: #8c6428;
+  background: rgba(212, 162, 59, 0.12);
+}
+
+.confidence-badge.blocked {
+  color: #a03a3a;
+  background: rgba(160, 58, 58, 0.12);
+}
+
+.review-step-stack {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.review-step {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-raised);
+}
+
+.review-step > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.review-step strong,
+.review-action-hint strong {
+  display: block;
+  color: var(--color-text-primary);
+  font-size: 12px;
+}
+
+.review-step p {
+  margin: 3px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.review-action-hint {
+  flex-basis: 100%;
+  padding: 10px;
+  border-radius: var(--radius-md);
+  background: var(--color-canvas);
+  border: 1px solid var(--color-border);
+}
+
+.review-action-hint span {
+  display: block;
+  margin-top: 3px;
+  color: var(--color-text-muted);
+  font-size: 11px;
 }
 
 .evidence-panel {
@@ -774,6 +901,99 @@
   border-radius: 3px;
   background: var(--color-accent);
   transition: width 0.5s ease;
+}
+
+.eval-run-card {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.eval-run-card.attention {
+  border-color: rgba(212, 162, 59, 0.42);
+}
+
+.eval-run-card.missing {
+  background: var(--color-canvas);
+}
+
+.eval-run-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.eval-run-head span,
+.eval-run-meta,
+.eval-metric-row small {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.eval-run-head strong {
+  color: var(--color-text-primary);
+  font-size: 13px;
+}
+
+.eval-run-card p {
+  margin: 10px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.eval-run-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.eval-run-meta span {
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-canvas);
+}
+
+.eval-metric-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.eval-metric-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px 42px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+  font-size: 12px;
+}
+
+.eval-metric-row span {
+  min-width: 0;
+  color: var(--color-text-secondary);
+}
+
+.eval-metric-row strong {
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  text-align: right;
+}
+
+.eval-metric-row.fail strong {
+  color: #b7791f;
+}
+
+.eval-recommendations {
+  margin-top: 10px;
 }
 
 /* 底部固定批量操作栏 */
@@ -1584,6 +1804,46 @@
   font-weight: 650;
 }
 
+.sync-verification-card {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.sync-verification-card.fail {
+  border-color: rgba(176, 57, 57, 0.35);
+}
+
+.sync-verification-card div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sync-verification-card span {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.sync-verification-card strong {
+  color: var(--color-text-primary);
+  font-size: 13px;
+}
+
+.sync-verification-card p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 /* 右侧检查器 (Agents) */
 .assignment-impact {
   display: flex;
@@ -1930,3 +2190,9 @@
     gap: 16px;
   }
 }
+/*
+ * Project detail feature styles.
+ *
+ * Owns Review Inbox, Memory Library, Agent Loadout, and Artifact Preview
+ * surfaces until those page modules are split into smaller feature packages.
+ */

@@ -1,6 +1,6 @@
 use agent_kernel::eval::{
     append_seen_memory_signatures, run_golden_set_eval, run_golden_set_eval_with_induce_provider,
-    score_pipeline_report,
+    score_pipeline_report, write_provider_evidence_failure_fixtures,
 };
 use agent_kernel::extract::crystallize::CrystallizedCard;
 use agent_kernel::extract::induce::EvidenceQuote;
@@ -22,6 +22,9 @@ fn golden_set_eval_reports_quality_metrics() {
     assert!(report.duplicate_cluster_risk_count <= report.positive_total);
     assert!(report.evidence_valid_count <= report.positive_total);
     assert!(report.evidence_valid_percent >= 70.0);
+    assert!(report.card_quality_passed_count <= report.positive_total);
+    assert!(report.card_quality_passed_percent >= 0.0);
+    assert!(report.card_quality_passed_percent <= 100.0);
     assert_eq!(report.provider_evidence_valid_count, None);
     assert_eq!(report.provider_evidence_valid_percent, None);
     assert_eq!(report.positive_cases.len(), report.positive_total);
@@ -32,6 +35,7 @@ fn golden_set_eval_reports_quality_metrics() {
     assert!(report.render_markdown().contains("one-off false positive"));
     assert!(report.render_markdown().contains("duplicate cluster risk"));
     assert!(report.render_markdown().contains("evidence validity"));
+    assert!(report.render_markdown().contains("card quality baseline"));
 }
 
 #[test]
@@ -79,8 +83,12 @@ impl agent_kernel::extract::induce::InduceProvider for EchoProvider {
   "when": "provider 根据重复观察归纳 Memory Card 时",
   "what": "只保留能回到原始 observation 的 evidence quote",
   "why": "让 provider-induced evidence 可以被人工审查和回放验证",
+  "boundary": "只用于可回溯证据生成，不能接受无法在 observation 中找到的 quote",
   "kind": "procedure",
   "scope": "global",
+  "memory_tier": "cross_project_principle",
+  "abstraction_level": "good",
+  "support_level": "strong",
   "evidence_quotes": [{{"observation_id": "{}", "text": "{}"}}],
   "temporal_status": "stable",
   "confidence": 0.9
@@ -138,6 +146,12 @@ fn golden_set_eval_can_measure_provider_induced_evidence_validity() {
             .iter()
             .any(|case| case.provider_evidence_valid == Some(true))
     );
+    assert!(
+        report
+            .positive_cases
+            .iter()
+            .any(|case| case.card_quality_passed.is_some())
+    );
 }
 
 #[test]
@@ -154,6 +168,36 @@ fn golden_set_eval_catches_provider_evidence_hallucination() {
             .iter()
             .all(|case| case.provider_evidence_valid == Some(false))
     );
+    assert!(
+        report
+            .positive_cases
+            .iter()
+            .all(|case| case.provider_evidence_failure_category.is_some())
+    );
+    assert!(report.positive_cases.iter().any(|case| {
+        case.provider_evidence_failure_category.as_deref() == Some("provider-untraceable-evidence")
+    }));
+}
+
+#[test]
+fn provider_evidence_failures_can_be_promoted_into_fixture_proposals() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let report =
+        run_golden_set_eval_with_induce_provider(std::path::Path::new("."), &HallucinatingProvider)
+            .expect("provider golden eval");
+
+    let written =
+        write_provider_evidence_failure_fixtures(temp.path(), &report).expect("write fixtures");
+    let path = temp
+        .path()
+        .join(".agent-kernel")
+        .join("evals")
+        .join("provider-evidence-failure-fixtures.yml");
+    let raw = std::fs::read_to_string(path).expect("fixture proposals");
+
+    assert_eq!(written, report.positive_total);
+    assert!(raw.contains("failure_category"));
+    assert!(raw.contains("provider-evidence-archived-real-history-regression"));
 }
 
 #[test]
@@ -192,6 +236,7 @@ fn score_pipeline_report_flags_duplicate_and_missing_evidence() {
             test_card("c2", Vec::new()),
         ],
         crystallize_rejects: Vec::new(),
+        stage_metrics: Vec::new(),
         failures_preview: vec!["provider malformed JSON".to_string()],
         layer_timings_ms: Default::default(),
         pipeline_version: 1,
@@ -244,6 +289,7 @@ fn score_pipeline_report_accepts_signal_fragment_evidence_ids() {
             }],
         )],
         crystallize_rejects: Vec::new(),
+        stage_metrics: Vec::new(),
         failures_preview: Vec::new(),
         layer_timings_ms: Default::default(),
         pipeline_version: 1,
@@ -294,6 +340,7 @@ fn score_pipeline_report_flags_expected_project_workflow_recall_miss() {
         crystallize_rejected: 0,
         cards: Vec::new(),
         crystallize_rejects: Vec::new(),
+        stage_metrics: Vec::new(),
         failures_preview: Vec::new(),
         layer_timings_ms: Default::default(),
         pipeline_version: 1,
@@ -338,6 +385,7 @@ fn seen_memory_signatures_are_written_as_jsonl() {
             }],
         )],
         crystallize_rejects: Vec::new(),
+        stage_metrics: Vec::new(),
         failures_preview: Vec::new(),
         layer_timings_ms: Default::default(),
         pipeline_version: 1,

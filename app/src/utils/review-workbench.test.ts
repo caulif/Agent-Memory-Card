@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { driftFileActionKey } from "../components/review/ArtifactDriftGroup";
 import {
+  buildWorkflowContractState,
   buildReviewClosureState,
   paginateArtifactBlockingTargets,
   summarizeArtifactPreview,
@@ -56,12 +58,182 @@ function draft(overrides: Partial<DraftRecord> = {}): DraftRecord {
 }
 
 describe("review workbench utilities", () => {
+  test("defines product terms that hide Candidate and Draft implementation details", () => {
+    const state = buildWorkflowContractState({ hasProject: false });
+
+    expect(state.productTerms).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ implementation: "Candidate", product: "Suggestion" }),
+        expect.objectContaining({ implementation: "Draft", product: "Suggestion" }),
+        expect.objectContaining({ implementation: "Assignment Matrix", product: "Agent Loadout" }),
+        expect.objectContaining({ implementation: "Build Preview / Drift", product: "Artifact Preview" }),
+      ]),
+    );
+  });
+
+  test("computes the canonical first-run workflow action", () => {
+    expect(buildWorkflowContractState({ hasProject: false }).primaryAction).toEqual({
+      id: "select-project",
+      label: "选择项目",
+      detail: "先扫描或打开一个本地 Claude Code / Codex 项目。",
+    });
+
+    expect(
+      buildWorkflowContractState({
+        hasProject: true,
+        dashboard: {
+          project_path: "C:/demo",
+          candidate_count: 0,
+          draft_count: 0,
+          memory_card_count: 0,
+          observation_count: 0,
+          global_memory_card_count: 0,
+          enabled_agents: ["codex"],
+          warning_count: 0,
+        },
+      }).primaryAction,
+    ).toMatchObject({
+      id: "run-evolution",
+      label: "提炼建议",
+      targetPage: "drafts",
+    });
+  });
+
+  test("walks reviewed suggestions toward loadout and artifact sync", () => {
+    const assignment = {
+      target_matrix: {
+        agents: ["codex"],
+        rows: [{ memory_card_id: "project:quality", title: "质量", targets: { codex: false } }],
+      },
+    } as ProjectAssignmentView;
+    const assigned = {
+      target_matrix: {
+        agents: ["codex"],
+        rows: [{ memory_card_id: "project:quality", title: "质量", targets: { codex: true } }],
+      },
+    } as ProjectAssignmentView;
+    const readyQuality = {
+      build_preview: { actions: ["Update AGENTS.md"], warnings: [] },
+      status: { warnings: [] },
+    } as ProjectQualityView;
+
+    expect(
+      buildWorkflowContractState({
+        hasProject: true,
+        candidates: [candidate()],
+      }).primaryAction,
+    ).toMatchObject({ id: "review-suggestions", targetPage: "drafts" });
+    expect(
+      buildWorkflowContractState({
+        hasProject: true,
+        candidates: [candidate()],
+      }).warnings,
+    ).toEqual([
+      {
+        id: "pending-suggestions",
+        label: "1 条待审建议",
+        detail: "先确认来源证据，再批准为 Memory Card。",
+        targetPage: "drafts",
+        tone: "info",
+      },
+    ]);
+
+    expect(
+      buildWorkflowContractState({
+        hasProject: true,
+        candidates: [],
+        drafts: [],
+        memoryCards: [{ id: "project:quality" }],
+        assignment,
+      }).primaryAction,
+    ).toMatchObject({ id: "assign-loadout", targetPage: "agents" });
+
+    expect(
+      buildWorkflowContractState({
+        hasProject: true,
+        candidates: [],
+        drafts: [],
+        memoryCards: [{ id: "project:quality" }],
+        assignment: assigned,
+        quality: readyQuality,
+      }).primaryAction,
+    ).toMatchObject({ id: "preview-artifacts", targetPage: "agents" });
+    expect(
+      buildWorkflowContractState({
+        hasProject: true,
+        candidates: [],
+        drafts: [],
+        memoryCards: [{ id: "project:quality" }],
+        assignment: assigned,
+        quality: readyQuality,
+      }).warnings,
+    ).toEqual([
+      {
+        id: "artifact-preview",
+        label: "1 个 Artifact 动作",
+        detail: "同步前检查 AGENTS.md / CLAUDE.md / Skill diff。",
+        targetPage: "agents",
+        tone: "info",
+      },
+    ]);
+  });
+
+  test("treats artifact drift as a blocking workflow state", () => {
+    const assigned = {
+      target_matrix: {
+        agents: ["codex"],
+        rows: [{ memory_card_id: "project:quality", title: "质量", targets: { codex: true } }],
+      },
+    } as ProjectAssignmentView;
+    const driftedQuality = {
+      build_preview: {
+        actions: ["Update AGENTS.md"],
+        warnings: [],
+        artifact_previews: [
+          {
+            agent: "codex",
+            kind: "codex:instructions",
+            path: "AGENTS.md",
+            status: "drifted",
+            current_hash: "manual",
+            expected_hash: "expected",
+            diff_preview: ["- manual", "+ generated"],
+          },
+        ],
+      },
+      status: { warnings: [] },
+    } as ProjectQualityView;
+
+    expect(
+      buildWorkflowContractState({
+        hasProject: true,
+        memoryCards: [{ id: "project:quality" }],
+        assignment: assigned,
+        quality: driftedQuality,
+      }).primaryAction,
+    ).toMatchObject({ id: "resolve-artifact-drift", label: "处理 Artifact Drift", targetPage: "drafts" });
+    expect(
+      buildWorkflowContractState({
+        hasProject: true,
+        memoryCards: [{ id: "project:quality" }],
+        assignment: assigned,
+        quality: driftedQuality,
+      }).warnings[0],
+    ).toMatchObject({ id: "artifact-drift", targetPage: "drafts", tone: "blocked" });
+  });
+
   test("summarizes candidate grounding from both top-level and extraction sources", () => {
     expect(summarizeCandidateEvidence(candidate())).toEqual({
       sourceCount: 3,
+      quoteCount: 0,
       confidenceLabel: "88%",
+      recurrenceLabel: "复现证据 3 来源",
+      riskLabel: "低风险",
+      riskTone: "safe",
       routeLabel: "写入规则",
       compileLabel: "会编译",
+      actionLabel: "新 Memory Card",
+      artifactImpactLabel: "写入规则，会编译",
       status: "grounded",
       warnings: [],
       evidencePreview: "用户强调不要越过人工审阅边界。",
@@ -80,7 +252,11 @@ describe("review workbench utilities", () => {
       ),
     ).toMatchObject({
       sourceCount: 0,
+      quoteCount: 0,
       confidenceLabel: "42%",
+      recurrenceLabel: "无来源",
+      riskLabel: "高风险",
+      riskTone: "blocked",
       status: "weak",
       warnings: ["缺少来源观察", "缺少证据摘要", "置信度偏低"],
     });
@@ -89,12 +265,53 @@ describe("review workbench utilities", () => {
   test("summarizes draft grounding and compile route", () => {
     expect(summarizeDraftEvidence(draft())).toEqual({
       sourceCount: 1,
+      quoteCount: 0,
       confidenceLabel: "81%",
+      recurrenceLabel: "单次证据",
+      riskLabel: "需复核",
+      riskTone: "review",
       routeLabel: "仅审阅",
       compileLabel: "不编译",
+      actionLabel: "新 Memory Card",
+      artifactImpactLabel: "仅审阅，不会写入 Agent 文件",
       status: "grounded",
       warnings: [],
       evidencePreview: "候选质量优先于数量。",
+    });
+  });
+
+  test("surfaces risk, recurrence, action, and artifact impact from evidence metadata", () => {
+    expect(
+      summarizeCandidateEvidence(
+        candidate({
+          extraction: {
+            source_observations: ["obs-1"],
+            evidence_bundle: {
+              source_observation_ids: ["obs-1"],
+              quotes: [
+                { observation_id: "obs-1", text: "以后都这样做。" },
+                { observation_id: "obs-1", text: "别再自动覆盖。" },
+              ],
+              validity: "weak",
+              source_trust: "user_feedback",
+            },
+            suggested_action: {
+              action: "merge_into_existing",
+              route: "workflow_skill",
+              compile_enabled: true,
+            },
+          },
+        }),
+      ),
+    ).toMatchObject({
+      sourceCount: 2,
+      quoteCount: 2,
+      recurrenceLabel: "复现证据 2 来源",
+      riskLabel: "合并需复核",
+      riskTone: "review",
+      actionLabel: "合并到现有 Memory Card",
+      artifactImpactLabel: "生成 Skill 草稿，会编译",
+      warnings: ["证据较弱"],
     });
   });
 
@@ -118,7 +335,7 @@ describe("review workbench utilities", () => {
         assignment: null,
         quality: null,
       }).nextStep,
-    ).toEqual({ id: "review-candidates", label: "审查候选", detail: "先处理 1 条系统建议。" });
+    ).toEqual({ id: "review-candidates", label: "审查建议", detail: "先处理 1 条系统建议。" });
 
     expect(
       buildReviewClosureState({
@@ -167,13 +384,14 @@ describe("review workbench utilities", () => {
       actions: ["Update AGENTS.md", "Write .agents/skills/review/SKILL.md"],
       warnings: ["artifact drifted at AGENTS.md", "Skill output will change"],
       blockingTargets: [],
+      lastSync: null,
       headline: "写入前需处理 Drift",
       detail: "2 个生成动作已计算，但 1 个 drift 警告会阻止安全写入。",
       recoveryAction: {
         actionKey: "导入 Drift",
         command: "import_artifact_drifts",
-        description: "把检测到的手动改动转成待审草稿，保留人工判断。",
-        doneMessage: "已把手动改动导入为待审草稿。",
+        description: "把检测到的手动改动转成待审建议，保留人工判断。",
+        doneMessage: "已把手动改动导入为待审建议。",
         label: "导入为草稿",
         tone: "safe",
       },
@@ -181,8 +399,8 @@ describe("review workbench utilities", () => {
         {
           actionKey: "导入 Drift",
           command: "import_artifact_drifts",
-          description: "把检测到的手动改动转成待审草稿，保留人工判断。",
-          doneMessage: "已把手动改动导入为待审草稿。",
+          description: "把检测到的手动改动转成待审建议，保留人工判断。",
+          doneMessage: "已把手动改动导入为待审建议。",
           label: "导入为草稿",
           tone: "safe",
         },
@@ -218,6 +436,29 @@ describe("review workbench utilities", () => {
     ).toBe("ready");
 
     expect(summarizeArtifactPreview(null).status).toBe("empty");
+  });
+
+  test("surfaces last sync checkpoint for rollback guidance", () => {
+    const summary = summarizeArtifactPreview({
+      build_preview: { actions: ["Update AGENTS.md"], warnings: [] },
+      status: {
+        warnings: [],
+        last_sync: {
+          id: "sync-20260518T010203Z",
+          created_at: "2026-05-18T01:02:03Z",
+          artifact_count: 1,
+          artifacts: [{ path: "AGENTS.md", kind: "codex:instructions", hash: "sha256:abc" }],
+          memory_card_ids: ["project:quality"],
+          rollback_instructions: ["Review hashes before changing files."],
+        },
+      },
+    } as ProjectQualityView);
+
+    expect(summary.lastSync).toMatchObject({
+      id: "sync-20260518T010203Z",
+      artifact_count: 1,
+      memory_card_ids: ["project:quality"],
+    });
   });
 
   test("groups structured drift targets for blocked artifact review", () => {
@@ -299,6 +540,13 @@ describe("review workbench utilities", () => {
     });
     expect(paginateArtifactBlockingTargets(targets, 99, 5).page).toBe(2);
     expect(paginateArtifactBlockingTargets(targets, -1, 5).page).toBe(0);
+  });
+
+  test("scopes artifact drift pending state to a single file operation", () => {
+    expect(driftFileActionKey("AGENTS.md", "import")).toBe("drift:import:AGENTS.md");
+    expect(driftFileActionKey("AGENTS.md", "discard")).not.toBe(
+      driftFileActionKey("CLAUDE.md", "discard"),
+    );
   });
 
   test("prefers structured artifact preview rows over action parsing", () => {

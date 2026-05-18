@@ -1,6 +1,7 @@
 import {
   getProjectAssignmentView,
   getProjectCandidateInbox,
+  getProjectEvalRun,
   getProjectQualityView,
   getProjectReviewInbox,
   getProjectMemoryCardLibrary,
@@ -9,6 +10,7 @@ import type {
   PageId,
   ProjectAssignmentView,
   ProjectCandidateInbox,
+  ProjectEvalRunView,
   ProjectQualityView,
   ProjectReviewInbox,
   ProjectMemoryCardLibrary,
@@ -19,7 +21,8 @@ export type ProjectReadModelCommand =
   | "get_project_review_inbox"
   | "get_project_memory_card_library"
   | "get_project_assignment_view"
-  | "get_project_quality_view";
+  | "get_project_quality_view"
+  | "get_project_eval_run";
 
 export type ProjectReadModels = {
   candidates?: ProjectCandidateInbox;
@@ -27,6 +30,7 @@ export type ProjectReadModels = {
   library?: ProjectMemoryCardLibrary;
   assignment?: ProjectAssignmentView;
   quality?: ProjectQualityView;
+  evalRun?: ProjectEvalRunView;
 };
 
 export function readModelCommandsForPage(page: PageId): ProjectReadModelCommand[] {
@@ -37,6 +41,7 @@ export function readModelCommandsForPage(page: PageId): ProjectReadModelCommand[
       "get_project_memory_card_library",
       "get_project_assignment_view",
       "get_project_quality_view",
+      "get_project_eval_run",
     ];
   }
   if (page === "memory-cards") {
@@ -52,6 +57,7 @@ export function readModelCommandsForPage(page: PageId): ProjectReadModelCommand[
       "get_project_memory_card_library",
       "get_project_assignment_view",
       "get_project_quality_view",
+      "get_project_eval_run",
     ];
   }
   return ["get_project_candidate_inbox", "get_project_review_inbox"];
@@ -114,6 +120,9 @@ export async function loadProjectReadModelsFromTauri(projectPath: string, page: 
       }
       if (command === "get_project_quality_view") {
         models.quality = await getProjectQualityView(projectPath);
+      }
+      if (command === "get_project_eval_run") {
+        models.evalRun = await getProjectEvalRun(projectPath);
       }
     }),
   );

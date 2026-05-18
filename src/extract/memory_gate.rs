@@ -188,6 +188,7 @@ fn looks_like_memory_pipeline_meta(lower: &str) -> bool {
         || (lower.contains("核心功能链路") && lower.contains("周边功能")))
         && !lower.contains("所有项目")
         && !lower.contains("每次");
+    let generation_quality_acceptance = looks_like_generation_quality_acceptance_chatter(lower);
 
     (candidate_pipeline_rule
         && (lower.contains("只保留")
@@ -197,6 +198,65 @@ fn looks_like_memory_pipeline_meta(lower: &str) -> bool {
             || lower.contains("质量优先")))
         || (memory_pipeline_terms && lower.contains("候选"))
         || generic_planning_principle
+        || generation_quality_acceptance
+}
+
+fn looks_like_generation_quality_acceptance_chatter(lower: &str) -> bool {
+    let generation_surface = [
+        "prompt",
+        "render",
+        "rewrite",
+        "llm",
+        "模型",
+        "卡片",
+        "最终卡片",
+        "成品卡片",
+        "改写器",
+        "memory card",
+        "candidate",
+        "候选",
+        "生成",
+        "提炼",
+        "筛选",
+    ]
+    .iter()
+    .filter(|marker| lower.contains(**marker))
+    .count()
+        >= 2;
+    let eval_surface = [
+        "抽样",
+        "最终卡片",
+        "分数",
+        "指标",
+        "人工看",
+        "人工审阅",
+        "质量",
+        "评估",
+        "golden",
+        "eval",
+        "score",
+        "metric",
+        "sample",
+    ]
+    .iter()
+    .filter(|marker| lower.contains(**marker))
+    .count()
+        >= 2;
+    let process_instruction = [
+        "要",
+        "不要",
+        "不能只",
+        "不应该只",
+        "必须",
+        "should",
+        "must",
+        "not only",
+        "don't just",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker));
+
+    generation_surface && eval_surface && process_instruction
 }
 
 fn looks_like_one_off_write_scope(lower: &str, durable: bool) -> bool {
@@ -319,6 +379,10 @@ mod tests {
         assert_eq!(
             decision("当规划或评估开发工作时，先确保核心功能链路和用户体验稳定；再考虑周边功能。")
                 .disposition,
+            MemoryGateDisposition::Reject
+        );
+        assert_eq!(
+            decision("修改卡片改写器时，必须抽样审阅最终卡片，不要只看质量分。").disposition,
             MemoryGateDisposition::Reject
         );
     }

@@ -15,8 +15,42 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: bun install --frozen-lockfile
       - run: bun install --cwd app --frozen-lockfile
+      - run: cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture
       - run: bun run tauri:build
+      - name: Smoke release outputs
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem "src-tauri/target/release/bundle/nsis" -Filter "*setup.exe" -File -ErrorAction SilentlyContinue
+          if ($installer.Count -eq 0) { throw "No NSIS setup.exe installer was created" }
+          if ($installer.Count -gt 1) { throw "Expected one NSIS setup.exe installer, found $($installer.Count)" }
+          $app = "src-tauri/target/release/agent-kernel-desktop.exe"
+          if (!(Test-Path $app)) { throw "Missing desktop executable: $app" }
+          "Installer: $($installer[0].FullName)"
+          "Installer bytes: $($installer[0].Length)"
+      - name: Write release limitations
+        shell: pwsh
+        run: |
+          @"
+          # Agent Memory Kernel Windows Release Notes
+
+          ## Smoke Checks
+
+          - Windows desktop executable built successfully.
+          - NSIS setup.exe installer artifact was created.
+          - Tauri desktop test suite passed before packaging.
+
+          ## Known Limitations
+
+          - Windows is the only packaged release target.
+          - CLI binaries and Bun packages are developer surfaces, not public release artifacts.
+          - Provider calls require a configured API key, reachable Base URL, and proxy environment when the local network needs one.
+          - Generated Agent artifacts remain explicit, reviewable file writes; automatic background sync is not enabled.
+          "@ | Set-Content -Path release-known-limitations.md -Encoding utf8
       - uses: actions/upload-artifact@v4
         with:
           name: agent-memory-kernel-windows-installer
           path: src-tauri/target/release/bundle/nsis/*setup.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-known-limitations
+          path: release-known-limitations.md

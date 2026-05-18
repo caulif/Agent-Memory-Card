@@ -132,6 +132,7 @@ describe("kernel mutation planning", () => {
       "get_project_memory_card_library",
       "get_project_assignment_view",
       "get_project_quality_view",
+      "get_project_eval_run",
     ]);
   });
 });

@@ -22,8 +22,19 @@ pub struct FeedbackEvent {
     pub body: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rejection_category: Option<String>,
     pub signature: String,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RejectionLearningReport {
+    pub total_rejections: usize,
+    pub categorized_rejections: usize,
+    pub negative_eval_examples: usize,
+    pub suppressible_signatures: usize,
+    pub estimated_false_positive_reduction: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -44,6 +55,11 @@ pub fn record_feedback(
     config::ensure_kernel_dir(project_root)?;
     let created_at = Utc::now().to_rfc3339();
     let signature = feedback_signature(item_kind, body);
+    let rejection_category = if is_rejection(decision) {
+        Some(categorize_rejection(reason.as_deref(), body))
+    } else {
+        None
+    };
     let event = FeedbackEvent {
         event_id: format!(
             "fb:{}",
@@ -57,6 +73,7 @@ pub fn record_feedback(
         decision: decision.to_string(),
         body: body.to_string(),
         reason,
+        rejection_category,
         signature,
         created_at,
     };
@@ -67,6 +84,112 @@ pub fn record_feedback(
         .context("open feedback log")?;
     writeln!(file, "{}", serde_json::to_string(&event)?).context("write feedback log")?;
     Ok(())
+}
+
+pub fn rejection_learning_report(project_root: &Path) -> Result<RejectionLearningReport> {
+    let events = load_feedback(project_root)?
+        .into_iter()
+        .filter(|event| is_rejection(&event.decision))
+        .collect::<Vec<_>>();
+    let mut grouped = BTreeMap::<String, Vec<FeedbackEvent>>::new();
+    for event in &events {
+        grouped
+            .entry(event.signature.clone())
+            .or_default()
+            .push(event.clone());
+    }
+    let negative_eval_examples = grouped.len();
+    let suppressible_signatures = grouped.values().filter(|events| events.len() >= 2).count();
+    let estimated_false_positive_reduction = grouped
+        .values()
+        .filter(|events| events.len() >= 2)
+        .map(|events| events.len().saturating_sub(1))
+        .sum();
+    Ok(RejectionLearningReport {
+        total_rejections: events.len(),
+        categorized_rejections: events
+            .iter()
+            .filter(|event| event.rejection_category.is_some())
+            .count(),
+        negative_eval_examples,
+        suppressible_signatures,
+        estimated_false_positive_reduction,
+    })
+}
+
+pub fn write_rejection_negative_eval_proposals(project_root: &Path) -> Result<Option<PathBuf>> {
+    let events = load_feedback(project_root)?
+        .into_iter()
+        .filter(|event| is_rejection(&event.decision))
+        .collect::<Vec<_>>();
+    if events.is_empty() {
+        return Ok(None);
+    }
+    let mut grouped = BTreeMap::<String, Vec<FeedbackEvent>>::new();
+    for event in events {
+        grouped
+            .entry(event.signature.clone())
+            .or_default()
+            .push(event);
+    }
+    let dir = config::kernel_dir(project_root).join("eval-corpus");
+    fs::create_dir_all(&dir).context("create eval corpus directory")?;
+    let path = dir.join("rejected-negative-proposals.yml");
+    let report = rejection_learning_report(project_root)?;
+    let mut out = String::new();
+    out.push_str("kind: rejection-negative-eval-proposals\n");
+    out.push_str("review_required: true\n");
+    out.push_str(&format!(
+        "generated_at: {}\n",
+        yaml_string(&Utc::now().to_rfc3339())
+    ));
+    out.push_str("learning_report:\n");
+    out.push_str(&format!(
+        "  total_rejections: {}\n",
+        report.total_rejections
+    ));
+    out.push_str(&format!(
+        "  categorized_rejections: {}\n",
+        report.categorized_rejections
+    ));
+    out.push_str(&format!(
+        "  negative_eval_examples: {}\n",
+        report.negative_eval_examples
+    ));
+    out.push_str(&format!(
+        "  suppressible_signatures: {}\n",
+        report.suppressible_signatures
+    ));
+    out.push_str(&format!(
+        "  estimated_false_positive_reduction: {}\n",
+        report.estimated_false_positive_reduction
+    ));
+    out.push_str("negatives:\n");
+    for (signature, events) in grouped {
+        let sample = events
+            .first()
+            .map(|event| event.body.as_str())
+            .unwrap_or_default();
+        let reason = dominant_reason(&events);
+        let category = dominant_category(&events);
+        let event_ids = events
+            .iter()
+            .map(|event| event.event_id.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push_str(&format!(
+            "  - id: {}\n    signature: {}\n    rejection_category: {}\n    reason: {}\n    source_event_ids: [{}]\n    user_messages:\n      - {}\n    expected_reduction: {}\n",
+            yaml_string(&format!("rejected-{}", signature.trim_start_matches("sig:"))),
+            yaml_string(&signature),
+            yaml_string(&category),
+            yaml_string(&reason),
+            event_ids,
+            yaml_string(sample),
+            yaml_string("future matching suggestions should be downranked or skipped before review")
+        ));
+    }
+    fs::write(&path, out).with_context(|| format!("write {}", path.display()))?;
+    Ok(Some(path))
 }
 
 pub fn load_feedback(project_root: &Path) -> Result<Vec<FeedbackEvent>> {
@@ -200,6 +323,29 @@ pub fn write_weekly_reflexion_proposal(project_root: &Path) -> Result<Option<Pat
     Ok(Some(path))
 }
 
+pub fn categorize_rejection(reason: Option<&str>, body: &str) -> String {
+    let text = format!(
+        "{} {}",
+        reason.unwrap_or_default().to_lowercase(),
+        body.to_lowercase()
+    );
+    if text.contains("conflict") || text.contains("冲突") || text.contains("不符合") {
+        "conflicts-existing-memory".to_string()
+    } else if text.contains("duplicate") || text.contains("重复") || text.contains("已有") {
+        "duplicate".to_string()
+    } else if text.contains("generic") || text.contains("泛") || text.contains("空泛") {
+        "too-generic".to_string()
+    } else if text.contains("temporary") || text.contains("一次性") || text.contains("临时") {
+        "temporary-context".to_string()
+    } else if text.contains("obsolete") || text.contains("过时") || text.contains("不用") {
+        "obsolete".to_string()
+    } else if text.contains("wrong") || text.contains("错误") || text.contains("不对") {
+        "incorrect".to_string()
+    } else {
+        "other".to_string()
+    }
+}
+
 fn feedback_path(project_root: &Path) -> std::path::PathBuf {
     config::kernel_dir(project_root).join("feedback.jsonl")
 }
@@ -269,6 +415,20 @@ fn dominant_reason(events: &[FeedbackEvent]) -> String {
         .unwrap_or_else(|| "repeated user rejection".to_string())
 }
 
+fn dominant_category(events: &[FeedbackEvent]) -> String {
+    let mut counts = BTreeMap::<String, usize>::new();
+    for event in events {
+        if let Some(category) = event.rejection_category.as_deref() {
+            *counts.entry(category.to_string()).or_default() += 1;
+        }
+    }
+    counts
+        .into_iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(category, _)| category)
+        .unwrap_or_else(|| "other".to_string())
+}
+
 fn yaml_string(value: &str) -> String {
     serde_yaml::to_string(value)
         .unwrap_or_else(|_| format!("{value:?}"))
@@ -302,6 +462,7 @@ mod tests {
         assert_eq!(events[0].decision, "approved");
         assert_eq!(events[0].item_id, "project:prefer-bun");
         assert!(events[0].signature.starts_with("sig:"));
+        assert_eq!(events[0].rejection_category, None);
     }
 
     #[test]
@@ -330,6 +491,60 @@ mod tests {
         assert!(penalty.confidence_delta < 0.0);
         assert_eq!(penalty.rejections, 3);
         assert!(penalty.reason.contains("obsolete package manager"));
+        let events = load_feedback(temp.path()).expect("load feedback");
+        assert!(
+            events
+                .iter()
+                .all(|event| { event.rejection_category.as_deref() == Some("obsolete") })
+        );
+    }
+
+    #[test]
+    fn rejection_reasons_are_categorized() {
+        assert_eq!(
+            categorize_rejection(Some("too generic"), "Best practices"),
+            "too-generic"
+        );
+        assert_eq!(
+            categorize_rejection(Some("一次性调试请求"), "临时命令"),
+            "temporary-context"
+        );
+        assert_eq!(
+            categorize_rejection(Some("和已有规则冲突"), "Use npm"),
+            "conflicts-existing-memory"
+        );
+    }
+
+    #[test]
+    fn rejected_feedback_writes_negative_eval_proposals() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        for item_id in ["one", "two"] {
+            record_feedback(
+                temp.path(),
+                "candidate",
+                item_id,
+                "rejected",
+                "Always use npm install for packages.",
+                Some("conflicts with Bun preference".to_string()),
+            )
+            .expect("record feedback");
+        }
+
+        let path = write_rejection_negative_eval_proposals(temp.path())
+            .expect("write proposals")
+            .expect("proposal path");
+        let text = fs::read_to_string(path).expect("read proposals");
+        let report = rejection_learning_report(temp.path()).expect("learning report");
+
+        assert_eq!(report.total_rejections, 2);
+        assert_eq!(report.categorized_rejections, 2);
+        assert_eq!(report.negative_eval_examples, 1);
+        assert_eq!(report.suppressible_signatures, 1);
+        assert_eq!(report.estimated_false_positive_reduction, 1);
+        assert!(text.contains("rejection-negative-eval-proposals"));
+        assert!(text.contains("review_required: true"));
+        assert!(text.contains("conflicts-existing-memory"));
+        assert!(text.contains("Always use npm install for packages."));
     }
 
     #[test]

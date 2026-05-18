@@ -8,14 +8,17 @@ import type {
   KernelPlanRequest,
   KernelPolicyPayload,
   CustomProviderConfig,
+  ProviderStatusReport,
   ProjectAssignmentView,
   ProjectCandidateInbox,
   ProjectDashboard,
+  ProjectEvalRunView,
   ProjectQualityView,
   ProjectReviewInbox,
   ProjectMemoryCardLibrary,
   ProjectSnapshot,
   MemoryCardRecord,
+  SetupChecklistReport,
 } from "./ui-helpers";
 
 export type ProjectMutationAck = {
@@ -50,6 +53,10 @@ export function getProjectQualityView(projectPath: string) {
   return invoke<ProjectQualityView>("get_project_quality_view", { projectPath });
 }
 
+export function getProjectEvalRun(projectPath: string) {
+  return invoke<ProjectEvalRunView>("get_project_eval_run", { projectPath });
+}
+
 export function getCustomProviderConfig(projectPath: string) {
   return invoke<CustomProviderConfig>("get_custom_provider_config", { projectPath });
 }
@@ -61,6 +68,14 @@ export function saveCustomProviderConfig(args: {
   decisionToken?: string;
 }) {
   return invoke<CustomProviderConfig>("save_custom_provider_config", args);
+}
+
+export function getSetupChecklist(projectPath: string) {
+  return invoke<SetupChecklistReport>("get_setup_checklist", { projectPath });
+}
+
+export function testProviderStatus(projectPath: string, liveRequest = true) {
+  return invoke<ProviderStatusReport>("test_provider_status", { projectPath, liveRequest });
 }
 
 export function getProjectSnapshot(projectPath: string) {

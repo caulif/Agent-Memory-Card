@@ -24,17 +24,17 @@ export function taskProgressForAction(actionKey: string): TaskProgress {
     "同步": {
       label: "同步生成产物",
       percent: 70,
-      description: "正在将已批准的技能片段写入目标智能体的配置文件...",
+      description: "正在将已批准的 Memory Card 写入目标智能体的配置文件...",
     },
     "融合 Memory Card": {
       label: "生成融合草稿",
       percent: 68,
-      description: "正在把多个 Memory Card 合并为一个待审草稿，原片段会保留不变...",
+      description: "正在把多个 Memory Card 合并为一个待审建议，原卡片会保留不变...",
     },
     "切换项目": {
       label: "切换项目快照",
       percent: 35,
-      description: "正在加载目标项目的草稿、技能片段和分配矩阵...",
+      description: "正在加载目标项目的建议、Memory Card 和 Loadout 矩阵...",
     },
   };
 

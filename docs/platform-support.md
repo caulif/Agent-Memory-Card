@@ -46,6 +46,24 @@ Release builds package one Windows desktop installer.
 
 Tagged releases build the Windows Tauri desktop installer so users can install the app without running the development toolchain.
 
+## Release Smoke Checks
+
+The release workflow now verifies:
+
+- Tauri desktop tests pass on Windows before packaging.
+- A Windows desktop executable exists after the release build.
+- Exactly one NSIS `*setup.exe` installer is created.
+- The installer artifact and a `release-known-limitations.md` note are uploaded together.
+
+CI also smoke checks the CLI release binary with `agent-kernel.exe --version` and verifies the frontend production bundle contains `app/dist/index.html` plus assets.
+
+## Known Limitations
+
+- Windows is the only packaged release target.
+- CLI binaries and Bun packages are developer surfaces, not public release artifacts.
+- Provider calls require a configured API key, reachable Base URL, and proxy environment when the local network needs one.
+- Generated Agent artifacts remain explicit, reviewable file writes; automatic background sync is not enabled.
+
 ## Current Development Host
 
 The current active development and manual verification host is Windows. macOS and Linux are not release targets yet.

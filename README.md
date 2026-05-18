@@ -26,19 +26,18 @@ Agent Memory Kernel 不是聊天记录总结器，也不是替你偷偷写规则
 - 反复纠正：例如“不要在没有确认的情况下合并、发布或覆盖生成产物”。
 - Skill 素材：例如稳定的调试流程、模板、脚本和检查清单。
 
-Agent Memory Kernel 会先把这些内容提炼成 Draft，再由你确认是否批准为长期 Memory Card。批准后的 Memory Cards 可以被分配给 Claude Code / Codex，并编译成它们能直接识别的文件结构。
+Agent Memory Kernel 会先把这些内容提炼成待审 Suggestion，再由你确认是否批准为长期 Memory Card。批准后的 Memory Cards 可以进入 Claude Code / Codex 的 Agent Loadout，并编译成它们能直接识别的文件结构。
 
 ## 核心流程
 
 ```text
-Observation -> Candidate -> Draft -> Memory Card -> Assignment -> Artifact
+Observation -> Suggestion -> Memory Card -> Agent Loadout -> Artifact
 ```
 
 - `Observation`：从本地对话、规则文件或项目资料中导入的证据。
-- `Candidate`：系统发现的候选记忆，带置信度、原因和分类信息。
-- `Draft`：进入人工审查区的可编辑候选。
+- `Suggestion`：系统发现并进入人工审查区的待审建议，内部可能由 Candidate / Draft 两层实现。
 - `Memory Card`：人工批准后的长期记忆源。
-- `Assignment`：把 Memory Card 分配给目标 Agent。
+- `Agent Loadout`：把 Memory Card 分配给目标 Agent。
 - `Artifact`：编译生成给 Claude Code / Codex 使用的原生文件。
 
 生成产物按激活方式拆分：
@@ -52,12 +51,11 @@ Observation -> Candidate -> Draft -> Memory Card -> Assignment -> Artifact
 Agent Memory Kernel 的主要入口是 Tauri 桌面工作台。你可以在 UI 里完成核心闭环：
 
 - 项目列表：扫描、注册和打开多个本地 Claude Code / Codex 项目。
-- Review Dashboard：查看当前项目的 Draft、Memory Cards、artifact drift 和同步状态。
-- Draft Inbox：审查自动提炼出的候选内容，查看置信度、原因、分类和目标 Agent。
+- Suggestion Review：审查自动提炼出的建议，查看证据、风险、置信度、动作和 Artifact 影响。
 - Memory Library：管理已经批准的 Memory Cards，持续维护长期 agent knowledge。
-- Assignment Matrix：把 Memory Cards 分配给 Codex、Claude Code 或两者。
+- Agent Loadout：把 Memory Cards 分配给 Codex、Claude Code 或两者。
 - Catalog：安装可复用的 Memory Card packages。
-- Observation Evolve：从本地 Claude Code / Codex 历史中整理高价值候选，先进入 Draft Inbox。
+- Observation Evolve：从本地 Claude Code / Codex 历史中整理高价值建议，先进入 Suggestion Review。
 - Build / Sync：预览并生成 `AGENTS.md`、`CLAUDE.md` 和 Skill 文件夹。
 
 CLI 目前主要作为源码开发和内部验证入口，暂不作为公开 release 产物发布。
@@ -66,7 +64,9 @@ CLI 目前主要作为源码开发和内部验证入口，暂不作为公开 rel
 
 当前项目处于 pre-1.0 阶段。普通 Windows 用户优先下载 GitHub Releases 中的桌面安装包；开发者可以从源码运行。
 
-准备环境：
+安装包用户打开应用后，先进入 `Settings` 查看首跑清单。安装包正常使用不需要 Rust、Bun 或 Tauri；如果 Provider 测试失败，设置页会给出 API key、Base URL、模型名或代理相关的下一步动作。
+
+从源码运行需要：
 
 - Rust 1.85+
 - Bun 1.3+
@@ -86,7 +86,7 @@ bun run --cwd app build
 bun run app:dev
 ```
 
-启动后，桌面工作台会先展示本地项目列表。选择项目后，你可以在同一个界面里处理 Draft、批准 Memory Cards、调整 Agent 分配、整理本地历史并执行 Build / Sync。
+启动后，桌面工作台会先展示本地项目列表。选择项目后，你可以在同一个界面里审查 Suggestion、批准 Memory Cards、调整 Agent Loadout、整理本地历史并执行 Build / Sync。
 
 确认 CLI 可用：
 
@@ -108,40 +108,42 @@ src-tauri/target/release/bundle/
 
 ## 快速开始
 
-推荐先使用桌面 UI 体验完整流程。
+推荐先使用桌面 UI 体验完整流程。CLI 放在后面的开发者参考里。
 
-### 1. 启动桌面工作台
+### 1. 打开桌面工作台
 
 ```bash
 bun run app:dev
 ```
 
-首次打开后：
+安装包用户直接从开始菜单打开应用；源码开发者使用上面的命令。
 
-1. 点击扫描或添加本地项目。
-2. 选择一个 Claude Code / Codex 项目进入工作台。
-3. 查看 Review Dashboard，了解 Draft、Memory Card、artifact drift 和同步状态。
+首次进入后：
 
-### 2. 整理本地对话和项目规则
+1. 在 `Settings` 确认首跑清单和 Provider 状态。
+2. 扫描或添加本地 Claude Code / Codex 项目。
+3. 选择项目进入工作台，查看下一步动作、Suggestion、Memory Card、artifact drift 和同步状态。
+
+### 2. 整理本地历史
 
 在 UI 中触发 Observation / Evolve 流程。Agent Memory Kernel 会读取本地 Claude Code / Codex 历史和项目上下文，提炼可能长期有用的候选内容。
 
-这些候选不会自动写入 `AGENTS.md` 或 `CLAUDE.md`，而是先进入 Draft Inbox。
+这些建议不会自动写入 `AGENTS.md` 或 `CLAUDE.md`，而是先进入 Suggestion Review。
 
-### 3. 审查 Draft Inbox
+### 3. 审查 Suggestion Review
 
-在 Draft Inbox 中逐条检查候选：
+在 Suggestion Review 中逐条检查建议：
 
 - 是否来自真实上下文。
 - 是否值得长期保存。
 - 应该分配给 Codex、Claude Code，还是两者。
 - 应该作为常驻规则，还是按需 Skill。
 
-确认后批准为 Memory Card；不合适的候选可以拒绝或继续编辑。
+确认后批准为 Memory Card；不合适的建议可以拒绝或继续编辑。
 
-### 4. 管理 Memory Cards 和 Agent 分配
+### 4. 管理 Memory Cards 和 Agent Loadout
 
-进入 Memory Library / Assignment Matrix：
+进入 Memory Library / Agent Loadout：
 
 - 查看已批准 Memory Cards。
 - 调整目标 Agent。
@@ -155,6 +157,8 @@ bun run app:dev
 
 - `codex` -> `AGENTS.md` 和 `.agents/skills`
 - `claude-code` -> `CLAUDE.md` 和 `.claude/skills`
+
+同步后查看 Rule CI、Last Sync checkpoint、失败 next action，并复制 reload prompt 让当前 Agent 会话重新读取最新生成文件。
 
 ## 开发者 CLI
 

@@ -17,6 +17,8 @@ import {
   type ProjectAction,
   type ProjectAssignmentView,
   type ProjectCandidateInbox,
+  type ProjectEvalMetricView,
+  type ProjectEvalRunView,
   type ProjectMemoryCardLibrary,
   type ProjectQualityView,
   type ProjectReviewInbox,
@@ -33,6 +35,7 @@ export function Drafts({
   assignment,
   library,
   quality,
+  evalRun,
   pendingAction,
   disabled,
   onAction,
@@ -48,6 +51,7 @@ export function Drafts({
   assignment: ProjectAssignmentView | null;
   library: ProjectMemoryCardLibrary | null;
   quality: ProjectQualityView | null;
+  evalRun: ProjectEvalRunView | null;
   onBatchCandidateAction: (
     actionKey: string,
     doneMessage: string,
@@ -100,8 +104,8 @@ export function Drafts({
 
   async function runBatch(command: "promote_candidate" | "hide_candidate" | "reject_candidate") {
     if (selectedCandidateIds.length === 0) return;
-    const label = command === "promote_candidate" ? "批量批准" : command === "hide_candidate" ? "批量隐藏" : "批量拒绝";
-    const reason = command === "reject_candidate" ? batchRejectReason.trim() || "用户批量拒绝候选。" : undefined;
+    const label = command === "promote_candidate" ? "批量批准建议" : command === "hide_candidate" ? "批量隐藏建议" : "批量拒绝建议";
+    const reason = command === "reject_candidate" ? batchRejectReason.trim() || "用户批量拒绝建议。" : undefined;
     await onBatchCandidateAction(label, `${label}完成`, command, selectedCandidateIds, reason ? { reason } : {});
     setSelectedCandidateIds([]);
   }
@@ -113,7 +117,7 @@ export function Drafts({
   return (
     <div className="stack">
       {/* ===== 顶部指标行 ===== */}
-      <Panel title="Draft Review" subtitle="Inbox 工作台 — 系统建议就是待审草稿；批准后直接进入 Memory Card，再分配并编译到目标智能体。">
+      <Panel title="Suggestion Review" subtitle="审阅系统建议，确认真实证据后批准为 Memory Card，再配置 Loadout 并预览 Artifact。">
         <div className="engine-command-row">
           <div className="engine-row" aria-label="整理引擎">
             <button className={synthesisEngine === "claude-code" ? "active" : ""} onClick={() => onSynthesisEngineChange("claude-code")}>
@@ -129,12 +133,12 @@ export function Drafts({
           <ActionButton
             className="hero-button"
             icon={RefreshCw}
-            label="提炼候选"
+            label="提炼建议"
             busyLabel="正在整理"
             busy={pendingAction === "整理历史"}
             disabled={disabled}
             onClick={() =>
-              onAction("整理历史", "已开始整理候选", "evolve_project", {
+              onAction("整理历史", "已开始整理建议", "evolve_project", {
                 targets: ["codex", "claude-code"],
                 dryRun: false,
                 engine: synthesisEngine,
@@ -149,11 +153,10 @@ export function Drafts({
             <small>{closureState.nextStep.detail}</small>
           </div>
           <div className="review-closure-metrics">
-            <span>{closureState.candidateCount} 候选</span>
-            <span>{closureState.draftCount} 草稿</span>
+            <span>{closureState.candidateCount + closureState.draftCount} 建议</span>
             <span>{closureState.unassignedCount} 未分配</span>
             <span>{closureState.driftWarningCount} Drift</span>
-            <span>{closureState.buildActionCount} 写入动作</span>
+            <span>{closureState.buildActionCount} Artifact 动作</span>
           </div>
         </div>
         <ArtifactPreviewStrip
@@ -164,27 +167,28 @@ export function Drafts({
         />
       </Panel>
 
-      {/* ===== 三栏布局：候选队列 / 详情 / 质量状态 ===== */}
+      {/* ===== 三栏布局：建议队列 / 详情 / 质量状态 ===== */}
       <div className="drafts-grid">
-        {/* 左栏：候选队列 */}
+        {/* 左栏：建议队列 */}
         <div className="drafts-column">
           <div className="drafts-column-head">
-            <h3>候选队列</h3>
+            <h3>建议队列</h3>
           </div>
 
           {visibleCandidates.length === 0 ? (
             <p className="empty" style={{ padding: "20px 0", textAlign: "center" }}>
-              暂无候选。
+              暂无建议。
             </p>
           ) : (
             <div className="candidate-queue">
               {visibleCandidates.map((candidate) => {
                 const isSelected = selectedCandidateIds.includes(candidate.id);
                 const isActive = selectedCandidateId === candidate.id;
+                const evidence = summarizeCandidateEvidence(candidate);
                 return (
                 <article
                   key={candidate.id}
-                  className={`candidate-queue-item ${isActive ? "active" : ""} ${isSelected ? "selected" : ""}`}
+                  className={`candidate-queue-item ${isActive ? "active" : ""} ${isSelected ? "selected" : ""} ${evidence.riskTone !== "safe" ? "needs-review" : ""}`}
                 >
                   <div className="candidate-queue-head">
                     <button
@@ -196,13 +200,13 @@ export function Drafts({
                     </button>
                     <div className="candidate-queue-head-right">
                       {candidate.confidence != null ? (
-                        <span className="confidence-badge">
+                        <span className={`confidence-badge ${evidence.riskTone}`}>
                           {Math.round(candidate.confidence * 100)}%
                         </span>
                       ) : null}
                       <button
                         className={`candidate-select-toggle ${isSelected ? "checked" : ""}`}
-                        aria-label={isSelected ? "取消选择" : "选择候选"}
+                        aria-label={isSelected ? "取消选择" : "选择建议"}
                         aria-pressed={isSelected}
                         onClick={(event) => { event.stopPropagation(); toggleCandidateSelected(candidate.id); }}
                       >
@@ -216,6 +220,10 @@ export function Drafts({
                   >
                     {candidate.brief ?? candidate.body.slice(0, 80)}
                   </button>
+                  <div className="candidate-queue-evidence">
+                    <span>{evidence.recurrenceLabel}</span>
+                    <span>{evidence.riskLabel}</span>
+                  </div>
                 </article>
                 );
               })}
@@ -223,7 +231,7 @@ export function Drafts({
           )}
         </div>
 
-        {/* 中栏：选中候选详情/审阅 */}
+        {/* 中栏：选中建议详情/审阅 */}
         <div className="drafts-column drafts-detail">
           {selectedCandidate ? (
             <>
@@ -243,7 +251,7 @@ export function Drafts({
           ) : (
             <div className="drafts-column-head">
               <h3>审阅详情</h3>
-              <EmptyState title="选择一个候选" description="从左侧候选队列中选择一条建议来查看详情和操作。" />
+              <EmptyState title="选择一个建议" description="从左侧建议队列中选择一条建议来查看证据、风险和操作。" />
             </div>
           )}
         </div>
@@ -271,19 +279,19 @@ export function Drafts({
               </svg>
               <div className="quality-ring-text">
                 <strong>{drafts.length}</strong>
-                <span>草稿</span>
+                <span>已审建议</span>
               </div>
             </div>
             <div className="quality-bars">
               <div className="quality-bar-row">
-                <span>候选</span>
+                <span>建议</span>
                 <div className="quality-bar-track">
                   <div className="quality-bar-fill" style={{ width: `${Math.min(100, allCandidates.length * 20)}%` }} />
                 </div>
                 <strong>{allCandidates.length}</strong>
               </div>
               <div className="quality-bar-row">
-                <span>草稿</span>
+                <span>已审建议</span>
                 <div className="quality-bar-track">
                   <div className="quality-bar-fill" style={{ width: `${Math.min(100, drafts.length * 25)}%`, background: "var(--color-accent)" }} />
                 </div>
@@ -298,13 +306,14 @@ export function Drafts({
               </div>
             </div>
           </div>
+          <EvalRunPanel evalRun={evalRun} />
         </div>
       </div>
 
-      {/* 草稿列表 */}
+      {/* 已审建议列表 */}
       {drafts.length > 0 ? (
         <>
-          {hiddenCount > 0 ? <p className="filter-note">已隐藏 {hiddenCount} 条低置信度或过碎草稿，避免审阅列表失控。</p> : null}
+          {hiddenCount > 0 ? <p className="filter-note">已隐藏 {hiddenCount} 条低置信度或过碎建议，避免审阅列表失控。</p> : null}
           {drafts.map((draft) => (
             <React.Fragment key={draft.id}>
             <article className="record">
@@ -314,7 +323,7 @@ export function Drafts({
                   {draft.confidence ? ` · 置信度 ${Math.round(draft.confidence * 100)}%` : ""}
                 </span>
                 <p className="draft-brief">
-                  <span className="brief-label">审阅摘要</span>
+                    <span className="brief-label">建议摘要</span>
                   {describeDraftForReview(draft)}
                 </p>
                 <h3>{draft.title}</h3>
@@ -378,20 +387,20 @@ export function Drafts({
                 </button>
                 <ActionButton
                   icon={Check}
-                  label="批准"
+                  label="批准为 Memory Card"
                   busyLabel="批准中"
                   busy={pendingAction === `批准-${draft.id}`}
                   disabled={disabled}
-                  onClick={() => onAction(`批准-${draft.id}`, "已批准草稿", "approve_draft", { id: draft.id })}
+                  onClick={() => onAction(`批准-${draft.id}`, "已批准为 Memory Card", "approve_draft", { id: draft.id })}
                 />
                 <ActionButton
                   className="danger-action"
                   icon={X}
-                  label="删除"
+                  label="拒绝"
                   busyLabel="删除中"
                   busy={pendingAction === `删除-${draft.id}`}
                   disabled={disabled}
-                  onClick={() => onAction(`删除-${draft.id}`, "已删除草稿", "reject_draft", { id: draft.id })}
+                  onClick={() => onAction(`删除-${draft.id}`, "已拒绝建议", "reject_draft", { id: draft.id })}
                 />
               </div>
             </article>
@@ -411,14 +420,14 @@ export function Drafts({
           ))}
         </>
       ) : allCandidates.length === 0 ? (
-        <EmptyState title="暂无高价值草稿" description={'点击「提炼候选」后，稳定偏好、硬约束、流程和可复用技能补充会出现在这里等待审核。'} />
+        <EmptyState title="暂无高价值建议" description={'点击「提炼建议」后，稳定偏好、硬约束、流程和可复用 Skill 补充会出现在这里等待审核。'} />
       ) : null}
 
       {/* 底部批量操作栏 */}
       {selectedCandidateIds.length > 0 ? (
         <div className="batch-bar-sticky">
           <div className="batch-row" style={{ margin: 0 }}>
-            <span>已选择 {selectedCandidateIds.length} 条候选</span>
+            <span>已选择 {selectedCandidateIds.length} 条建议</span>
             <input
               type="text"
               value={batchRejectReason}
@@ -426,13 +435,13 @@ export function Drafts({
               placeholder="批量拒绝原因"
             />
             <button className="primary-action" disabled={disabled || selectedCandidateIds.length === 0} onClick={() => void runBatch("promote_candidate")}>
-              批量批准
+              批量批准建议
             </button>
             <button className="secondary-action" disabled={disabled || selectedCandidateIds.length === 0} onClick={() => void runBatch("hide_candidate")}>
-              批量隐藏
+              批量隐藏建议
             </button>
             <button className="danger-action" disabled={disabled || selectedCandidateIds.length === 0} onClick={() => void runBatch("reject_candidate")}>
-              批量拒绝
+              批量拒绝建议
             </button>
           </div>
         </div>
@@ -441,7 +450,83 @@ export function Drafts({
   );
 }
 
-/** 候选详情卡片 */
+function EvalRunPanel({ evalRun }: { evalRun: ProjectEvalRunView | null }) {
+  const metrics = [
+    evalRun?.recall,
+    evalRun?.precision,
+    evalRun?.one_off_false_positive,
+    evalRun?.duplicate_cluster_risk,
+    evalRun?.evidence_validity,
+    evalRun?.provider_evidence_validity,
+  ].filter(Boolean) as ProjectEvalMetricView[];
+
+  if (!evalRun || evalRun.status === "missing") {
+    return (
+      <div className="eval-run-card missing">
+        <div className="eval-run-head">
+          <span>Eval Run</span>
+          <strong>未建立基线</strong>
+        </div>
+        <p>{evalRun?.recommendations[0] ?? "运行 golden-set eval 后，这里会显示召回、精确率和证据有效性。"}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`eval-run-card ${evalRun.status}`}>
+      <div className="eval-run-head">
+        <span>Eval Run</span>
+        <strong>{evalRun.status === "passing" ? "通过" : "需要关注"}</strong>
+      </div>
+      <div className="eval-run-meta">
+        <span>{evalRun.provider ?? "unknown provider"}</span>
+        <span>v{evalRun.pipeline_version ?? "?"}</span>
+        <span>{formatEvalTimestamp(evalRun.timestamp)}</span>
+      </div>
+      <div className="eval-metric-list">
+        {metrics.map((metric) => (
+          <div key={metric.label} className={`eval-metric-row ${metric.status}`}>
+            <span>{evalMetricLabel(metric.label)}</span>
+            <strong>{formatEvalPercent(metric.percent)}</strong>
+            <small>{metric.count}/{metric.total}</small>
+          </div>
+        ))}
+      </div>
+      {evalRun.recommendations.length > 0 ? (
+        <div className="eval-recommendations">
+          {evalRun.recommendations.slice(0, 2).map((recommendation) => (
+            <p key={recommendation}>{recommendation}</p>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function formatEvalPercent(percent?: number | null) {
+  return percent == null ? "-" : `${Math.round(percent)}%`;
+}
+
+function formatEvalTimestamp(timestamp?: string | null) {
+  if (!timestamp) return "未记录时间";
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) return timestamp;
+  return parsed.toLocaleString();
+}
+
+function evalMetricLabel(label: string) {
+  const labels: Record<string, string> = {
+    Recall: "召回",
+    Precision: "精确",
+    "One-off false positives": "一次性误报",
+    "Duplicate risk": "重复风险",
+    "Evidence validity": "证据有效",
+    "Provider evidence validity": "Provider 证据",
+  };
+  return labels[label] ?? label;
+}
+
+/** 建议详情卡片 */
 function CandidateDetail({
   candidate,
   disabled,
@@ -464,7 +549,7 @@ function CandidateDetail({
   const candidateTags = candidate.tags ?? [];
   const candidateBrief =
     candidate.brief?.trim() ||
-    `这条系统建议沉淀了"${candidate.title}"，批准后会直接进入 Memory Card。`;
+    `这条建议沉淀了"${candidate.title}"，批准后会直接进入 Memory Card。`;
   const suggestedAction = candidate.extraction?.suggested_action;
   const mergeTarget =
     suggestedAction?.action === "merge_into_existing"
@@ -488,7 +573,7 @@ function CandidateDetail({
   return (
     <div className="candidate-detail">
       <span className="tag">
-        候选 · {translateKind(candidate.kind)} · {translateScope(candidate.scope)}
+        Suggestion · {translateKind(candidate.kind)} · {translateScope(candidate.scope)}
         {confidence}
       </span>
       <h3>{candidate.title}</h3>
@@ -496,6 +581,23 @@ function CandidateDetail({
         <span className="brief-label">概述</span>
         {candidateBrief}
       </p>
+      <div className="review-step-stack" aria-label="审阅步骤">
+        <section className="review-step">
+          <span>1</span>
+          <div>
+            <strong>证据与风险</strong>
+            <p>先确认这条建议是否来自真实、可追溯、足够稳定的上下文。</p>
+          </div>
+        </section>
+        <EvidencePanel summary={evidenceSummary} />
+        <section className="review-step">
+          <span>2</span>
+          <div>
+            <strong>动作与 Artifact 影响</strong>
+            <p>{evidenceSummary.actionLabel} · {evidenceSummary.artifactImpactLabel}</p>
+          </div>
+        </section>
+      </div>
       {candidateTags.length > 0 ? (
         <div className="tag-row">
           {candidateTags.map((tag) => (
@@ -534,9 +636,11 @@ function CandidateDetail({
           {candidate.extraction.reason}
         </p>
       ) : null}
-      <EvidencePanel summary={evidenceSummary} />
-
       <div className="candidate-detail-actions">
+        <div className="review-action-hint">
+          <strong>3 · 人工决定</strong>
+          <span>批准前请先看完证据、风险和 Artifact 影响。</span>
+        </div>
         <input
           className="inline-input"
           type="text"
@@ -572,7 +676,7 @@ function CandidateDetail({
           busyLabel="隐藏中"
           busy={pendingAction === `隐藏-${candidate.id}`}
           disabled={disabled}
-          onClick={() => onAction(`隐藏-${candidate.id}`, "已隐藏候选", "hide_candidate", { id: candidate.id })}
+          onClick={() => onAction(`隐藏-${candidate.id}`, "已隐藏建议", "hide_candidate", { id: candidate.id })}
         />
         <ActionButton
           className="danger-action"
@@ -582,9 +686,9 @@ function CandidateDetail({
           busy={pendingAction === `拒绝-${candidate.id}`}
           disabled={disabled}
           onClick={() =>
-            onAction(`拒绝-${candidate.id}`, "已拒绝候选", "reject_candidate", {
+            onAction(`拒绝-${candidate.id}`, "已拒绝建议", "reject_candidate", {
               id: candidate.id,
-              reason: rejectReason.trim() || "用户从 Candidate Review 拒绝。",
+              reason: rejectReason.trim() || "用户从 Suggestion Review 拒绝。",
             })
           }
         />

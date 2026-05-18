@@ -125,7 +125,7 @@ export function MemoryCards({
   return (
     <div className="list">
       {allMemoryCards.length === 0 ? (
-        <EmptyState title="暂无项目技能片段" description="批准草稿后会先进入这里，之后再由你手动分配给 Agent。" />
+        <EmptyState title="暂无项目 Memory Card" description="批准建议后会先进入这里，之后再由你手动配置到 Agent Loadout。" />
       ) : (
         <>
           <section className="governance-strip" aria-label="Memory Card 治理状态">
@@ -164,7 +164,7 @@ export function MemoryCards({
           </section>
 
           {allTags.length > 0 ? (
-            <nav className="tag-filter" aria-label="按标签筛选技能片段">
+            <nav className="tag-filter" aria-label="按标签筛选 Memory Card">
               <button
                 className={activeTag === "all" ? "active" : ""}
                 onClick={() => setActiveTag("all")}
@@ -203,12 +203,12 @@ export function MemoryCards({
           />
 
           {filtered.length === 0 ? (
-            <p className="filter-note">当前标签筛选条件下暂无匹配的技能片段。</p>
+            <p className="filter-note">当前标签筛选条件下暂无匹配的 Memory Card。</p>
           ) : null}
 
           {filteredProject.length > 0 ? (
             <section className="memory_card-section">
-              <div className="section-label">项目技能片段</div>
+              <div className="section-label">项目 Memory Cards</div>
               {filteredProject.map((memoryCard) => {
                 const deleting = pendingAction === `删除-${memoryCard.id}`;
                 const governance = summarizeMemoryCardGovernance(memoryCard, assignment, allMemoryCards);

@@ -8,6 +8,7 @@ import {
   createDemoProjectAssignmentView,
   createDemoProjectCandidateInbox,
   createDemoProjectDashboard,
+  createDemoProjectEvalRunView,
   createDemoProjectQualityView,
   createDemoProjectReviewInbox,
   createDemoProjectMemoryCardLibrary,
@@ -15,6 +16,7 @@ import {
   type ProjectAssignmentView,
   type ProjectCandidateInbox,
   type ProjectDashboard,
+  type ProjectEvalRunView,
   type ProjectQualityView,
   type ProjectReviewInbox,
   type ProjectMemoryCardLibrary,
@@ -37,6 +39,7 @@ export function useProjectReadModels({
   const [memory_cardLibrary, setMemoryCardLibrary] = React.useState<ProjectMemoryCardLibrary | null>(null);
   const [assignmentView, setAssignmentView] = React.useState<ProjectAssignmentView | null>(null);
   const [qualityView, setQualityView] = React.useState<ProjectQualityView | null>(null);
+  const [evalRunView, setEvalRunView] = React.useState<ProjectEvalRunView | null>(null);
   const dashboardRequestRef = React.useRef(0);
   const readModelRequestRef = React.useRef(0);
 
@@ -46,6 +49,7 @@ export function useProjectReadModels({
     setMemoryCardLibrary(null);
     setAssignmentView(null);
     setQualityView(null);
+    setEvalRunView(null);
   }, []);
 
   const applyReadModels = React.useCallback((models: ProjectReadModels) => {
@@ -54,6 +58,7 @@ export function useProjectReadModels({
     if (models.library) setMemoryCardLibrary(models.library);
     if (models.assignment) setAssignmentView(models.assignment);
     if (models.quality) setQualityView(models.quality);
+    if (models.evalRun) setEvalRunView(models.evalRun);
   }, []);
 
   const hydrateReadModelsFromDemo = React.useCallback((projectPath: string, targetPage: PageId = page) => {
@@ -63,6 +68,7 @@ export function useProjectReadModels({
       setMemoryCardLibrary(createDemoProjectMemoryCardLibrary(projectPath));
       setAssignmentView(createDemoProjectAssignmentView(projectPath));
       setQualityView(createDemoProjectQualityView(projectPath));
+      setEvalRunView(createDemoProjectEvalRunView(projectPath));
     }
     if (targetPage === "memory-cards" || targetPage === "agents" || targetPage === "settings") {
       setMemoryCardLibrary(createDemoProjectMemoryCardLibrary(projectPath));
@@ -72,6 +78,7 @@ export function useProjectReadModels({
     }
     if (targetPage === "settings") {
       setQualityView(createDemoProjectQualityView(projectPath));
+      setEvalRunView(createDemoProjectEvalRunView(projectPath));
     }
   }, [page]);
 
@@ -132,6 +139,8 @@ export function useProjectReadModels({
     setAssignmentView,
     qualityView,
     setQualityView,
+    evalRunView,
+    setEvalRunView,
     clearProjectReadModels,
     hydrateReadModelsFromDemo,
     loadDashboard,

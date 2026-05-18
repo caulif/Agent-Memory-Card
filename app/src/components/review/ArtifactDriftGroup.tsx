@@ -49,7 +49,9 @@ export function ArtifactDriftGroup({
         ) : null}
       </div>
       {targetPage.items.map((target) => {
-        const actionKey = `drift:${target.path}`;
+        const importKey = driftFileActionKey(target.path, "import");
+        const keepKey = driftFileActionKey(target.path, "keep");
+        const discardKey = driftFileActionKey(target.path, "discard");
         return (
           <span key={`blocking:${target.path}`} title={target.diffPreview?.join("\n") || target.path}>
             {target.status} · {target.path}
@@ -59,9 +61,9 @@ export function ArtifactDriftGroup({
               <span className="artifact-drift-file-actions">
                 <button
                   type="button"
-                  disabled={disabled || pendingAction === `${actionKey}:import`}
+                  disabled={disabled || pendingAction === importKey}
                   onClick={() =>
-                    void onAction("导入 Drift 文件", "已把该 drift 文件导入为待审草稿。", "import_artifact_drift_path", {
+                    void onAction(importKey, "已把该 drift 文件导入为待审草稿。", "import_artifact_drift_path", {
                       artifactPath: target.path,
                     })
                   }
@@ -72,9 +74,9 @@ export function ArtifactDriftGroup({
                 </button>
                 <button
                   type="button"
-                  disabled={disabled || pendingAction === `${actionKey}:keep`}
+                  disabled={disabled || pendingAction === keepKey}
                   onClick={() =>
-                    void onAction("保留 Drift 文件", "已接受该 drift 文件的当前内容。", "keep_artifact_drift_path", {
+                    void onAction(keepKey, "已接受该 drift 文件的当前内容。", "keep_artifact_drift_path", {
                       artifactPath: target.path,
                     })
                   }
@@ -86,10 +88,10 @@ export function ArtifactDriftGroup({
                 <button
                   type="button"
                   className="danger"
-                  disabled={disabled || pendingAction === `${actionKey}:discard`}
+                  disabled={disabled || pendingAction === discardKey}
                   onClick={() => {
                     if (!window.confirm("这会丢弃该 drift 文件里的手动改动，并恢复为 Memory Card 生成内容。确定继续吗？")) return;
-                    void onAction("丢弃 Drift 文件", "已恢复该 drift 文件的生成内容。", "discard_artifact_drift_path", {
+                    void onAction(discardKey, "已恢复该 drift 文件的生成内容。", "discard_artifact_drift_path", {
                       artifactPath: target.path,
                     });
                   }}
@@ -108,4 +110,11 @@ export function ArtifactDriftGroup({
       ) : null}
     </div>
   );
+}
+
+export function driftFileActionKey(
+  path: string,
+  action: "import" | "keep" | "discard",
+) {
+  return `drift:${action}:${path}`;
 }

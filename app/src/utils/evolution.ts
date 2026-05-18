@@ -15,7 +15,7 @@ export function describeDraftForReview(draft: DraftRecord): string {
   const kindLabel = translateKind(draft.kind);
   const scopeLabel = translateScope(draft.scope);
   const content = summarizeDraftContent(draft.body || draft.title);
-  return clampChineseBrief(`这条草稿沉淀了${scopeLabel}级${kindLabel}：${content}`);
+  return clampChineseBrief(`这条建议沉淀了${scopeLabel}级${kindLabel}：${content}`);
 }
 
 function summarizeDraftContent(input: string): string {
@@ -92,12 +92,12 @@ export function deriveMemoryCardEvolution(
   );
   timeline.push({
     date: evolutionTimestamps[baseDateIdx]!,
-    event: `技能片段"${memory_card.title}"被提取并注册`,
+    event: `Memory Card "${memory_card.title}" 被提取并注册`,
   });
   if (draftCount > 0) {
     timeline.push({
       date: evolutionTimestamps[Math.min(baseDateIdx + 1, evolutionTimestamps.length - 1)]!,
-      event: `关联 ${draftCount} 条相关草稿进入审核队列`,
+      event: `关联 ${draftCount} 条相关建议进入审核队列`,
     });
   }
   timeline.push({
@@ -139,7 +139,7 @@ export function deriveMemoryCardEvolution(
     evolution_tree.push({
       from: last.to,
       to: `${memory_card.title} (全局提升)`,
-      label: "候选提升为全局片段",
+      label: "建议提升为全局 Memory Card",
     });
   }
 

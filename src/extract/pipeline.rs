@@ -18,6 +18,12 @@ use crate::extract::truncate::truncate_messages;
 use crate::observation::ObservationRecord;
 use crate::provider::ProviderConfig;
 
+pub const STAGE_STRIP: &str = "strip";
+pub const STAGE_TRUNCATE: &str = "truncate";
+pub const STAGE_CLUSTER: &str = "cluster";
+pub const STAGE_INDUCE: &str = "induce";
+pub const STAGE_CRYSTALLIZE: &str = "crystallize";
+
 /// 流水线选项：组合各层配置 + 是否跳过 INDUCE。
 pub struct PipelineOptions {
     pub cluster: ClusterOptions,
@@ -77,6 +83,8 @@ pub struct PipelineReport {
     pub cards: Vec<CrystallizedCard>,
     #[serde(default)]
     pub crystallize_rejects: Vec<CrystallizeReject>,
+    #[serde(default)]
+    pub stage_metrics: Vec<PipelineStageMetric>,
     /// 失败原因的串简表（前若干条），便于 debug
     pub failures_preview: Vec<String>,
     /// 各层耗时（毫秒）。键：strip / truncate / cluster / induce / crystallize
@@ -91,6 +99,78 @@ pub struct CrystallizeReject {
     pub cluster_id: String,
     pub candidate: InducedCandidate,
     pub reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PipelineStageMetric {
+    pub stage: String,
+    pub input_count: usize,
+    pub output_count: usize,
+    pub accepted_count: usize,
+    pub rejected_count: usize,
+    pub failed_count: usize,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct StripStageInput<'a> {
+    pub observations: &'a [ObservationRecord],
+}
+
+#[derive(Debug, Clone)]
+pub struct StripStageOutput {
+    pub messages: Vec<crate::extract::strip::StrippedMessage>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TruncateStageInput {
+    pub messages: Vec<crate::extract::strip::StrippedMessage>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TruncateStageOutput {
+    pub messages: Vec<crate::extract::truncate::TruncatedMessage>,
+    pub long_truncated: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClusterStageInput {
+    pub messages: Vec<crate::extract::truncate::TruncatedMessage>,
+    pub options: ClusterOptions,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClusterStageOutput {
+    pub clusters: Vec<MessageCluster>,
+}
+
+#[derive(Debug, Clone)]
+pub struct InduceStageInput {
+    pub clusters: Vec<MessageCluster>,
+    pub mode: InduceMode,
+    pub skip_induce: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct InduceStageOutput {
+    pub candidates: Vec<InducedCandidate>,
+    pub rejected: usize,
+    pub failed: usize,
+    pub calls: usize,
+    pub clusters_selected: usize,
+    pub failures_preview: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CrystallizeStageInput {
+    pub candidates: Vec<InducedCandidate>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CrystallizeStageOutput {
+    pub cards: Vec<CrystallizedCard>,
+    pub rejects: Vec<CrystallizeReject>,
+    pub failures_preview: Vec<String>,
 }
 
 impl PipelineReport {
@@ -171,87 +251,233 @@ pub fn run_pipeline_with(
     options: &PipelineOptions,
 ) -> Result<PipelineReport> {
     let mut timings = std::collections::BTreeMap::<String, u64>::new();
+    let mut stage_metrics = Vec::<PipelineStageMetric>::new();
 
-    // Layer 1
     let t = Instant::now();
-    let stripped = strip_observations(observations);
-    timings.insert("strip".to_string(), t.elapsed().as_millis() as u64);
-    // Layer 2
-    let t = Instant::now();
-    let truncated = truncate_messages(&stripped);
-    timings.insert("truncate".to_string(), t.elapsed().as_millis() as u64);
-    let truncated_long = truncated.iter().filter(|m| m.was_truncated).count();
-    // Layer 3
-    let t = Instant::now();
-    let clusters: Vec<MessageCluster> = cluster_messages_with(&truncated, &options.cluster)?;
-    timings.insert("cluster".to_string(), t.elapsed().as_millis() as u64);
+    let strip_output = run_strip_stage(StripStageInput { observations });
+    let strip_ms = t.elapsed().as_millis() as u64;
+    timings.insert(STAGE_STRIP.to_string(), strip_ms);
+    stage_metrics.push(PipelineStageMetric {
+        stage: STAGE_STRIP.to_string(),
+        input_count: observations.len(),
+        output_count: strip_output.messages.len(),
+        accepted_count: strip_output.messages.len(),
+        rejected_count: observations
+            .len()
+            .saturating_sub(strip_output.messages.len()),
+        failed_count: 0,
+        duration_ms: strip_ms,
+    });
 
-    // Layer 4
     let t = Instant::now();
-    let (outcomes, induce_calls, induce_clusters_selected): (Vec<InductionOutcome>, usize, usize) =
-        if options.skip_induce {
-            (Vec::new(), 0, 0)
-        } else {
-            match options.induce {
-                InduceMode::PerCluster => (
-                    induce_with_provider(provider, &clusters),
-                    clusters.len(),
-                    clusters.len(),
-                ),
-                InduceMode::BatchTopK {
-                    evidence_top_k,
-                    max_cards,
-                } => {
-                    let selected = select_induce_clusters(&clusters, evidence_top_k);
-                    let selected_len = selected.len();
-                    let (outcomes, calls) = if selected.is_empty() {
-                        (Vec::new(), 0)
+    let truncate_output = run_truncate_stage(TruncateStageInput {
+        messages: strip_output.messages,
+    });
+    let truncate_ms = t.elapsed().as_millis() as u64;
+    timings.insert(STAGE_TRUNCATE.to_string(), truncate_ms);
+    stage_metrics.push(PipelineStageMetric {
+        stage: STAGE_TRUNCATE.to_string(),
+        input_count: truncate_output.messages.len(),
+        output_count: truncate_output.messages.len(),
+        accepted_count: truncate_output.messages.len(),
+        rejected_count: 0,
+        failed_count: 0,
+        duration_ms: truncate_ms,
+    });
+
+    let t = Instant::now();
+    let truncate_count = truncate_output.messages.len();
+    let truncated_long = truncate_output.long_truncated;
+    let cluster_output = run_cluster_stage(ClusterStageInput {
+        messages: truncate_output.messages,
+        options: options.cluster.clone(),
+    })?;
+    let cluster_ms = t.elapsed().as_millis() as u64;
+    timings.insert(STAGE_CLUSTER.to_string(), cluster_ms);
+    stage_metrics.push(PipelineStageMetric {
+        stage: STAGE_CLUSTER.to_string(),
+        input_count: truncate_count,
+        output_count: cluster_output.clusters.len(),
+        accepted_count: cluster_output.clusters.len(),
+        rejected_count: 0,
+        failed_count: 0,
+        duration_ms: cluster_ms,
+    });
+
+    let t = Instant::now();
+    let clusters_in = cluster_output.clusters.len();
+    let induce_output = run_induce_stage(
+        provider,
+        InduceStageInput {
+            clusters: cluster_output.clusters,
+            mode: options.induce,
+            skip_induce: options.skip_induce,
+        },
+    );
+    let induce_ms = t.elapsed().as_millis() as u64;
+    timings.insert(STAGE_INDUCE.to_string(), induce_ms);
+    stage_metrics.push(PipelineStageMetric {
+        stage: STAGE_INDUCE.to_string(),
+        input_count: clusters_in,
+        output_count: induce_output.candidates.len(),
+        accepted_count: induce_output.candidates.len(),
+        rejected_count: induce_output.rejected,
+        failed_count: induce_output.failed,
+        duration_ms: induce_ms,
+    });
+
+    let t = Instant::now();
+    let induce_accepted = induce_output.candidates.len();
+    let induce_rejected = induce_output.rejected;
+    let induce_failed = induce_output.failed;
+    let induce_calls = induce_output.calls;
+    let induce_clusters_selected = induce_output.clusters_selected;
+    let mut failures_preview = induce_output.failures_preview;
+    let crystallize_output = run_crystallize_stage(CrystallizeStageInput {
+        candidates: induce_output.candidates,
+    });
+    let crystallize_ms = t.elapsed().as_millis() as u64;
+    timings.insert(STAGE_CRYSTALLIZE.to_string(), crystallize_ms);
+    failures_preview.extend(
+        crystallize_output
+            .failures_preview
+            .iter()
+            .take(10usize.saturating_sub(failures_preview.len()))
+            .cloned(),
+    );
+    stage_metrics.push(PipelineStageMetric {
+        stage: STAGE_CRYSTALLIZE.to_string(),
+        input_count: induce_accepted,
+        output_count: crystallize_output.cards.len(),
+        accepted_count: crystallize_output.cards.len(),
+        rejected_count: crystallize_output.rejects.len(),
+        failed_count: 0,
+        duration_ms: crystallize_ms,
+    });
+
+    Ok(PipelineReport {
+        observations_in: observations.len(),
+        stripped_kept: stage_metrics[0].output_count,
+        truncated_count: truncate_count,
+        truncated_long_messages: truncated_long,
+        clusters_in,
+        induce_accepted,
+        induce_rejected,
+        induce_failed,
+        induce_calls,
+        induce_clusters_selected,
+        crystallize_accepted: crystallize_output.cards.len(),
+        crystallize_rejected: crystallize_output.rejects.len(),
+        cards: crystallize_output.cards,
+        crystallize_rejects: crystallize_output.rejects,
+        stage_metrics,
+        failures_preview,
+        layer_timings_ms: timings,
+        pipeline_version: PIPELINE_VERSION,
+    })
+}
+
+/// 当前流水线版本号；任何会改变卡产出的 layer 修改都应 +1。
+pub const PIPELINE_VERSION: u32 = 1;
+
+pub fn run_strip_stage(input: StripStageInput<'_>) -> StripStageOutput {
+    StripStageOutput {
+        messages: strip_observations(input.observations),
+    }
+}
+
+pub fn run_truncate_stage(input: TruncateStageInput) -> TruncateStageOutput {
+    let messages = truncate_messages(&input.messages);
+    let long_truncated = messages
+        .iter()
+        .filter(|message| message.was_truncated)
+        .count();
+    TruncateStageOutput {
+        messages,
+        long_truncated,
+    }
+}
+
+pub fn run_cluster_stage(input: ClusterStageInput) -> Result<ClusterStageOutput> {
+    Ok(ClusterStageOutput {
+        clusters: cluster_messages_with(&input.messages, &input.options)?,
+    })
+}
+
+pub fn run_induce_stage(
+    provider: &dyn InduceProvider,
+    input: InduceStageInput,
+) -> InduceStageOutput {
+    let (outcomes, calls, clusters_selected): (Vec<InductionOutcome>, usize, usize) = if input
+        .skip_induce
+    {
+        (Vec::new(), 0, 0)
+    } else {
+        match input.mode {
+            InduceMode::PerCluster => (
+                induce_with_provider(provider, &input.clusters),
+                input.clusters.len(),
+                input.clusters.len(),
+            ),
+            InduceMode::BatchTopK {
+                evidence_top_k,
+                max_cards,
+            } => {
+                let selected = select_induce_clusters(&input.clusters, evidence_top_k);
+                let selected_len = selected.len();
+                let (outcomes, calls) = if selected.is_empty() {
+                    (Vec::new(), 0)
+                } else {
+                    let batch_outcomes = induce_batch_with_provider(provider, &selected, max_cards);
+                    if is_batch_failure(&batch_outcomes) {
+                        let mut outcomes = batch_outcomes;
+                        outcomes.extend(induce_with_provider(provider, &selected));
+                        (outcomes, 1 + selected_len)
                     } else {
-                        let batch_outcomes =
-                            induce_batch_with_provider(provider, &selected, max_cards);
-                        if is_batch_failure(&batch_outcomes) {
-                            let mut outcomes = batch_outcomes;
-                            outcomes.extend(induce_with_provider(provider, &selected));
-                            (outcomes, 1 + selected_len)
-                        } else {
-                            (batch_outcomes, 1)
-                        }
-                    };
-                    (outcomes, calls, selected_len)
-                }
+                        (batch_outcomes, 1)
+                    }
+                };
+                (outcomes, calls, selected_len)
             }
-        };
-    timings.insert("induce".to_string(), t.elapsed().as_millis() as u64);
-    let mut accepted_candidates: Vec<InducedCandidate> = Vec::new();
-    let mut induce_rejected = 0usize;
-    let mut induce_failed = 0usize;
-    let mut failures_preview: Vec<String> = Vec::new();
+        }
+    };
+    let mut candidates = Vec::new();
+    let mut rejected = 0usize;
+    let mut failed = 0usize;
+    let mut failures_preview = Vec::new();
     for outcome in outcomes {
         match outcome {
-            InductionOutcome::Accepted(c) => accepted_candidates.push(c),
+            InductionOutcome::Accepted(candidate) => candidates.push(candidate),
             InductionOutcome::Rejected { cluster_id, reason } => {
-                induce_rejected += 1;
+                rejected += 1;
                 if failures_preview.len() < 5 {
                     failures_preview.push(format!("induce reject {cluster_id}: {reason}"));
                 }
             }
             InductionOutcome::Failed { cluster_id, error } => {
-                induce_failed += 1;
+                failed += 1;
                 if failures_preview.len() < 5 {
                     failures_preview.push(format!("induce fail {cluster_id}: {error}"));
                 }
             }
         }
     }
+    InduceStageOutput {
+        candidates,
+        rejected,
+        failed,
+        calls,
+        clusters_selected,
+        failures_preview,
+    }
+}
 
-    // Layer 5
-    let t = Instant::now();
-    let crystallize_outcomes = crystallize_candidates(&accepted_candidates);
-    timings.insert("crystallize".to_string(), t.elapsed().as_millis() as u64);
-    let mut cards: Vec<CrystallizedCard> = Vec::new();
-    let mut crystallize_rejected = 0usize;
-    let mut crystallize_rejects: Vec<CrystallizeReject> = Vec::new();
-    for outcome in crystallize_outcomes {
+pub fn run_crystallize_stage(input: CrystallizeStageInput) -> CrystallizeStageOutput {
+    let outcomes = crystallize_candidates(&input.candidates);
+    let mut cards = Vec::new();
+    let mut rejects = Vec::new();
+    let mut failures_preview = Vec::new();
+    for outcome in outcomes {
         match outcome {
             CrystallizationOutcome::Accepted(card) => cards.push(card),
             CrystallizationOutcome::Rejected {
@@ -259,8 +485,7 @@ pub fn run_pipeline_with(
                 candidate,
                 reasons,
             } => {
-                crystallize_rejected += 1;
-                crystallize_rejects.push(CrystallizeReject {
+                rejects.push(CrystallizeReject {
                     cluster_id: cluster_id.clone(),
                     candidate,
                     reasons: reasons.clone(),
@@ -274,30 +499,12 @@ pub fn run_pipeline_with(
             }
         }
     }
-
-    Ok(PipelineReport {
-        observations_in: observations.len(),
-        stripped_kept: stripped.len(),
-        truncated_count: truncated.len(),
-        truncated_long_messages: truncated_long,
-        clusters_in: clusters.len(),
-        induce_accepted: accepted_candidates.len(),
-        induce_rejected,
-        induce_failed,
-        induce_calls,
-        induce_clusters_selected,
-        crystallize_accepted: cards.len(),
-        crystallize_rejected,
+    CrystallizeStageOutput {
         cards,
-        crystallize_rejects,
+        rejects,
         failures_preview,
-        layer_timings_ms: timings,
-        pipeline_version: PIPELINE_VERSION,
-    })
+    }
 }
-
-/// 当前流水线版本号；任何会改变卡产出的 layer 修改都应 +1。
-pub const PIPELINE_VERSION: u32 = 1;
 
 fn select_induce_clusters(
     clusters: &[MessageCluster],
@@ -668,6 +875,23 @@ mod tests {
         assert!(report.stripped_kept >= 1);
         assert_eq!(report.induce_accepted, 0);
         assert_eq!(report.crystallize_accepted, 0);
+        assert_eq!(
+            report
+                .stage_metrics
+                .iter()
+                .map(|metric| metric.stage.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                STAGE_STRIP,
+                STAGE_TRUNCATE,
+                STAGE_CLUSTER,
+                STAGE_INDUCE,
+                STAGE_CRYSTALLIZE
+            ]
+        );
+        assert_eq!(report.stage_metrics[0].input_count, 2);
+        assert_eq!(report.stage_metrics[0].output_count, report.stripped_kept);
+        assert_eq!(report.stage_metrics[3].failed_count, report.induce_failed);
     }
 
     #[test]

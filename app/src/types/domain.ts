@@ -143,13 +143,53 @@ export type ProjectQualityView = {
   project_path: string;
   rule_ci: { passed: number; failed: number };
   build_preview: BuildPreview;
-  status: { warnings: string[] };
+  status: { warnings: string[]; last_sync?: SyncCheckpoint | null };
+};
+
+export type SyncCheckpoint = {
+  id: string;
+  created_at: string;
+  artifact_count: number;
+  artifacts: Array<{ path: string; kind: string; hash: string }>;
+  memory_card_ids: string[];
+  rollback_instructions: string[];
+};
+
+export type ProjectEvalMetricView = {
+  label: string;
+  percent?: number | null;
+  count: number;
+  total: number;
+  status: "pass" | "fail" | string;
+};
+
+export type ProjectEvalRunView = {
+  project_path: string;
+  status: "missing" | "passing" | "attention" | string;
+  provider?: string | null;
+  pipeline_version?: number | null;
+  timestamp?: string | null;
+  recall?: ProjectEvalMetricView | null;
+  precision?: ProjectEvalMetricView | null;
+  one_off_false_positive?: ProjectEvalMetricView | null;
+  duplicate_cluster_risk?: ProjectEvalMetricView | null;
+  evidence_validity?: ProjectEvalMetricView | null;
+  provider_evidence_validity?: ProjectEvalMetricView | null;
+  recommendations: string[];
 };
 
 export type BuildPreview = {
   actions: string[];
   warnings: string[];
   artifact_previews?: ArtifactPreviewRow[];
+  verification?: SyncVerificationReport | null;
+};
+
+export type SyncVerificationReport = {
+  rule_ci: { passed: number; failed: number; rows: Array<{ name: string; status: string; details: string[] }> };
+  status: "pass" | "fail" | string;
+  next_actions: string[];
+  reload_prompt: string;
 };
 
 export type ArtifactPreviewRow = {
@@ -171,6 +211,30 @@ export type CustomProviderConfig = {
   model: string;
   api_key_env: string;
   api_key?: string;
+};
+
+export type SetupChecklistItem = {
+  label: string;
+  status: "pass" | "warn" | "fail" | string;
+  detail: string;
+  next_action?: string | null;
+};
+
+export type SetupChecklistReport = {
+  runtime_mode: "installer" | "dev" | string;
+  items: SetupChecklistItem[];
+};
+
+export type ProviderStatusReport = {
+  status: "pass" | "warn" | "fail" | string;
+  provider: string;
+  protocol: string;
+  base_url: string;
+  model: string;
+  api_key_env: string;
+  proxy?: string | null;
+  checks: SetupChecklistItem[];
+  next_actions: string[];
 };
 
 // ===== 任务相关 =====

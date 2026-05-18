@@ -65,6 +65,23 @@ export function ArtifactPreviewStrip({
         pendingAction={pendingAction}
         onAction={onAction}
       />
+      {preview.lastSync ? (
+        <div className="artifact-sync-checkpoint">
+          <div>
+            <span>Last Sync</span>
+            <strong>{preview.lastSync.artifact_count} artifacts · {preview.lastSync.memory_card_ids.length} Memory Cards</strong>
+            <small>{formatSyncTime(preview.lastSync.created_at)}</small>
+          </div>
+          <details>
+            <summary>Rollback guidance</summary>
+            <ul>
+              {preview.lastSync.rollback_instructions.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ul>
+          </details>
+        </div>
+      ) : null}
       {preview.targets.some((target) => target.diffLines?.length) ? (
         <div className="artifact-preview-diffs">
           {preview.targets
@@ -83,4 +100,10 @@ export function ArtifactPreviewStrip({
       ) : null}
     </div>
   );
+}
+
+function formatSyncTime(timestamp: string) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return timestamp;
+  return date.toLocaleString();
 }
