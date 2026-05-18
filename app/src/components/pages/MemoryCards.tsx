@@ -3,17 +3,26 @@ import { Loader2, Pencil, Trash2 } from "lucide-react";
 import { EmptyState } from "../common";
 import {
   buildEditFormFromMemoryCard,
+  buildMemoryGovernanceBatchActions,
+  buildMemoryGovernanceSummary,
+  filterMemoryCardsByGovernance,
   filterRecordsByTag,
+  summarizeMemoryCardGovernance,
   translateKind,
   translateScope,
+  type MemoryGovernanceFilter,
   type ProjectMemoryCardLibrary,
+  type ProjectAssignmentView,
   type PanelPageProps,
 } from "../../ui-helpers";
+import { MemoryGovernanceBatchBar } from "../memory/MemoryGovernanceBatchBar";
+import { MemoryGovernancePanel } from "../memory/MemoryGovernancePanel";
 import { RecordEditor } from "./RecordEditor";
 
 export function MemoryCards({
   snapshot,
   library,
+  assignment,
   pendingAction,
   disabled,
   onAction,
@@ -22,12 +31,15 @@ export function MemoryCards({
   onRefresh,
 }: PanelPageProps & {
   library: ProjectMemoryCardLibrary | null;
+  assignment: ProjectAssignmentView | null;
   previewMode: boolean;
   projectPath: string;
   onRefresh: () => void;
 }) {
   const [activeTag, setActiveTag] = React.useState("all");
+  const [activeGovernance, setActiveGovernance] = React.useState<MemoryGovernanceFilter>("all");
   const [editingId, setEditingId] = React.useState<string | null>(null);
+  const [batchAction, setBatchAction] = React.useState<string | null>(null);
 
   function startEdit(memoryCard: import("../../ui-helpers").MemoryCardRecord) {
     setEditingId(memoryCard.id);
@@ -51,12 +63,28 @@ export function MemoryCards({
     );
   }
 
+  async function runGovernanceBatch(action: import("../../ui-helpers").MemoryGovernanceBatchAction) {
+    setBatchAction(action.actionKey);
+    try {
+      for (const step of action.steps) {
+        await onAction(step.actionKey, step.doneMessage, step.command, step.args);
+      }
+    } finally {
+      setBatchAction(null);
+      onRefresh();
+    }
+  }
+
   const rawProjectMemoryCards = library?.memory_cards ?? snapshot?.memory_cards ?? [];
   const projectMemoryCards = React.useMemo(
     () => dedupeMemoryCards(rawProjectMemoryCards, projectPath),
     [rawProjectMemoryCards, projectPath],
   );
   const allMemoryCards = projectMemoryCards;
+  const governanceSummary = React.useMemo(
+    () => buildMemoryGovernanceSummary(allMemoryCards, assignment),
+    [allMemoryCards, assignment],
+  );
 
   const allTags = React.useMemo(() => {
     const tagSet = new Set<string>();
@@ -68,14 +96,31 @@ export function MemoryCards({
     return Array.from(tagSet).sort();
   }, [allMemoryCards]);
 
-  const filtered = React.useMemo(
+  const tagFiltered = React.useMemo(
     () => filterRecordsByTag(allMemoryCards, activeTag),
     [allMemoryCards, activeTag],
   );
-  const filteredProject = React.useMemo(
-    () => filterRecordsByTag(projectMemoryCards, activeTag),
-    [projectMemoryCards, activeTag],
+  const filtered = React.useMemo(
+    () => filterMemoryCardsByGovernance(tagFiltered, activeGovernance, assignment),
+    [activeGovernance, assignment, tagFiltered],
   );
+  const filteredProject = React.useMemo(
+    () => filterMemoryCardsByGovernance(filterRecordsByTag(projectMemoryCards, activeTag), activeGovernance, assignment),
+    [activeGovernance, assignment, projectMemoryCards, activeTag],
+  );
+  const batchActions = React.useMemo(
+    () => buildMemoryGovernanceBatchActions(filteredProject, activeGovernance, assignment, allMemoryCards),
+    [activeGovernance, allMemoryCards, assignment, filteredProject],
+  );
+  const governanceFilters: Array<{ id: MemoryGovernanceFilter; label: string }> = [
+    { id: "all", label: "全部治理" },
+    { id: "needs-review", label: "需复核" },
+    { id: "conflicts", label: "疑似重复" },
+    { id: "unassigned", label: "未分配" },
+    { id: "missing-source", label: "缺来源" },
+    { id: "dormant", label: "休眠" },
+    { id: "expired", label: "过期" },
+  ];
 
   return (
     <div className="list">
@@ -83,6 +128,41 @@ export function MemoryCards({
         <EmptyState title="暂无项目技能片段" description="批准草稿后会先进入这里，之后再由你手动分配给 Agent。" />
       ) : (
         <>
+          <section className="governance-strip" aria-label="Memory Card 治理状态">
+            <div>
+              <strong>{governanceSummary.total}</strong>
+              <span>总卡片</span>
+            </div>
+            <div>
+              <strong>{governanceSummary.assigned}</strong>
+              <span>已分配</span>
+            </div>
+            <div>
+              <strong>{governanceSummary.unassigned}</strong>
+              <span>未分配</span>
+            </div>
+            <div>
+              <strong>{governanceSummary.missingSource}</strong>
+              <span>缺来源</span>
+            </div>
+            <div>
+              <strong>{governanceSummary.needsReview}</strong>
+              <span>需复核</span>
+            </div>
+            <div>
+              <strong>{governanceSummary.conflicts}</strong>
+              <span>疑似重复</span>
+            </div>
+            <div>
+              <strong>{governanceSummary.dormant}</strong>
+              <span>休眠</span>
+            </div>
+            <div>
+              <strong>{governanceSummary.expired}</strong>
+              <span>过期</span>
+            </div>
+          </section>
+
           {allTags.length > 0 ? (
             <nav className="tag-filter" aria-label="按标签筛选技能片段">
               <button
@@ -102,6 +182,25 @@ export function MemoryCards({
               ))}
             </nav>
           ) : null}
+          <nav className="tag-filter" aria-label="按治理状态筛选 Memory Card">
+            {governanceFilters.map((filter) => (
+              <button
+                key={filter.id}
+                className={activeGovernance === filter.id ? "active" : ""}
+                onClick={() => setActiveGovernance(filter.id)}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </nav>
+
+          <MemoryGovernanceBatchBar
+            actions={batchActions}
+            disabled={disabled}
+            pendingAction={pendingAction}
+            batchAction={batchAction}
+            onRunBatch={runGovernanceBatch}
+          />
 
           {filtered.length === 0 ? (
             <p className="filter-note">当前标签筛选条件下暂无匹配的技能片段。</p>
@@ -112,6 +211,7 @@ export function MemoryCards({
               <div className="section-label">项目技能片段</div>
               {filteredProject.map((memoryCard) => {
                 const deleting = pendingAction === `删除-${memoryCard.id}`;
+                const governance = summarizeMemoryCardGovernance(memoryCard, assignment, allMemoryCards);
                 return (
                   <React.Fragment key={memoryCard.id}>
                     <article className="record compact">
@@ -129,6 +229,12 @@ export function MemoryCards({
                             ))}
                           </div>
                         ) : null}
+                        <MemoryGovernancePanel
+                          governance={governance}
+                          disabled={disabled}
+                          pendingAction={pendingAction}
+                          onAction={onAction}
+                        />
                       </div>
                       <div className="record-actions">
                         <button

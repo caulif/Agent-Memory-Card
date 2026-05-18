@@ -60,6 +60,9 @@ export function useProjectReadModels({
     if (targetPage === "drafts" || targetPage === "settings") {
       setCandidateInbox(createDemoProjectCandidateInbox(projectPath));
       setReviewInbox(createDemoProjectReviewInbox(projectPath));
+      setMemoryCardLibrary(createDemoProjectMemoryCardLibrary(projectPath));
+      setAssignmentView(createDemoProjectAssignmentView(projectPath));
+      setQualityView(createDemoProjectQualityView(projectPath));
     }
     if (targetPage === "memory-cards" || targetPage === "agents" || targetPage === "settings") {
       setMemoryCardLibrary(createDemoProjectMemoryCardLibrary(projectPath));

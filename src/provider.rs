@@ -12,7 +12,7 @@ use crate::config;
 use crate::fsutil;
 
 mod custom;
-pub use custom::save_custom_openai_compatible_provider;
+pub use custom::{save_custom_openai_compatible_provider, save_custom_provider};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfig {
@@ -146,6 +146,8 @@ pub enum Provider {
         api_key_env: String,
     },
     Anthropic {
+        #[serde(default = "default_anthropic_base_url")]
+        base_url: String,
         model: String,
         api_key_env: String,
         #[serde(default = "default_cache_system_prompt")]
@@ -184,12 +186,14 @@ impl std::fmt::Debug for Provider {
                 .field("api_key_env", &KeyEnvRedacted(api_key_env))
                 .finish(),
             Self::Anthropic {
+                base_url,
                 model,
                 api_key_env,
                 cache_system_prompt,
                 cache_ttl,
             } => f
                 .debug_struct("Anthropic")
+                .field("base_url", base_url)
                 .field("model", model)
                 .field("api_key_env", &KeyEnvRedacted(api_key_env))
                 .field("cache_system_prompt", cache_system_prompt)
@@ -234,6 +238,10 @@ impl std::fmt::Debug for KeyEnvRedacted<'_> {
 
 fn default_cache_system_prompt() -> bool {
     true
+}
+
+fn default_anthropic_base_url() -> String {
+    "https://api.anthropic.com".to_string()
 }
 
 fn default_cli_timeout_secs() -> u64 {
@@ -310,21 +318,62 @@ impl ProviderConfig {
 
     pub fn auto_detect() -> Self {
         let mut cfg = Self::local_default();
-        if std::env::var("ANTHROPIC_API_KEY")
-            .ok()
-            .is_some_and(|value| !value.trim().is_empty())
-        {
+        if let Some((api_key_env, _)) = anthropic_key_env_value() {
+            let base_url = std::env::var("ANTHROPIC_BASE_URL")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(default_anthropic_base_url);
+            let model = std::env::var("ANTHROPIC_MODEL")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "claude-sonnet-4-5".to_string());
             cfg.providers.insert(
                 "anthropic".to_string(),
                 Provider::Anthropic {
-                    model: "claude-sonnet-4-5".to_string(),
-                    api_key_env: "ANTHROPIC_API_KEY".to_string(),
+                    base_url,
+                    model,
+                    api_key_env,
                     cache_system_prompt: true,
                     cache_ttl: Some("1h".to_string()),
                 },
             );
         }
         cfg
+    }
+}
+
+fn anthropic_key_env_value() -> Option<(String, String)> {
+    ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]
+        .into_iter()
+        .find_map(|key| {
+            std::env::var(key)
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .map(|value| (key.to_string(), value))
+        })
+}
+
+fn merge_detected_providers(mut cfg: ProviderConfig) -> ProviderConfig {
+    let detected = ProviderConfig::auto_detect();
+    for (name, provider) in detected.providers {
+        cfg.providers.entry(name).or_insert(provider);
+    }
+    cfg
+}
+
+fn env_override(value: &str, env_name: &str) -> String {
+    std::env::var(env_name)
+        .ok()
+        .filter(|env_value| !env_value.trim().is_empty())
+        .unwrap_or_else(|| value.to_string())
+}
+
+fn anthropic_api_key(api_key_env: &str) -> Result<String> {
+    match std::env::var(api_key_env) {
+        Ok(value) if !value.trim().is_empty() => Ok(value),
+        _ => anthropic_key_env_value()
+            .map(|(_, value)| value)
+            .ok_or_else(|| anyhow!("missing Anthropic API key in {api_key_env}")),
     }
 }
 
@@ -351,7 +400,8 @@ pub fn load_or_default_provider_config(project_root: &Path) -> Result<ProviderCo
         return Ok(ProviderConfig::auto_detect());
     }
     let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-    serde_yaml::from_str(&text).with_context(|| format!("parse {}", path.display()))
+    let cfg = serde_yaml::from_str(&text).with_context(|| format!("parse {}", path.display()))?;
+    Ok(merge_detected_providers(cfg))
 }
 
 pub fn provider_exists(project_root: &Path, name: &str) -> Result<bool> {
@@ -446,21 +496,24 @@ pub fn call_provider_for_role(
             call_openai_compatible_api(base_url, &api_key, &body)
         }
         Provider::Anthropic {
+            base_url,
             model,
             api_key_env,
             cache_system_prompt,
             cache_ttl,
         } => {
-            let api_key = std::env::var(api_key_env)
-                .with_context(|| format!("missing Anthropic API key in {api_key_env}"))?;
+            let api_key = anthropic_api_key(api_key_env)?;
+            let base_url = env_override(base_url, "ANTHROPIC_BASE_URL");
+            let model = env_override(model, "ANTHROPIC_MODEL");
             let body = anthropic_request_body(
-                model,
+                &model,
                 request,
                 max_tokens,
                 *cache_system_prompt,
                 cache_ttl.as_deref(),
+                anthropic_supports_structured_output(&base_url),
             );
-            call_anthropic_api(&api_key, &body, cache_ttl.as_deref())
+            call_anthropic_api(&base_url, &api_key, &body, cache_ttl.as_deref())
         }
         Provider::ClaudeCli {
             binary,
@@ -499,13 +552,34 @@ fn call_openai_compatible_api(
 }
 
 fn call_anthropic_api(
+    base_url: &str,
     api_key: &str,
     body: &serde_json::Value,
     cache_ttl: Option<&str>,
 ) -> Result<String> {
+    call_anthropic_api_once(base_url, api_key, body, cache_ttl).or_else(|error| {
+        if !anthropic_no_text_error(&error) || body.get("output_config").is_none() {
+            return Err(error);
+        }
+        let fallback = anthropic_unstructured_json_body(body);
+        call_anthropic_api_once(base_url, api_key, &fallback, cache_ttl).with_context(|| {
+            format!(
+                "structured Anthropic response had no text content; fallback also failed: {error}"
+            )
+        })
+    })
+}
+
+fn call_anthropic_api_once(
+    base_url: &str,
+    api_key: &str,
+    body: &serde_json::Value,
+    cache_ttl: Option<&str>,
+) -> Result<String> {
+    let endpoint = format!("{}/v1/messages", base_url.trim_end_matches('/'));
     let client = http_client()?;
     let mut builder = client
-        .post("https://api.anthropic.com/v1/messages")
+        .post(endpoint)
         .header("x-api-key", api_key)
         .header("anthropic-version", "2023-06-01");
     if let Some(beta) = anthropic_beta_header(cache_ttl, body.get("output_config").is_some()) {
@@ -526,6 +600,51 @@ fn call_anthropic_api(
         })
         .map(str::to_string)
         .ok_or_else(|| anyhow!("Anthropic response returned no text content"))
+}
+
+fn anthropic_no_text_error(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .to_string()
+            .contains("Anthropic response returned no text content")
+    })
+}
+
+fn anthropic_unstructured_json_body(body: &serde_json::Value) -> serde_json::Value {
+    let mut fallback = body.clone();
+    let Some(schema) = fallback
+        .pointer("/output_config/format/schema/schema")
+        .cloned()
+    else {
+        return fallback;
+    };
+    fallback.as_object_mut().map(|object| {
+        object.remove("output_config");
+        let max_tokens = object
+            .get("max_tokens")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0)
+            .saturating_mul(4)
+            .max(4096);
+        object.insert("max_tokens".to_string(), serde_json::json!(max_tokens));
+    });
+    if let Some(messages) = fallback
+        .get_mut("messages")
+        .and_then(|value| value.as_array_mut())
+        && let Some(first_message) = messages.first_mut()
+        && let Some(content) = first_message.get_mut("content")
+        && let Some(text) = content.as_str()
+    {
+        let schema_text = serde_json::to_string(&schema).unwrap_or_else(|_| schema.to_string());
+        *content = serde_json::Value::String(format!(
+            "{text}\n\nReturn only valid JSON matching this JSON Schema. Do not include markdown fences or explanatory text:\n{schema_text}"
+        ));
+    }
+    fallback
+}
+
+fn anthropic_supports_structured_output(base_url: &str) -> bool {
+    !base_url.to_ascii_lowercase().contains("api.deepseek.com")
 }
 
 fn anthropic_beta_header(cache_ttl: Option<&str>, structured_outputs: bool) -> Option<String> {
@@ -549,6 +668,7 @@ fn anthropic_request_body(
     max_tokens: usize,
     cache_system_prompt: bool,
     cache_ttl: Option<&str>,
+    supports_structured_output: bool,
 ) -> serde_json::Value {
     let system = if cache_system_prompt {
         let cache_control = match cache_ttl {
@@ -574,6 +694,22 @@ fn anthropic_request_body(
         }]
     });
     if let Some(schema) = request.json_schema.as_ref() {
+        if !supports_structured_output {
+            if let Some(messages) = body
+                .get_mut("messages")
+                .and_then(|value| value.as_array_mut())
+                && let Some(first_message) = messages.first_mut()
+                && let Some(content) = first_message.get_mut("content")
+                && let Some(text) = content.as_str()
+            {
+                let schema_text = serde_json::to_string(&schema.schema)
+                    .unwrap_or_else(|_| schema.schema.to_string());
+                *content = serde_json::Value::String(format!(
+                    "{text}\n\nReturn only valid JSON matching this JSON Schema. Do not include markdown fences or explanatory text:\n{schema_text}"
+                ));
+            }
+            return body;
+        }
         body["output_config"] = serde_json::json!({
             "format": {
                 "type": "json_schema",
@@ -657,9 +793,18 @@ fn call_cli_subprocess(
 
 fn http_client() -> Result<Client> {
     Client::builder()
-        .timeout(Duration::from_secs(30))
+        .timeout(http_timeout_duration())
         .build()
         .context("build HTTP client")
+}
+
+fn http_timeout_duration() -> Duration {
+    std::env::var("AGENT_KERNEL_HTTP_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|secs| *secs > 0)
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| Duration::from_secs(120))
 }
 
 fn send_json(builder: reqwest::blocking::RequestBuilder) -> Result<serde_json::Value> {
@@ -703,293 +848,4 @@ fn provider_name_for_role(cfg: &ProviderConfig, role: ProviderRole) -> &str {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::{Mutex, OnceLock};
-
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
-
-    fn with_env_var<T>(key: &str, value: Option<&str>, f: impl FnOnce() -> T) -> T {
-        let _guard = env_lock().lock().expect("env lock");
-        let previous = std::env::var(key).ok();
-        match value {
-            Some(value) => unsafe { std::env::set_var(key, value) },
-            None => unsafe { std::env::remove_var(key) },
-        }
-        let result = f();
-        match previous.as_deref() {
-            Some(value) => unsafe { std::env::set_var(key, value) },
-            None => unsafe { std::env::remove_var(key) },
-        }
-        result
-    }
-
-    #[test]
-    fn default_provider_is_claude_cli() {
-        with_env_var("ANTHROPIC_API_KEY", None, || {
-            let cfg = ProviderConfig::default();
-            assert_eq!(cfg.default, "claude-cli");
-            assert_eq!(cfg.extraction_provider, "claude-cli");
-            assert_eq!(extraction_provider_name(&cfg), "claude-cli");
-            assert!(cfg.providers.contains_key("claude-cli"));
-            assert!(cfg.providers.contains_key("local"));
-        });
-    }
-
-    #[test]
-    fn init_writes_provider_config() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        init_provider_config(temp.path()).expect("init");
-        assert!(provider_config_path(temp.path()).expect("path").exists());
-    }
-
-    #[test]
-    fn redacts_common_secret_shapes() {
-        let input =
-            "token=abc123456789xyz and bearer secretBearerToken12345 and sk-abc123456789xyz";
-        let redacted = redact_secrets(input);
-
-        assert!(!redacted.contains("abc123456789xyz"));
-        assert!(!redacted.contains("secretBearerToken12345"));
-        assert!(redacted.contains("[REDACTED]"));
-    }
-
-    #[test]
-    fn default_extraction_config_fields() {
-        with_env_var("ANTHROPIC_API_KEY", None, || {
-            let cfg = ProviderConfig::default();
-            assert_eq!(cfg.extraction_provider, "claude-cli");
-            assert_eq!(
-                extraction_provider_name(&cfg),
-                "claude-cli",
-                "extract role should fall back to legacy extraction_provider"
-            );
-            assert_eq!(cfg.max_candidates_per_batch, 20);
-            assert_eq!(cfg.min_confidence, 0.7);
-        });
-    }
-
-    #[test]
-    fn local_provider_refuses_remote_call() {
-        with_env_var("ANTHROPIC_API_KEY", None, || {
-            let mut cfg = ProviderConfig::default();
-            cfg.default = "local".to_string();
-            cfg.extraction_provider = "local".to_string();
-            let result = call_provider(
-                &cfg,
-                &ProviderRequest {
-                    system_prompt: "system".to_string(),
-                    user_prompt: "user".to_string(),
-                    json_schema: None,
-                },
-                512,
-            );
-            assert!(result.is_err());
-            assert!(result.expect_err("must fail").to_string().contains("local"));
-        });
-    }
-
-    #[test]
-    fn is_llm_extraction_enabled_by_default() {
-        with_env_var("ANTHROPIC_API_KEY", None, || {
-            let temp = tempfile::tempdir().expect("tempdir");
-            let enabled = is_llm_extraction_enabled(temp.path()).expect("check");
-            assert!(enabled);
-        });
-    }
-
-    #[test]
-    fn auto_detect_keeps_claude_cli_default_when_anthropic_key_present() {
-        with_env_var("ANTHROPIC_API_KEY", Some("test-key"), || {
-            let cfg = ProviderConfig::auto_detect();
-            assert_eq!(cfg.default, "claude-cli");
-            assert_eq!(cfg.extraction_provider, "claude-cli");
-            assert_eq!(cfg.role_providers.update.as_deref(), None);
-            assert!(matches!(
-                cfg.providers.get("anthropic"),
-                Some(Provider::Anthropic { .. })
-            ));
-        });
-    }
-
-    #[test]
-    fn role_provider_overrides_legacy_extraction_provider() {
-        let mut cfg = ProviderConfig {
-            extraction_provider: "anthropic".to_string(),
-            ..ProviderConfig::default()
-        };
-        cfg.role_providers.extract = Some("openai-compatible".to_string());
-        cfg.role_providers.abstract_ = Some("claude-cli".to_string());
-
-        assert_eq!(
-            provider_name_for_role(&cfg, ProviderRole::Extract),
-            "openai-compatible"
-        );
-        assert_eq!(
-            provider_name_for_role(&cfg, ProviderRole::Update),
-            "anthropic"
-        );
-        assert_eq!(
-            provider_name_for_role(&cfg, ProviderRole::Abstract),
-            "claude-cli"
-        );
-        assert_eq!(
-            provider_name_for_role(&cfg, ProviderRole::Refine),
-            "anthropic"
-        );
-    }
-
-    #[test]
-    fn anthropic_request_body_marks_system_prompt_cacheable() {
-        let body = anthropic_request_body(
-            "claude-sonnet-4-5",
-            &ProviderRequest {
-                system_prompt: "system prompt".to_string(),
-                user_prompt: "user prompt".to_string(),
-                json_schema: None,
-            },
-            512,
-            true,
-            Some("1h"),
-        );
-
-        assert_eq!(body["model"], "claude-sonnet-4-5");
-        assert_eq!(body["messages"][0]["content"], "user prompt");
-        assert_eq!(body["system"][0]["cache_control"]["type"], "ephemeral");
-        assert_eq!(body["system"][0]["cache_control"]["ttl"], "1h");
-    }
-
-    #[test]
-    fn anthropic_request_body_includes_json_schema_output_config() {
-        let body = anthropic_request_body(
-            "claude-sonnet-4-5",
-            &ProviderRequest {
-                system_prompt: "system prompt".to_string(),
-                user_prompt: "user prompt".to_string(),
-                json_schema: Some(ProviderJsonSchema {
-                    name: "AtomicFactExtraction".to_string(),
-                    strict: true,
-                    schema: serde_json::json!({
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "title": { "type": "string" }
-                            },
-                            "required": ["title"]
-                        }
-                    }),
-                }),
-            },
-            1024,
-            true,
-            Some("1h"),
-        );
-
-        assert_eq!(body["output_config"]["format"]["type"], "json_schema");
-        assert_eq!(
-            body["output_config"]["format"]["schema"]["name"],
-            "AtomicFactExtraction"
-        );
-        assert_eq!(body["output_config"]["format"]["schema"]["strict"], true);
-    }
-
-    #[test]
-    fn anthropic_beta_header_combines_cache_and_structured_output_betas() {
-        assert_eq!(
-            anthropic_beta_header(Some("1h"), true).as_deref(),
-            Some("extended-cache-ttl-2025-04-11,structured-outputs-2025-11-13")
-        );
-        assert_eq!(
-            anthropic_beta_header(None, true).as_deref(),
-            Some("structured-outputs-2025-11-13")
-        );
-    }
-
-    #[test]
-    fn cli_provider_can_round_trip_prompt_via_stdin() {
-        let script_dir = tempfile::tempdir().expect("tempdir");
-
-        #[cfg(windows)]
-        let (binary, args) = {
-            let script_path = script_dir.path().join("echo-provider.ps1");
-            std::fs::write(&script_path, "@($input) -join \"`n\" | Write-Output").expect("script");
-            (
-                "powershell",
-                vec![
-                    "-NoProfile".to_string(),
-                    "-File".to_string(),
-                    script_path.display().to_string(),
-                ],
-            )
-        };
-
-        #[cfg(not(windows))]
-        let (binary, args) = {
-            let script_path = script_dir.path().join("echo-provider.sh");
-            std::fs::write(&script_path, "cat\n").expect("script");
-            ("sh", vec![script_path.display().to_string()])
-        };
-        let output = call_cli_subprocess(
-            binary,
-            &args,
-            &ProviderRequest {
-                system_prompt: "system prompt".to_string(),
-                user_prompt: "user prompt".to_string(),
-                json_schema: None,
-            },
-            5,
-        )
-        .expect("cli output");
-
-        assert!(output.contains("system prompt"));
-        assert!(output.contains("user prompt"));
-    }
-
-    #[test]
-    fn debug_redacts_api_key_env() {
-        let openai = Provider::OpenAiCompatible {
-            base_url: "http://localhost:11434/v1".into(),
-            model: "qwen2.5-coder:7b".into(),
-            api_key_env: "OPENAI_API_KEY".into(),
-        };
-        let anthropic = Provider::Anthropic {
-            model: "claude-sonnet-4-5".into(),
-            api_key_env: "ANTHROPIC_API_KEY".into(),
-            cache_system_prompt: true,
-            cache_ttl: Some("1h".into()),
-        };
-
-        let openai_dbg = format!("{openai:?}");
-        let anthropic_dbg = format!("{anthropic:?}");
-
-        // 确认包含非敏感的 provider 和 model 信息
-        assert!(openai_dbg.contains("OpenAiCompatible"));
-        assert!(openai_dbg.contains("qwen2.5-coder:7b"));
-        assert!(anthropic_dbg.contains("Anthropic"));
-        assert!(anthropic_dbg.contains("claude-sonnet-4-5"));
-
-        // 确认不暴露真实环境变量名
-        assert!(!openai_dbg.contains("OPENAI_API_KEY"));
-        assert!(!anthropic_dbg.contains("ANTHROPIC_API_KEY"));
-
-        // 确认使用了占位标记
-        assert!(openai_dbg.contains("<redacted>"));
-        assert!(anthropic_dbg.contains("<redacted>"));
-    }
-
-    #[test]
-    fn debug_provider_config_contains_providers_without_secrets() {
-        let cfg = ProviderConfig::default();
-        let dbg = format!("{cfg:?}");
-
-        // ProviderConfig 使用 Provider 的自定义 Debug，不应泄露密钥
-        assert!(!dbg.contains("OPENAI_API_KEY"));
-        assert!(!dbg.contains("ANTHROPIC_API_KEY"));
-        assert!(dbg.contains("OpenAiCompatible"));
-        assert!(dbg.contains("LocalHeuristic"));
-    }
-}
+mod tests;

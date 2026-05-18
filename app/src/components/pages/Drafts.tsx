@@ -3,24 +3,36 @@ import { ArrowUp, Check, Circle, Pencil, RefreshCw, X } from "lucide-react";
 import { ActionButton, EmptyState, Panel } from "../common";
 import {
   buildEditFormFromDraft,
+  buildEditFormFromCandidate,
+  buildReviewClosureState,
   type CandidateRecord,
   describeDraftForReview,
+  routeLabel,
+  summarizeArtifactPreview,
+  summarizeCandidateEvidence,
+  summarizeDraftEvidence,
   sortCandidatesForInbox,
   translateKind,
   translateScope,
-  type ExtractionMetadata,
   type ProjectAction,
+  type ProjectAssignmentView,
   type ProjectCandidateInbox,
+  type ProjectMemoryCardLibrary,
+  type ProjectQualityView,
   type ProjectReviewInbox,
   type ProjectSnapshot,
   type PanelPageProps,
 } from "../../ui-helpers";
+import { ArtifactPreviewStrip } from "../review/ArtifactPreviewStrip";
 import { RecordEditor } from "./RecordEditor";
 
 export function Drafts({
   snapshot,
   candidates,
   inbox,
+  assignment,
+  library,
+  quality,
   pendingAction,
   disabled,
   onAction,
@@ -33,6 +45,9 @@ export function Drafts({
 }: PanelPageProps & {
   candidates: ProjectCandidateInbox | null;
   inbox: ProjectReviewInbox | null;
+  assignment: ProjectAssignmentView | null;
+  library: ProjectMemoryCardLibrary | null;
+  quality: ProjectQualityView | null;
   onBatchCandidateAction: (
     actionKey: string,
     doneMessage: string,
@@ -54,6 +69,15 @@ export function Drafts({
   const sourceDrafts = inbox?.drafts ?? snapshot?.drafts ?? [];
   const drafts = visibleDrafts(sourceDrafts);
   const hiddenCount = Math.max(sourceDrafts.length - drafts.length, 0);
+  const memoryCards = library?.memory_cards ?? snapshot?.memory_cards ?? [];
+  const closureState = buildReviewClosureState({
+    candidates: allCandidates,
+    drafts,
+    memoryCards,
+    assignment,
+    quality,
+  });
+  const artifactPreview = summarizeArtifactPreview(quality);
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = React.useState<string | null>(null);
 
@@ -98,6 +122,9 @@ export function Drafts({
             <button className={synthesisEngine === "codex" ? "active" : ""} onClick={() => onSynthesisEngineChange("codex")}>
               Codex
             </button>
+            <button className={synthesisEngine === "llm" ? "active" : ""} onClick={() => onSynthesisEngineChange("llm")}>
+              LLM
+            </button>
           </div>
           <ActionButton
             className="hero-button"
@@ -115,6 +142,26 @@ export function Drafts({
             }
           />
         </div>
+        <div className="review-closure-strip" aria-label="审查闭环状态">
+          <div className="review-closure-next">
+            <span>下一步</span>
+            <strong>{closureState.nextStep.label}</strong>
+            <small>{closureState.nextStep.detail}</small>
+          </div>
+          <div className="review-closure-metrics">
+            <span>{closureState.candidateCount} 候选</span>
+            <span>{closureState.draftCount} 草稿</span>
+            <span>{closureState.unassignedCount} 未分配</span>
+            <span>{closureState.driftWarningCount} Drift</span>
+            <span>{closureState.buildActionCount} 写入动作</span>
+          </div>
+        </div>
+        <ArtifactPreviewStrip
+          preview={artifactPreview}
+          disabled={disabled}
+          pendingAction={pendingAction}
+          onAction={onAction}
+        />
       </Panel>
 
       {/* ===== 三栏布局：候选队列 / 详情 / 质量状态 ===== */}
@@ -188,6 +235,9 @@ export function Drafts({
                 disabled={disabled}
                 pendingAction={pendingAction}
                 onAction={onAction}
+                previewMode={previewMode}
+                projectPath={projectPath}
+                onRefresh={onRefresh}
               />
             </>
           ) : (
@@ -315,6 +365,7 @@ export function Drafts({
                     </span>
                   </div>
                 ) : null}
+                <EvidencePanel summary={summarizeDraftEvidence(draft)} />
               </div>
               <div className="record-actions">
                 <button
@@ -396,13 +447,20 @@ function CandidateDetail({
   disabled,
   pendingAction,
   onAction,
+  previewMode,
+  projectPath,
+  onRefresh,
 }: {
   candidate: CandidateRecord;
   disabled: boolean;
   pendingAction: string;
   onAction: ProjectAction;
+  previewMode: boolean;
+  projectPath: string;
+  onRefresh: () => void;
 }) {
   const confidence = candidate.confidence ? ` · 置信度 ${Math.round(candidate.confidence * 100)}%` : "";
+  const evidenceSummary = summarizeCandidateEvidence(candidate);
   const candidateTags = candidate.tags ?? [];
   const candidateBrief =
     candidate.brief?.trim() ||
@@ -420,6 +478,12 @@ function CandidateDetail({
     .filter(Boolean)
     .join(" · ");
   const [rejectReason, setRejectReason] = React.useState("");
+  const [editing, setEditing] = React.useState(false);
+
+  async function handleSaved() {
+    setEditing(false);
+    onRefresh();
+  }
 
   return (
     <div className="candidate-detail">
@@ -470,6 +534,7 @@ function CandidateDetail({
           {candidate.extraction.reason}
         </p>
       ) : null}
+      <EvidencePanel summary={evidenceSummary} />
 
       <div className="candidate-detail-actions">
         <input
@@ -480,6 +545,15 @@ function CandidateDetail({
           placeholder="拒绝原因"
           disabled={disabled}
           style={{ flex: 1 }}
+        />
+        <ActionButton
+          className="secondary-action"
+          icon={Pencil}
+          label="编辑"
+          busyLabel="编辑中"
+          busy={false}
+          disabled={disabled}
+          onClick={() => setEditing((current) => !current)}
         />
         <ActionButton
           icon={ArrowUp}
@@ -515,23 +589,42 @@ function CandidateDetail({
           }
         />
       </div>
+      {editing ? (
+        <RecordEditor
+          recordType="candidate"
+          initialForm={buildEditFormFromCandidate(candidate)}
+          extraction={candidate.extraction}
+          previewMode={previewMode}
+          projectPath={projectPath}
+          recordId={candidate.id}
+          onSaved={handleSaved}
+          onCancel={() => setEditing(false)}
+        />
+      ) : null}
     </div>
   );
 }
 
-function routeLabel(route?: string | null): string {
-  switch (route) {
-    case "always_on_rule":
-      return "写入规则";
-    case "workflow_skill":
-      return "生成 Skill 草稿";
-    case "skill_supplement":
-      return "补充 Skill";
-    case "review_only":
-      return "仅审阅";
-    default:
-      return "待分流";
-  }
+function EvidencePanel({ summary }: { summary: ReturnType<typeof summarizeCandidateEvidence> }) {
+  return (
+    <div className={`evidence-panel ${summary.status === "weak" ? "weak" : ""}`}>
+      <div className="evidence-panel-head">
+        <strong>{summary.status === "grounded" ? "证据可追溯" : "证据需复核"}</strong>
+        <span>{summary.sourceCount} 来源</span>
+        <span>{summary.confidenceLabel}</span>
+        <span>{summary.routeLabel}</span>
+        <span>{summary.compileLabel}</span>
+      </div>
+      {summary.evidencePreview ? <p>{summary.evidencePreview}</p> : null}
+      {summary.warnings.length > 0 ? (
+        <div className="evidence-warnings">
+          {summary.warnings.map((warning) => (
+            <span key={warning}>{warning}</span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function compileLabel(enabled?: boolean | null): string {

@@ -7,19 +7,26 @@ use chrono::Utc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::candidate::ExtractionMetadata;
 use crate::config::{self, ArtifactState, MirrorState, ProjectLock, SkillRecord};
-use crate::draft;
 use crate::fsutil;
 use crate::memory_card::{self, MemoryCardRecord};
 
 mod agent_skills;
+mod artifact_drift;
+mod artifact_preview;
 mod hook_artifacts;
 
 use agent_skills::{
     compile_memory_cards_as_agent_skills, expected_agent_skill_artifacts,
     memory_card_compiles_to_agent_skill,
 };
+pub use artifact_drift::{
+    ArtifactDriftResolutionReport, ArtifactImportReport, discard_artifact_drift_path,
+    discard_artifact_drifts, import_artifact_drift_path, import_artifact_drifts,
+    keep_artifact_drift_path, keep_artifact_drifts,
+};
+pub use artifact_preview::ArtifactPreviewRow;
+use artifact_preview::artifact_preview_rows_from;
 use hook_artifacts::{compile_memory_card_hooks, expected_hook_artifact};
 
 const INSTRUCTION_ARTIFACT_BUDGET_BYTES: usize = 32 * 1024;
@@ -29,6 +36,7 @@ pub struct BuildReport {
     preview: bool,
     actions: Vec<String>,
     warnings: Vec<String>,
+    artifact_previews: Vec<ArtifactPreviewRow>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -36,29 +44,6 @@ pub struct StatusReport {
     rows: Vec<StatusRow>,
     artifact_rows: Vec<ArtifactStatusRow>,
     warnings: Vec<String>,
-}
-
-#[derive(Debug, serde::Serialize)]
-pub struct ArtifactImportReport {
-    pub created: usize,
-    pub skipped: usize,
-    pub drafts: Vec<String>,
-}
-
-impl ArtifactImportReport {
-    pub fn render(&self) -> String {
-        let mut out = String::new();
-        out.push_str("Agent Memory Kernel artifact import\n\n");
-        out.push_str(&format!("Created drafts: {}\n", self.created));
-        out.push_str(&format!("Skipped artifacts: {}\n", self.skipped));
-        if !self.drafts.is_empty() {
-            out.push_str("\nDrafts:\n");
-            for draft in &self.drafts {
-                out.push_str(&format!("- {draft}\n"));
-            }
-        }
-        out
-    }
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -342,6 +327,11 @@ pub fn build_project(project_root: &Path, preview: bool) -> Result<BuildReport> 
         preview,
         actions,
         warnings,
+        artifact_previews: if preview {
+            artifact_preview_rows_from(&root, &config, &memory_cards, &previous_lock)?
+        } else {
+            Vec::new()
+        },
     })
 }
 
@@ -497,87 +487,16 @@ pub fn preview_as_json(project_root: &Path) -> Result<serde_json::Value> {
         "text": report.render(),
         "actions": report.actions,
         "warnings": report.warnings,
+        "artifact_previews": report.artifact_previews,
     }))
 }
 
-pub fn import_artifact_drifts(project_root: &Path) -> Result<ArtifactImportReport> {
+pub fn artifact_preview_rows(project_root: &Path) -> Result<Vec<ArtifactPreviewRow>> {
     let root = fsutil::normalize_project_root(project_root)?;
     let config = config::load_or_default_project_config(&root)?;
     let memory_cards = memory_card::memory_card_map(&root)?;
-    let expected = expected_artifacts(&root, &config, &memory_cards)?;
-    let mut lock = config::load_lock(&root)?;
-    let mut lock_changed = false;
-
-    let mut created = 0;
-    let mut skipped = 0;
-    let mut drafts = Vec::new();
-
-    for artifact in expected {
-        if !artifact.path.exists() {
-            skipped += 1;
-            continue;
-        }
-        let actual = fs::read_to_string(&artifact.path)
-            .with_context(|| format!("read artifact {}", artifact.path.display()))?;
-        if fsutil::sha256_text(&actual) == fsutil::sha256_text(&artifact.expected_content) {
-            upsert_artifact_lock(
-                &mut lock,
-                &artifact,
-                fsutil::sha256_text(&artifact.expected_content),
-            );
-            lock_changed = true;
-            skipped += 1;
-            continue;
-        }
-
-        let extracted = extract_added_lines(&artifact.expected_content, &actual);
-        let body = if extracted.trim().is_empty() {
-            actual.trim().to_string()
-        } else {
-            extracted
-        };
-        if body.trim().is_empty() {
-            skipped += 1;
-            continue;
-        }
-
-        let id = format!(
-            "artifact:{}:{}",
-            artifact.agent,
-            &fsutil::sha256_text(&format!("{}:{body}", artifact.path.display()))[..12]
-        );
-        draft::add_draft(
-            &root,
-            draft::NewDraft {
-                id: id.clone(),
-                title: format!("Manual artifact changes for {}", artifact.agent),
-                kind: "preference".to_string(),
-                scope: "project".to_string(),
-                body,
-                targets: vec![artifact.agent.clone()],
-                evidence: format!("Imported from {}", fsutil::path_to_slash(&artifact.path)),
-                confidence: None,
-                reason: None,
-                matched_template: None,
-                extraction: ExtractionMetadata::default(),
-            },
-        )?;
-        let current_hash = fsutil::sha256_text(&actual);
-        upsert_artifact_lock(&mut lock, &artifact, current_hash);
-        lock_changed = true;
-        drafts.push(id);
-        created += 1;
-    }
-
-    if lock_changed {
-        config::save_lock(&root, &lock)?;
-    }
-
-    Ok(ArtifactImportReport {
-        created,
-        skipped,
-        drafts,
-    })
+    let previous_lock = config::load_lock(&root)?;
+    artifact_preview_rows_from(&root, &config, &memory_cards, &previous_lock)
 }
 
 pub fn status_project(project_root: &Path) -> Result<StatusReport> {
@@ -671,14 +590,14 @@ pub fn status_project(project_root: &Path) -> Result<StatusReport> {
     })
 }
 
-struct ExpectedArtifact {
-    agent: String,
-    path: std::path::PathBuf,
-    expected_content: String,
-    kind: String,
+pub(super) struct ExpectedArtifact {
+    pub(super) agent: String,
+    pub(super) path: std::path::PathBuf,
+    pub(super) expected_content: String,
+    pub(super) kind: String,
 }
 
-fn expected_artifacts(
+pub(super) fn expected_artifacts(
     root: &Path,
     config: &config::ProjectConfig,
     memory_cards: &BTreeMap<String, MemoryCardRecord>,
@@ -738,7 +657,11 @@ fn expected_artifacts(
     Ok(artifacts)
 }
 
-fn upsert_artifact_lock(lock: &mut ProjectLock, artifact: &ExpectedArtifact, current_hash: String) {
+pub(super) fn upsert_artifact_lock(
+    lock: &mut ProjectLock,
+    artifact: &ExpectedArtifact,
+    current_hash: String,
+) {
     let path_label = fsutil::path_to_slash(&artifact.path);
     if let Some(previous) = lock
         .artifacts
@@ -788,25 +711,6 @@ pub(super) fn ensure_generated_artifact_is_safe_to_write(
     Ok(())
 }
 
-fn extract_added_lines(expected: &str, actual: &str) -> String {
-    let mut expected_counts = BTreeMap::<&str, usize>::new();
-    for line in expected.lines() {
-        *expected_counts.entry(line).or_default() += 1;
-    }
-
-    let mut added = Vec::new();
-    for line in actual.lines() {
-        if let Some(count) = expected_counts.get_mut(line)
-            && *count > 0
-        {
-            *count -= 1;
-            continue;
-        }
-        added.push(line);
-    }
-    added.join("\n").trim().to_string()
-}
-
 pub fn mirror(project_root: &Path, skill_id: &str, agent: &str) -> Result<()> {
     let root = fsutil::normalize_project_root(project_root)?;
     let config = config::load_or_default_project_config(&root)?;
@@ -832,3 +736,6 @@ fn read_marker(target_dir: &Path) -> Result<Option<MirrorMarker>> {
     let text = fs::read_to_string(path)?;
     Ok(Some(serde_yaml::from_str(&text)?))
 }
+
+#[cfg(test)]
+mod tests;

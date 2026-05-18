@@ -75,6 +75,9 @@ pub enum KernelCommand {
     UpdateDraft {
         id: String,
     },
+    UpdateCandidate {
+        id: String,
+    },
     UpdateMemoryCard {
         id: String,
     },
@@ -139,6 +142,8 @@ pub enum KernelCommand {
         engine: String,
     },
     ImportArtifactDrifts,
+    KeepArtifactDrifts,
+    DiscardArtifactDrifts,
     CompileProject {
         dry_run: bool,
     },
@@ -313,6 +318,7 @@ pub fn command_risk(command: &KernelCommand) -> KernelRisk {
         KernelCommand::AddProject { .. } => KernelRisk::Low,
         KernelCommand::ImportProject { .. } => KernelRisk::Medium,
         KernelCommand::UpdateDraft { .. } => KernelRisk::Medium,
+        KernelCommand::UpdateCandidate { .. } => KernelRisk::Medium,
         KernelCommand::UpdateMemoryCard { .. } => KernelRisk::Medium,
         KernelCommand::DeleteMemoryCard { .. } => KernelRisk::Medium,
         KernelCommand::RejectDraft { .. } => KernelRisk::Medium,
@@ -340,6 +346,8 @@ pub fn command_risk(command: &KernelCommand) -> KernelRisk {
             }
         }
         KernelCommand::ImportArtifactDrifts => KernelRisk::Medium,
+        KernelCommand::KeepArtifactDrifts => KernelRisk::Medium,
+        KernelCommand::DiscardArtifactDrifts => KernelRisk::High,
         KernelCommand::CompileProject { dry_run } => {
             if *dry_run {
                 KernelRisk::ReadOnly
@@ -366,6 +374,7 @@ fn command_label(command: &KernelCommand) -> String {
         KernelCommand::AddProject { .. } => "add-project",
         KernelCommand::ImportProject { .. } => "import-project",
         KernelCommand::UpdateDraft { .. } => "update-draft",
+        KernelCommand::UpdateCandidate { .. } => "update-candidate",
         KernelCommand::UpdateMemoryCard { .. } => "update-memory-card",
         KernelCommand::DeleteMemoryCard { .. } => "delete-memory-card",
         KernelCommand::ApproveDraft { .. } => "approve-draft",
@@ -387,6 +396,8 @@ fn command_label(command: &KernelCommand) -> String {
         KernelCommand::AttachMemoryCardToSkill { .. } => "attach-memory-card-to-skill",
         KernelCommand::EvolveProject { .. } => "evolve-project",
         KernelCommand::ImportArtifactDrifts => "import-artifact-drifts",
+        KernelCommand::KeepArtifactDrifts => "keep-artifact-drifts",
+        KernelCommand::DiscardArtifactDrifts => "discard-artifact-drifts",
         KernelCommand::CompileProject { .. } => "compile-project",
         KernelCommand::ClearProjectHistory => "clear-project-history",
     }

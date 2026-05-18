@@ -278,6 +278,10 @@ pub(super) fn extraction_metadata_for_chunk(
         value_scores: Default::default(),
         abstraction_of: None,
         abstracted_from: None,
+        pipeline_version: None,
+        layer_trace: Vec::new(),
+        rejected_at: None,
+        evidence_bundle: None,
     }
 }
 

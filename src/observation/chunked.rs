@@ -15,7 +15,7 @@ pub(super) fn synthesis_material(observations: &[ObservationRecord], max_chars: 
         .unwrap_or_default()
 }
 
-pub(super) fn prefiltered_synthesis_material(
+pub(crate) fn prefiltered_synthesis_material(
     observations: &[ObservationRecord],
     max_chars: usize,
 ) -> String {
@@ -587,7 +587,8 @@ fn observation_entry(observation: &ObservationRecord) -> String {
         body = truncate_head_and_tail(&body, 2_000, 2_000);
     }
     format!(
-        "\n---\nsource: {}\nagent: {}\nevidence: {}\ntext:\n{}\n",
+        "\n--- {} ---\nsource: {}\nagent: {}\nevidence: {}\ntext:\n{}\n",
+        observation.id,
         observation.source_kind,
         observation.agent.as_deref().unwrap_or("unknown"),
         observation.evidence,
@@ -606,7 +607,8 @@ fn compact_observation_entry(observation: &ObservationRecord) -> String {
         body = truncate_head_and_tail(&body, 700, 500);
     }
     format!(
-        "\n---\nsource: {}\nagent: {}\nevidence: {}\ntext:\n{}\n",
+        "\n--- {} ---\nsource: {}\nagent: {}\nevidence: {}\ntext:\n{}\n",
+        observation.id,
         observation.source_kind,
         observation.agent.as_deref().unwrap_or("unknown"),
         observation.evidence,

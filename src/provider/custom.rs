@@ -18,9 +18,28 @@ pub fn save_custom_openai_compatible_provider(
     api_key_env: &str,
     enabled: bool,
 ) -> Result<ProviderConfig> {
+    save_custom_provider(
+        project_root,
+        "openai-compatible",
+        base_url,
+        model,
+        api_key_env,
+        enabled,
+    )
+}
+
+pub fn save_custom_provider(
+    project_root: &Path,
+    protocol: &str,
+    base_url: &str,
+    model: &str,
+    api_key_env: &str,
+    enabled: bool,
+) -> Result<ProviderConfig> {
     let normalized_base_url = base_url.trim();
     let normalized_model = model.trim();
     let normalized_api_key_env = api_key_env.trim();
+    let normalized_protocol = protocol.trim();
     if normalized_base_url.is_empty() {
         return Err(anyhow!("custom API base URL must not be empty"));
     }
@@ -29,14 +48,22 @@ pub fn save_custom_openai_compatible_provider(
     }
 
     let mut cfg = load_or_default_provider_config(project_root)?;
-    cfg.providers.insert(
-        "custom-api".to_string(),
-        Provider::OpenAiCompatible {
+    let provider = match normalized_protocol {
+        "openai-compatible" => Provider::OpenAiCompatible {
             base_url: normalized_base_url.to_string(),
             model: normalized_model.to_string(),
             api_key_env: normalized_api_key_env.to_string(),
         },
-    );
+        "anthropic-compatible" => Provider::Anthropic {
+            base_url: normalized_base_url.to_string(),
+            model: normalized_model.to_string(),
+            api_key_env: normalized_api_key_env.to_string(),
+            cache_system_prompt: false,
+            cache_ttl: None,
+        },
+        _ => anyhow::bail!("unsupported custom API protocol `{normalized_protocol}`"),
+    };
+    cfg.providers.insert("custom-api".to_string(), provider);
 
     if enabled {
         cfg.default = "custom-api".to_string();
@@ -138,6 +165,38 @@ mod tests {
             assert_eq!(disabled_cfg.role_providers.extract, None);
             assert!(super::super::is_llm_extraction_enabled(temp.path()).expect("llm enabled"));
             assert!(disabled_cfg.providers.contains_key("custom-api"));
+        });
+    }
+
+    #[test]
+    fn save_custom_provider_can_use_anthropic_compatible_protocol() {
+        with_env_var("ANTHROPIC_API_KEY", None, || {
+            let temp = tempfile::tempdir().expect("tempdir");
+            let cfg = save_custom_provider(
+                temp.path(),
+                "anthropic-compatible",
+                "https://api.deepseek.com/anthropic",
+                "deepseek-v4-flash",
+                "DEEPSEEK_API_KEY",
+                true,
+            )
+            .expect("save anthropic-compatible provider");
+
+            assert_eq!(cfg.extraction_provider, "custom-api");
+            assert!(matches!(
+                cfg.providers.get("custom-api"),
+                Some(Provider::Anthropic {
+                    base_url,
+                    model,
+                    api_key_env,
+                    cache_system_prompt,
+                    cache_ttl,
+                }) if base_url == "https://api.deepseek.com/anthropic"
+                    && model == "deepseek-v4-flash"
+                    && api_key_env == "DEEPSEEK_API_KEY"
+                    && !cache_system_prompt
+                    && cache_ttl.is_none()
+            ));
         });
     }
 }

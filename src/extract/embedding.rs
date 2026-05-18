@@ -1,8 +1,9 @@
 ﻿//! 语义去重层：优先使用 fastembed，本地不可用时回退到 Jaccard。
 
+use std::path::PathBuf;
 use std::sync::Mutex;
 
-use fastembed::TextEmbedding;
+use fastembed::{InitOptions, TextEmbedding};
 
 use crate::memory_card::MemoryCardRecord;
 use crate::textutil;
@@ -38,7 +39,11 @@ pub(crate) struct FastEmbedMatcher {
 
 impl FastEmbedMatcher {
     pub(crate) fn try_new() -> anyhow::Result<Self> {
-        let model = TextEmbedding::try_new(Default::default())?;
+        let mut options = InitOptions::new(Default::default());
+        if let Some(cache_dir) = local_fastembed_cache_dir() {
+            options = options.with_cache_dir(cache_dir);
+        }
+        let model = TextEmbedding::try_new(options)?;
         Ok(Self {
             model: Mutex::new(model),
         })
@@ -59,6 +64,21 @@ impl FastEmbedMatcher {
             .cloned()
             .ok_or_else(|| anyhow::anyhow!("missing second embedding"))?;
         Ok((left, right))
+    }
+
+    /// 批量编码：一次 forward 多条文本，复用同一次 model lock。
+    ///
+    /// Layer 3 CLUSTER 用这个接口避免对 N 条消息发起 N 次单独编码。
+    pub(crate) fn embed_batch(&self, texts: &[String]) -> anyhow::Result<Vec<Vec<f32>>> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut model = self
+            .model
+            .lock()
+            .map_err(|_| anyhow::anyhow!("fastembed model lock poisoned"))?;
+        let embeddings = model.embed(texts.to_vec(), None)?;
+        Ok(embeddings)
     }
 }
 
@@ -196,6 +216,29 @@ pub(crate) fn default_matcher() -> Box<dyn SemanticMatcher> {
         .unwrap_or_else(|_| Box::new(JaccardMatcher::new()))
 }
 
+/// 探测本地 fastembed 缓存目录。
+///
+/// 顺序：`FASTEMBED_CACHE_DIR` 环境变量 → 当前工作目录下的
+/// `.fastembed_cache/` → 不设置（让 fastembed 走默认 HF_HOME 路径）。
+///
+/// 项目里 `.fastembed_cache/` 已经存在但默认 HF_HOME 路径不同时，
+/// fastembed 会在初始化阶段试图重新拉模型；外部网络不可达时会卡几十秒
+/// 才回退到 jaccard。命中本地缓存可以跳过这次探测。
+fn local_fastembed_cache_dir() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("FASTEMBED_CACHE_DIR") {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+    let cwd_cache = std::env::current_dir().ok()?.join(".fastembed_cache");
+    if cwd_cache.is_dir() {
+        Some(cwd_cache)
+    } else {
+        None
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct LlmKnowledgeItem {
     pub title: String,
@@ -240,6 +283,13 @@ fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
         return 0.0;
     }
     dot / (left_norm.sqrt() * right_norm.sqrt())
+}
+
+/// `cosine_similarity` 的对外公开版本，给 Layer 3 CLUSTER 直接调用。
+///
+/// 名字带 `pub_` 前缀避免与现有内部函数冲突。
+pub(crate) fn cosine(left: &[f32], right: &[f32]) -> f32 {
+    cosine_similarity(left, right)
 }
 
 #[cfg(test)]

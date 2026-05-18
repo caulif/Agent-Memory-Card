@@ -1,21 +1,22 @@
 use std::path::PathBuf;
 
 use agent_kernel::{
-    build, candidate, catalog, config, draft, extract, feedback, hooks, index, mcp, memory_card,
-    migration, observation, project_registry, provider, review, rule_test, scanner,
+    build, candidate, catalog, config, draft, eval, extract, feedback, hooks, index, mcp,
+    memory_card, memory_card_verify, migration, observation, project_registry, provider, review,
+    rule_test, scanner,
 };
 use anyhow::Result;
 use clap::Parser;
 
 mod cli;
+mod pipeline_output;
 
 use cli::{
     AgentCommands, CatalogCommands, Cli, Commands, DraftCommands, HookCommands, IndexCommands,
     MemoryCardCommands, ObserveCommands, PreferenceCommands, ProjectCommands, ProviderCommands,
 };
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -153,6 +154,13 @@ async fn main() -> Result<()> {
                 let matrix = memory_card::memory_card_target_matrix(&project)?;
                 println!("{}", matrix.render());
             }
+            MemoryCardCommands::Verify { project } => {
+                let report = memory_card_verify::verify_project(&project)?;
+                print!("{}", report.render());
+                if !report.is_clean() {
+                    std::process::exit(1);
+                }
+            }
         },
         Commands::Agent { command } => match command {
             AgentCommands::List { project } => {
@@ -261,6 +269,77 @@ async fn main() -> Result<()> {
                 println!("Rejected draft `{id}`");
             }
         },
+        Commands::Eval {
+            project,
+            golden_set,
+            score_run,
+            write_seen,
+            projects,
+            max_projects,
+            provider,
+            timeout_secs,
+            json,
+        } => {
+            if golden_set {
+                let report = if provider.is_some() {
+                    eval::run_golden_set_eval_with_provider(
+                        &project,
+                        provider.as_deref(),
+                        timeout_secs,
+                    )?
+                } else {
+                    eval::run_golden_set_eval(&project)?
+                };
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                } else {
+                    println!("{}", report.render_markdown());
+                }
+                return Ok(());
+            }
+            if let Some(score_run) = score_run {
+                let raw = std::fs::read_to_string(&score_run)?;
+                let report: agent_kernel::extract::pipeline::PipelineReport =
+                    serde_json::from_str(&raw)?;
+                let observations = observation::load_observations(&project)?;
+                let qa = eval::score_pipeline_report(&report, &observations)?;
+                if let Some(outcome) = write_seen.as_deref() {
+                    let written = eval::append_seen_memory_signatures(&project, &report, outcome)?;
+                    if !json {
+                        println!("Recorded {written} seen memory signature(s).");
+                    }
+                }
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&qa)?);
+                } else {
+                    println!("{}", qa.render_markdown());
+                }
+                if qa.score < 85 {
+                    std::process::exit(1);
+                }
+                return Ok(());
+            }
+            let report = eval::run_real_project_eval_with_provider(
+                &project,
+                projects,
+                max_projects,
+                json,
+                provider,
+                timeout_secs,
+            )?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "Eval run complete: {} project(s), {} reference cards, {} pipeline cards, {} baseline cards",
+                    report.summary.project_count,
+                    report.summary.reference_cards,
+                    report.summary.pipeline_cards,
+                    report.summary.baseline_cards
+                );
+                println!("Run dir: {}", report.run_dir.display());
+            }
+        }
         Commands::Extract {
             text,
             file,
@@ -492,6 +571,37 @@ async fn main() -> Result<()> {
         Commands::Mcp { project } => {
             mcp::serve_stdio(&project)?;
         }
+        Commands::Pipeline {
+            project,
+            skip_induce,
+            force_jaccard,
+            drop_singletons,
+            provider,
+            timeout_secs,
+            long_threshold,
+            short_threshold,
+            jaccard_long,
+            jaccard_short,
+            json,
+            save,
+            save_report,
+        } => {
+            run_extraction_pipeline(
+                &project,
+                skip_induce,
+                force_jaccard,
+                drop_singletons,
+                provider.as_deref(),
+                timeout_secs,
+                long_threshold,
+                short_threshold,
+                jaccard_long,
+                jaccard_short,
+                json,
+                save,
+                save_report,
+            )?;
+        }
         Commands::Review {
             json,
             approve_drafts,
@@ -534,4 +644,101 @@ fn default_home_dir() -> PathBuf {
         .or_else(|| std::env::var_os("HOME"))
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_extraction_pipeline(
+    project: &std::path::Path,
+    skip_induce: bool,
+    force_jaccard: bool,
+    drop_singletons: bool,
+    provider_override: Option<&str>,
+    timeout_secs: Option<u64>,
+    long_threshold: Option<f32>,
+    short_threshold: Option<f32>,
+    jaccard_long: Option<f32>,
+    jaccard_short: Option<f32>,
+    json: bool,
+    save: bool,
+    save_report: bool,
+) -> Result<()> {
+    use agent_kernel::extract::cluster::ClusterOptions;
+    use agent_kernel::extract::pipeline::{PipelineOptions, run_pipeline};
+
+    let observations = observation::load_observations(project)?;
+    if observations.is_empty() {
+        println!(
+            "No observations found under {}. Run `agent-kernel observe import` first.",
+            project.display()
+        );
+        return Ok(());
+    }
+
+    let mut cluster = ClusterOptions::default();
+    if let Some(t) = long_threshold {
+        cluster.long_threshold = t;
+    }
+    if let Some(t) = short_threshold {
+        cluster.short_threshold = t;
+    }
+    if let Some(t) = jaccard_long {
+        cluster.jaccard_long_threshold = t;
+    }
+    if let Some(t) = jaccard_short {
+        cluster.jaccard_short_threshold = t;
+    }
+    if force_jaccard {
+        cluster.force_jaccard = true;
+    }
+    if drop_singletons {
+        cluster.keep_singletons = false;
+    }
+
+    let options = PipelineOptions {
+        cluster,
+        induce: Default::default(),
+        skip_induce,
+    };
+    let mut cfg = provider::load_or_default_provider_config(project)?;
+    if let Some(provider) = provider_override {
+        cfg.extraction_provider = provider.to_string();
+        cfg.role_providers.extract = Some(provider.to_string());
+    }
+    if let Some(timeout_secs) = timeout_secs {
+        apply_pipeline_timeouts(&mut cfg, timeout_secs);
+    }
+    let report = run_pipeline(&observations, &cfg, &options)?;
+
+    if save {
+        pipeline_output::save_pipeline_cards(project, &report)?;
+    }
+    if save_report {
+        pipeline_output::write_pipeline_report_json(project, &report)?;
+    }
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!("{}", report.render_summary());
+        if save {
+            println!(
+                "Saved {} crystallized card(s) to .agent-kernel/drafts/.",
+                report.cards.len()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn apply_pipeline_timeouts(cfg: &mut provider::ProviderConfig, requested_timeout_secs: u64) {
+    let requested_timeout_secs = requested_timeout_secs.max(1);
+    for provider in cfg.providers.values_mut() {
+        match provider {
+            provider::Provider::ClaudeCli { timeout_secs, .. }
+            | provider::Provider::CodexCli { timeout_secs, .. } => {
+                *timeout_secs = requested_timeout_secs;
+            }
+            _ => {}
+        }
+    }
 }

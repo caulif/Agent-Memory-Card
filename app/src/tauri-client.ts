@@ -105,6 +105,16 @@ export function updateDraft(args: {
   return invoke<DraftRecord>("update_draft", args);
 }
 
+export function updateCandidate(args: {
+  projectPath: string;
+  id: string;
+  input: Record<string, unknown>;
+  confirmedPolicy: KernelPolicyPayload;
+  decisionToken?: string;
+}) {
+  return invoke<CandidateRecord>("update_candidate", args);
+}
+
 export function updateMemoryCard(args: {
   projectPath: string;
   id: string;

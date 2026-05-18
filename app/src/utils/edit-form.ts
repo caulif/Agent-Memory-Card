@@ -1,5 +1,5 @@
 ﻿import { Bell, Boxes, CloudCog, GitBranch } from "lucide-react";
-import type { DraftRecord, MemoryCardRecord, EditFormData, PageDef } from "../types/domain";
+import type { CandidateRecord, DraftRecord, MemoryCardRecord, EditFormData, PageDef } from "../types/domain";
 
 export const KIND_OPTIONS = ["rule", "memory_card", "observation", "preference", "constraint", "procedure", "convention"];
 export const SCOPE_OPTIONS = ["project", "global", "agent"];
@@ -21,6 +21,18 @@ export function buildEditFormFromDraft(draft: DraftRecord): EditFormData {
     scope: draft.scope,
     tagsInput: (draft.tags ?? []).join("，"),
     targets: [...(draft.targets ?? [])],
+  };
+}
+
+export function buildEditFormFromCandidate(candidate: CandidateRecord): EditFormData {
+  return {
+    title: candidate.title,
+    brief: candidate.brief ?? "",
+    body: candidate.body,
+    kind: candidate.kind,
+    scope: candidate.scope,
+    tagsInput: (candidate.tags ?? []).join("，"),
+    targets: [...(candidate.targets ?? [])],
   };
 }
 

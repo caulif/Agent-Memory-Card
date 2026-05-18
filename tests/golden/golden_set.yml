@@ -1,0 +1,473 @@
+# 黄金集：流水线提炼质量回归基线
+#
+# 设计原则
+#
+# - positives：用户在多个 session 里反复用不同措辞表达的同一长期偏好；
+#   流水线应该聚类 + 归纳 + 结晶出至少一张卡，title/body 包含期望关键词。
+# - negatives：一次性请求、模型问候、内部 ID、半截句、明显边界声明；
+#   流水线**不应**对这些产出卡。
+#
+# 来源
+#
+# 4 张 positives（id 以 archived 开头）来自 .agent-kernel/memory-cards/.archive/
+# 已经人工审过的 cards——它们是 ground truth。其余 positives + negatives
+# 是基于本项目真实历史话题手写的最小可用补充。
+#
+# 测试参考 tests/golden_set_regression.rs。
+version: 1
+
+positives:
+  - id: archived-real-history-regression
+    description: 用真实历史会话回归验证提炼，不要只依赖静态样例
+    user_messages:
+      - "评估提炼质量时优先用真实历史会话做回归验证"
+      - "改提炼逻辑前必须用真实历史跑一遍，别只用静态样例"
+      - "再次强调用真实历史会话做回归检验"
+      - "提炼相关的改动要在真实历史上验证才能合"
+    expected_title_keywords: ["真实历史", "回归"]
+    expected_kind: procedure
+    expected_scope: global
+
+  - id: archived-keep-human-review-boundary
+    description: 保留人工审阅边界，不让 AI 直接固化规则
+    user_messages:
+      - "先 review 再 merge，保留人工审阅边界"
+      - "不要让 AI 直接固化规则，必须经过人工审阅"
+      - "review 边界不能省，AI 自动写入规则我不接受"
+    expected_title_keywords: ["人工", "审阅"]
+    expected_kind: procedure
+    expected_scope: global
+
+  - id: archived-user-perspective-quality
+    description: 从用户视角判断体验质量
+    user_messages:
+      - "判断体验好不好要从用户视角，不是开发者视角"
+      - "评估质量必须站在用户角度，开发者自己觉得对没用"
+      - "再次强调从用户视角看体验"
+    expected_title_keywords: ["用户视角"]
+    expected_kind: preference
+    expected_scope: global
+
+  - id: archived-test-scope-by-risk
+    description: 按改动风险选择测试范围
+    user_messages:
+      - "测试范围按改动风险选，不要每次都跑全量"
+      - "改动风险低就跑相关单测，风险高才跑集成"
+      - "再次强调按风险定测试边界"
+    expected_title_keywords: ["改动风险", "测试"]
+    expected_kind: procedure
+    expected_scope: global
+
+  - id: hand-written-no-emoji
+    description: 输出禁用 emoji
+    user_messages:
+      - "回复一律不要 emoji，简体中文"
+      - "禁止表情符号，所有输出纯文本"
+      - "再次强调不要 emoji"
+    expected_title_keywords: ["emoji", "表情"]
+    expected_kind: preference
+    expected_scope: global
+
+  - id: hand-written-no-auto-commit
+    description: 不主动 git commit/push
+    user_messages:
+      - "不要主动 git commit，除非我明确说"
+      - "不允许自动 push 到 remote"
+      - "再次强调 git 操作必须我确认"
+    expected_title_keywords: ["commit", "push", "git"]
+    expected_kind: constraint
+    expected_scope: global
+
+  - id: hand-written-preview-artifact-diff
+    description: 写入 agent 文件前必须先展示 artifact diff
+    user_messages:
+      - "写入 AGENTS.md 或 CLAUDE.md 前必须先给我看 artifact diff"
+      - "同步 agent 文件之前要先预览完整差异，不要只显示动作字符串"
+      - "再次强调生成文件写入前需要可展开 diff，确认后再 sync"
+    expected_title_keywords: ["artifact", "diff", "写入"]
+    expected_kind: constraint
+    expected_scope: project
+
+  - id: hand-written-human-confirm-high-risk
+    description: 高风险文件写入需要明确人工确认
+    user_messages:
+      - "高风险文件写入前必须明确人工确认"
+      - "删除、覆盖、同步这类高风险动作都要先人工确认"
+      - "再次强调高风险写操作不能自动执行，必须确认"
+    expected_title_keywords: ["高风险", "确认"]
+    expected_kind: constraint
+    expected_scope: global
+
+  - id: hand-written-structured-tool-responses
+    description: 工具响应要结构化并服务下一步决策
+    user_messages:
+      - "工具响应要结构化，直接服务下一步决策"
+      - "不要只返回一大段自然语言，工具结果要给状态、证据和下一步"
+      - "再次强调工具响应要高信号、可操作、结构化"
+    expected_title_keywords: ["工具响应", "结构化"]
+    expected_kind: preference
+    expected_scope: global
+
+  - id: hand-written-no-silent-overwrite
+    description: 不允许静默覆盖用户手动修改
+    user_messages:
+      - "不要静默覆盖我手动改过的文件"
+      - "检测到用户手改时必须先提示 drift，不能直接覆盖"
+      - "再次强调发现手动修改要先审查，不要静默覆盖"
+    expected_title_keywords: ["静默覆盖", "手动修改"]
+    expected_kind: constraint
+    expected_scope: project
+
+  - id: hand-written-workflow-first
+    description: 固定路径优先 workflow，不要包装成黑盒 agent
+    user_messages:
+      - "固定路径能解决的问题优先 workflow，不要包装成黑盒 agent"
+      - "这个产品主链路应该 workflow first，Agent 只处理开放探索部分"
+      - "再次强调能流程化就流程化，不要让 Agent 自由乱跑"
+    expected_title_keywords: ["workflow", "agent"]
+    expected_kind: procedure
+    expected_scope: global
+
+  - id: hand-written-evidence-before-confidence
+    description: 先看证据再表达信心
+    user_messages:
+      - "先给证据再给信心，不要空口说已经完成"
+      - "没有验证输出就不要宣称通过，先展示证据"
+      - "再次强调 evidence before confidence，结论必须跟着验证走"
+    expected_title_keywords: ["证据", "信心"]
+    expected_kind: procedure
+    expected_scope: global
+
+  - id: hand-written-provider-evidence-grounded
+    description: provider 生成的 evidence quote 必须能回到 observation
+    user_messages:
+      - "provider 生成的 evidence quote 必须能回到原始 observation"
+      - "不要接受 LLM 编造的 evidence，quote 要能在 observation 里找到"
+      - "再次强调 provider-induced evidence 必须可回溯"
+    expected_title_keywords: ["evidence", "observation"]
+    expected_kind: constraint
+    expected_scope: global
+
+  - id: hand-written-no-proxy-completion
+    description: 不把测试通过当作目标完成的代理信号
+    user_messages:
+      - "不要把测试通过当成目标完成，必须对照需求做完成审计"
+      - "绿色测试只是证据之一，不能替代 prompt-to-artifact audit"
+      - "再次强调完成要看每条需求有没有真实 artifact 证据"
+    expected_title_keywords: ["完成", "审计"]
+    expected_kind: procedure
+    expected_scope: global
+
+  - id: hand-written-file-scoped-drift-resolution
+    description: drift 应支持逐文件处理，避免全局覆盖
+    user_messages:
+      - "drift 恢复应该支持逐文件处理，不要只能全局丢弃"
+      - "多个生成文件 drift 时，要能按目标文件分别导入、保留或丢弃"
+      - "再次强调 file-scoped drift resolution，避免一次覆盖所有手改"
+    expected_title_keywords: ["drift", "逐文件"]
+    expected_kind: procedure
+    expected_scope: project
+
+  - id: hand-written-memory-merge-review
+    description: 合并 Memory Card 前要展示来源差异和影响范围
+    user_messages:
+      - "Memory Card 合并前要展示源卡差异、保留字段和影响哪些 Agent"
+      - "生成合并草稿还不够，merge review 要能看 lineage 和最终预览"
+      - "再次强调合并卡片要先审查来源链路和目标 Agent 影响"
+    expected_title_keywords: ["合并", "lineage"]
+    expected_kind: procedure
+    expected_scope: project
+
+  - id: hand-written-feature-boundaries
+    description: 前端页面按 review artifact memory eval assignment 拆边界
+    user_messages:
+      - "页面级组件继续按 review artifact memory eval assignment 拆清楚"
+      - "Drafts 和 MemoryCards 不要继续堆业务逻辑，拆到 feature 组件和 read model"
+      - "再次强调按 review、artifact、memory、eval、assignment 分边界"
+    expected_title_keywords: ["边界", "组件"]
+    expected_kind: procedure
+    expected_scope: project
+
+  - id: real-daofocus-project-workflow-recall
+    description: DaoFocus 项目工作流不能被低层产品细节或泛泛方法论挤掉
+    user_messages:
+      - "DaoFocus 项目约定：开发任务要先 TDD，再用 Bun 跑测试，完成后 review，merge 前做验证"
+      - "再次强调 DaoFocus 项目约定：TDD、Bun 测试、review、merge 前验证是长期工作流"
+      - "以后 DaoFocus 项目工作流都按 TDD、Bun 测试、review、merge 前验证执行"
+    expected_title_keywords: ["工作流"]
+    expected_kind: procedure
+    expected_scope: project
+
+  - id: real-review-feedback-to-golden
+    description: 审查反馈应进入 Golden Set 或 eval corpus
+    user_messages:
+      - "用户批准、拒绝、编辑候选以后，要把审查反馈回流成 Golden Set 或 eval corpus"
+      - "再次强调用户批准、拒绝、编辑候选以后，要把审查反馈回流成 Golden Set 或 eval corpus"
+      - "以后用户批准、拒绝、编辑候选以后，都要把审查反馈回流成 Golden Set 或 eval corpus"
+    expected_title_keywords: ["反馈", "Golden"]
+    expected_kind: procedure
+    expected_scope: project
+
+  - id: real-extraction-profile-lane-weights
+    description: 项目级 ExtractionProfile 应记录 lane 权重和领域词
+    user_messages:
+      - "每个项目要有 ExtractionProfile，记录高价值 lane、低价值 lane、领域词和证据策略"
+      - "再次强调每个项目要有 ExtractionProfile，记录高价值 lane、低价值 lane、领域词和证据策略"
+      - "以后每个项目要有 ExtractionProfile，记录高价值 lane、低价值 lane、领域词和证据策略"
+    expected_title_keywords: ["ExtractionProfile", "lane"]
+    expected_kind: procedure
+    expected_scope: project
+
+  - id: real-run-qa-before-review
+    description: 提炼运行进入审查前应先有 RunQAReport
+    user_messages:
+      - "每次提炼运行都要有 RunQAReport，检查 evidence validity、duplicate signatures、scope risk 和 provider failures"
+      - "再次强调每次提炼运行都要有 RunQAReport，检查 evidence validity、duplicate signatures、scope risk 和 provider failures"
+      - "以后每次提炼运行都要有 RunQAReport，检查 evidence validity、duplicate signatures、scope risk 和 provider failures"
+    expected_title_keywords: ["RunQA", "评分"]
+    expected_kind: procedure
+    expected_scope: project
+
+  - id: real-seen-memory-signatures
+    description: 已见过的 evidence/body/outcome 要记录 signature 防重复
+    user_messages:
+      - "需要 seen-memory-signatures 记录已经见过的 evidence、body 和用户处理结果，用来防重复"
+      - "再次强调需要 seen-memory-signatures 记录已经见过的 evidence、body 和用户处理结果，用来防重复"
+      - "以后需要 seen-memory-signatures 记录已经见过的 evidence、body 和用户处理结果，用来防重复"
+    expected_title_keywords: ["signature", "去重"]
+    expected_kind: procedure
+    expected_scope: project
+
+negatives:
+  - id: one-off-css
+    description: 一次性 CSS 修改请求
+    user_messages:
+      - "这次只把首页按钮颜色改成红色"
+    reason: 一次性任务，单 session 单消息，无 recurrence
+
+  - id: greeting
+    description: 模型问候
+    user_messages:
+      - "你好"
+      - "你是哪个模型"
+    reason: 无信息问候，应在 STRIP 层被干掉
+
+  - id: tool-echo
+    description: 工具回显残余
+    user_messages:
+      - "<tool_use>edit_file path=foo.rs</tool_use>"
+    reason: STRIP 层应该剥掉 XML 标签
+
+  - id: partial-sentence
+    description: 半截句
+    user_messages:
+      - "那个文件里的"
+      - "或者这样吧"
+    reason: 信息密度不足以归纳出规则
+
+  - id: model-self-intro
+    description: Agent 自我介绍
+    user_messages:
+      - "我是 Claude，由 Anthropic 训练的 AI"
+    reason: 不是用户表达，是 assistant 自述
+
+  - id: prompt-template-leak
+    description: LLM prompt 模板被错误录入 observation
+    user_messages:
+      - "你是 Agent 长期记忆的最终质检与改写器。请只返回 JSON"
+    reason: looks_like_system_prompt 应该拦截
+
+  - id: time-bound-one-off
+    description: 一次性 ad-hoc 决定
+    user_messages:
+      - "今天临时跳过 lint 检查赶时间"
+    reason: 显式一次性，不该固化为长期规则
+
+  - id: temporary-file-scope-boundary
+    description: 当前任务里的临时文件边界不是长期规则
+    user_messages:
+      - "这个 PR 里先不要动 src/build.rs"
+      - "这次任务先别改 build.rs，只看 app 页面"
+      - "当前这轮不要碰 build 模块，避免扩大范围"
+    reason: 当前任务/PR 的临时写作边界，不应沉淀为长期偏好
+
+  - id: one-off-port-change
+    description: 一次性端口切换
+    user_messages:
+      - "这次 dev server 临时换到 5174"
+    reason: 单次运行环境选择，不是长期偏好
+
+  - id: one-off-screenshot-request
+    description: 一次性截图请求
+    user_messages:
+      - "帮我截一下当前页面看看"
+    reason: 当前操作请求，不应沉淀为长期规则
+
+  - id: transient-network-failure
+    description: 临时网络失败描述
+    user_messages:
+      - "刚才网络抽风导致 npm install 失败"
+    reason: 环境偶发故障，不是用户长期偏好
+
+  - id: current-branch-status
+    description: 当前分支状态汇报
+    user_messages:
+      - "现在这个分支还有三个未提交文件"
+    reason: 当前状态事实，不是可复用规则
+
+  - id: one-off-copy-request
+    description: 一次性复制文本请求
+    user_messages:
+      - "把这段错误信息复制到 issue 里"
+    reason: 单次操作，不具备 durable value
+
+  - id: temporary-debug-logging
+    description: 临时调试日志
+    user_messages:
+      - "先加几个 console.log 看看这个状态"
+      - "这轮临时多打日志，调完删掉"
+    reason: 明确临时调试，不应升级为长期做法
+
+  - id: one-off-dependency-version
+    description: 当前任务临时指定依赖版本
+    user_messages:
+      - "这次先固定 vite 到 8.0.10"
+    reason: 单次依赖决策，缺少 recurrence
+
+  - id: assistant-progress-echo
+    description: 助手进度回显不应成为记忆
+    user_messages:
+      - "我已经开始检查文件并准备修改"
+    reason: 这是助手式进度文本，不是用户偏好
+
+  - id: temporary-visual-tweak
+    description: 一次性视觉微调
+    user_messages:
+      - "这次先把卡片间距缩小一点"
+    reason: 当前页面微调，不是长期设计原则
+
+  - id: one-off-run-command
+    description: 一次性运行命令
+    user_messages:
+      - "现在跑一下 cargo test --lib"
+    reason: 单次命令请求，不应沉淀
+
+  - id: provider-timeout-failure
+    description: provider 临时超时失败
+    user_messages:
+      - "刚才 provider 调用超时了，先重试一次"
+    reason: 临时运行失败，不是长期偏好
+
+  - id: malformed-provider-json
+    description: provider 当前返回 malformed JSON
+    user_messages:
+      - "这次 provider 返回了 malformed JSON，先记录错误"
+    reason: 当前执行故障，不是可复用规则
+
+  - id: current-golden-score
+    description: 当前 Golden Set 分数事实
+    user_messages:
+      - "现在 Golden Set evidence validity 是 83%"
+    reason: 当前指标事实，不应沉淀为长期规则
+
+  - id: one-off-open-tab
+    description: 一次性打开页面
+    user_messages:
+      - "打开 Memory Cards 页面看一下"
+    reason: 单次导航请求，不是长期偏好
+
+  - id: typo-fix-once
+    description: 一次性修 typo
+    user_messages:
+      - "这次只把 README 里的拼写错误修一下"
+    reason: 单次编辑任务，不是长期规则
+
+  - id: temporary-branch-name
+    description: 当前临时分支名
+    user_messages:
+      - "这个临时分支就叫 codex/drift-ui"
+    reason: 当前分支命名事实，不是持久规则
+
+  - id: current-browser-width
+    description: 当前浏览器宽度事实
+    user_messages:
+      - "现在浏览器宽度大概 390 像素"
+    reason: 当前环境事实，不应变成设计规则
+
+  - id: one-off-install-dep
+    description: 一次性安装依赖
+    user_messages:
+      - "现在先安装 lucide-react 这个依赖"
+    reason: 单次操作请求，不应沉淀
+
+  - id: one-off-file-path
+    description: 当前任务临时文件路径
+    user_messages:
+      - "这轮只检查 app/src/main.tsx 这个文件"
+    reason: 当前任务边界，不是长期偏好
+
+  - id: provider-output-debug-note
+    description: provider 输出调试备注
+    user_messages:
+      - "provider 刚才输出里多了一个 markdown fence"
+    reason: 当前调试观察，不是用户长期偏好
+
+  - id: assistant-summarized-user-preference
+    description: assistant 复述用户偏好不应当成用户直接偏好
+    user_messages:
+      - "助手总结：用户似乎偏好所有页面都使用蓝色按钮"
+    reason: assistant 推测/复述，不是用户直接表达
+
+  - id: provider-semantic-mismatch
+    description: provider 输出字段合法但语义错配
+    user_messages:
+      - "provider 给了合法 JSON，但把临时 debug 命令归纳成长期 workflow"
+    reason: provider 当前失败现象，不是应固化规则
+
+  - id: stale-product-direction
+    description: 已过期产品方向不应继续固化
+    user_messages:
+      - "旧版本里曾经考虑过把 DaoFocus 做成纯文字游戏，但这个方向已经废弃"
+    reason: 明确过期方向，不能进入长期产品记忆
+
+  - id: pronoun-lost-context
+    description: 指代丢失的片段不能独立成规则
+    user_messages:
+      - "就按刚才那个 A 加 B，再把 C 调一下"
+    reason: 缺少上下文，无法审查证据
+
+  - id: artifact-generated-summary
+    description: 生成文件中的总结不应单独支撑记忆
+    user_messages:
+      - "## 自动生成总结\n用户喜欢更激进的重构"
+    reason: artifact/assistant 总结，缺少用户直接证据
+
+  - id: current-eval-run-path
+    description: 当前 eval 运行路径不是长期规则
+    user_messages:
+      - "这次 eval 输出在 docs/runs/eval-20260518T120000"
+    reason: 当前 artifact 路径事实，不是长期偏好
+
+  - id: temporary-provider-model
+    description: 当前测试临时 provider model 不是长期偏好
+    user_messages:
+      - "这次先用 deepseek-v4-flash 跑测试，别把模型名提交进去"
+    reason: 临时测试配置且包含敏感边界
+
+  - id: duplicate-global-project-card
+    description: 重复卡风险描述本身不是记忆
+    user_messages:
+      - "刚才同一条偏好在 global 和 project 两边各生成了一条"
+    reason: 当前失败样例，应进 eval corpus，不是长期行为规则
+
+  - id: low-quality-quote-correct-but-weak
+    description: quote 可回溯但不足以支撑 body
+    user_messages:
+      - "证据 quote 只有“好一点”，却生成了完整工程规范"
+    reason: 低质量证据失败样例，不应沉淀为规则
+
+  - id: manual-edit-noise
+    description: 手改漂移里的格式噪声不是偏好
+    user_messages:
+      - "AGENTS.md 里多了两个空行和一个临时注释"
+    reason: artifact drift 噪声，不是用户长期偏好

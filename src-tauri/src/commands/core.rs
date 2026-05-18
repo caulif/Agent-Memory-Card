@@ -5,7 +5,7 @@ use serde_json::Value;
 use crate::app_service;
 use crate::jobs::{DesktopJobStart, DesktopTaskStore};
 use crate::provider_config;
-use crate::{app_state_for_home, default_home_dir, error_to_string, load_project_snapshot, CommandResult, DesktopAppState, DraftMergeInput, DraftUpdateInput, KernelPlanInput, ProjectMutationAck, ProjectSnapshot, MemoryCardMergeInput, MemoryCardUpdateInput};
+use crate::{app_state_for_home, default_home_dir, error_to_string, load_project_snapshot, CandidateUpdateInput, CommandResult, DesktopAppState, DraftMergeInput, DraftUpdateInput, KernelPlanInput, ProjectMutationAck, ProjectSnapshot, MemoryCardMergeInput, MemoryCardUpdateInput};
 fn project_ack(project_path: &str) -> CommandResult<ProjectMutationAck> {
     let root = fsutil::normalize_project_root(Path::new(project_path)).map_err(error_to_string)?;
     Ok(ProjectMutationAck {
@@ -330,6 +330,25 @@ pub fn reject_candidate(
         decision_token,
     )?;
     app_service::reject_candidate(Path::new(&project_path), &id, reason).map_err(error_to_string)
+}
+
+#[tauri::command]
+pub fn update_candidate(
+    project_path: String,
+    id: String,
+    input: CandidateUpdateInput,
+    confirmed_policy: Option<kernel::KernelPolicy>,
+    decision_token: Option<String>,
+) -> CommandResult<agent_kernel::candidate::CandidateRecord> {
+    let payload = serde_json::json!({ "id": id.clone(), "input": input.clone() });
+    enforce_tauri_kernel_policy_for_project(
+        &project_path,
+        kernel::KernelCommand::UpdateCandidate { id: id.clone() },
+        payload,
+        confirmed_policy,
+        decision_token,
+    )?;
+    app_service::update_candidate(Path::new(&project_path), &id, input).map_err(error_to_string)
 }
 
 #[tauri::command]
@@ -723,6 +742,97 @@ pub fn import_artifact_drifts(
         decision_token,
     )?;
     app_service::import_artifact_drifts(Path::new(&project_path)).map_err(error_to_string)?;
+    project_ack(&project_path)
+}
+
+#[tauri::command]
+pub fn import_artifact_drift_path(
+    project_path: String,
+    artifact_path: String,
+    confirmed_policy: Option<kernel::KernelPolicy>,
+    decision_token: Option<String>,
+) -> CommandResult<ProjectMutationAck> {
+    enforce_tauri_kernel_policy_for_project(
+        &project_path,
+        kernel::KernelCommand::ImportArtifactDrifts,
+        serde_json::json!({ "artifact_path": artifact_path.clone() }),
+        confirmed_policy,
+        decision_token,
+    )?;
+    app_service::import_artifact_drift_path(Path::new(&project_path), &artifact_path)
+        .map_err(error_to_string)?;
+    project_ack(&project_path)
+}
+
+#[tauri::command]
+pub fn keep_artifact_drifts(
+    project_path: String,
+    confirmed_policy: Option<kernel::KernelPolicy>,
+    decision_token: Option<String>,
+) -> CommandResult<ProjectMutationAck> {
+    enforce_tauri_kernel_policy_for_project(
+        &project_path,
+        kernel::KernelCommand::KeepArtifactDrifts,
+        serde_json::json!({}),
+        confirmed_policy,
+        decision_token,
+    )?;
+    app_service::keep_artifact_drifts(Path::new(&project_path)).map_err(error_to_string)?;
+    project_ack(&project_path)
+}
+
+#[tauri::command]
+pub fn keep_artifact_drift_path(
+    project_path: String,
+    artifact_path: String,
+    confirmed_policy: Option<kernel::KernelPolicy>,
+    decision_token: Option<String>,
+) -> CommandResult<ProjectMutationAck> {
+    enforce_tauri_kernel_policy_for_project(
+        &project_path,
+        kernel::KernelCommand::KeepArtifactDrifts,
+        serde_json::json!({ "artifact_path": artifact_path.clone() }),
+        confirmed_policy,
+        decision_token,
+    )?;
+    app_service::keep_artifact_drift_path(Path::new(&project_path), &artifact_path)
+        .map_err(error_to_string)?;
+    project_ack(&project_path)
+}
+
+#[tauri::command]
+pub fn discard_artifact_drifts(
+    project_path: String,
+    confirmed_policy: Option<kernel::KernelPolicy>,
+    decision_token: Option<String>,
+) -> CommandResult<ProjectMutationAck> {
+    enforce_tauri_kernel_policy_for_project(
+        &project_path,
+        kernel::KernelCommand::DiscardArtifactDrifts,
+        serde_json::json!({}),
+        confirmed_policy,
+        decision_token,
+    )?;
+    app_service::discard_artifact_drifts(Path::new(&project_path)).map_err(error_to_string)?;
+    project_ack(&project_path)
+}
+
+#[tauri::command]
+pub fn discard_artifact_drift_path(
+    project_path: String,
+    artifact_path: String,
+    confirmed_policy: Option<kernel::KernelPolicy>,
+    decision_token: Option<String>,
+) -> CommandResult<ProjectMutationAck> {
+    enforce_tauri_kernel_policy_for_project(
+        &project_path,
+        kernel::KernelCommand::DiscardArtifactDrifts,
+        serde_json::json!({ "artifact_path": artifact_path.clone() }),
+        confirmed_policy,
+        decision_token,
+    )?;
+    app_service::discard_artifact_drift_path(Path::new(&project_path), &artifact_path)
+        .map_err(error_to_string)?;
     project_ack(&project_path)
 }
 

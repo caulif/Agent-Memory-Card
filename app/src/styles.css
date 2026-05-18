@@ -426,11 +426,37 @@ button:disabled {
   right: 0;
   z-index: 50;
   min-width: 240px;
+  max-width: min(420px, calc(100vw - 40px));
   padding: 6px;
   border-radius: var(--radius-md);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   box-shadow: var(--shadow-lg);
+}
+
+.project-select-list {
+  display: grid;
+  gap: 2px;
+  max-height: min(420px, calc(100vh - 180px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2px 0;
+  scrollbar-gutter: stable;
+}
+
+.project-menu-scroll {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--color-canvas);
+  color: var(--color-text-muted);
+}
+
+.project-menu-scroll:hover {
+  color: var(--color-text-primary);
+  background: var(--color-accent-soft);
 }
 
 .project-select-menu .project-item {
@@ -1403,6 +1429,12 @@ button:disabled {
 }
 
 .settings-actions span {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.settings-hint {
+  margin: 0;
   font-size: 12px;
   color: var(--color-text-muted);
 }

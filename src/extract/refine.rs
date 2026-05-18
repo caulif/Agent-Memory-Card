@@ -40,10 +40,17 @@ pub(super) fn refine_candidates(
     }
 
     let mut messages = Vec::new();
-    if allow_provider_refine
-        && let Ok(Some(refined)) = refine_with_provider(project_root, candidates)
-    {
-        return (refined, messages);
+    if allow_provider_refine {
+        match refine_with_provider(project_root, candidates) {
+            Ok(Some(refined)) => return (refined, messages),
+            Ok(None) => messages.push(
+                "LLM final rewrite skipped: refine provider unavailable; falling back to deterministic baseline (no body rewrite)."
+                    .to_string(),
+            ),
+            Err(error) => messages.push(format!(
+                "LLM final rewrite failed: {error}; falling back to deterministic baseline (no body rewrite)."
+            )),
+        }
     }
 
     let refined = candidates
@@ -221,117 +228,24 @@ fn refine_schema() -> ProviderJsonSchema {
     }
 }
 
+/// LLM provider 不可用时的最小确定性回退路径。
+///
+/// 不再尝试用关键词匹配把 candidate body 改写成"模板话"。命中低质量残留则拒绝；
+/// 通过基础长度校验则原样保留。最终的 When/What/Why 改写必须由 LLM 完成；
+/// 如果 provider 不可用，外层应明确告知用户而不是产出虚假高置信度卡。
 fn refine_deterministic(candidate: &Candidate, messages: &mut Vec<String>) -> Option<Candidate> {
     let lower = candidate.body.to_lowercase();
-    let mut refined = candidate.clone();
-    let tier: MemoryTier;
-    let kind: String;
-    let body = if lower.contains("候选质量") && (lower.contains("数量") || lower.contains("候选"))
-    {
-        tier = MemoryTier::CrossProjectPrinciple;
-        kind = "procedure".to_string();
-        "当生成、筛选或展示候选记忆时，只保留高置信度且可执行的少量候选；目标是让候选质量优先于数量。"
-            .to_string()
-    } else if lower.contains("do not return more than 3")
-        || lower.contains("不要展示为啥不")
-        || lower.contains("不该记")
-        || lower.contains("低质量候选")
-    {
-        tier = MemoryTier::CollaborationPreference;
-        kind = "procedure".to_string();
-        "当候选被判定为无长期价值或低质量时，直接从候选列表中过滤；目标是只让用户审阅真正值得固化的记忆。"
-            .to_string()
-    } else if lower.contains("持续自我修正")
-        || lower.contains("持续修正")
-        || lower.contains("真实反馈")
-    {
-        tier = MemoryTier::CollaborationPreference;
-        kind = "procedure".to_string();
-        "当用户提供纠错反馈或真实运行结果时，将反馈整理成可回放的 bad case/good case；目标是持续修正提炼规则。"
-            .to_string()
-    } else if lower.contains("真实历史") || lower.contains("历史回归") {
-        tier = MemoryTier::CollaborationPreference;
-        kind = "procedure".to_string();
-        "当评估提炼质量或修改提炼逻辑时，优先使用真实历史会话做回归验证；不要只依赖静态样例。"
-            .to_string()
-    } else if lower.contains("审阅边界") || lower.contains("review") {
-        tier = MemoryTier::ProjectRule;
-        kind = "constraint".to_string();
-        "当候选规则、MemoryCard 或关键变更准备固化时，先交给人类 review 再 merge；Agent 只提出建议，不越过人工审阅边界。"
-            .to_string()
-    } else if lower.contains("小改快测") || lower.contains("大改重测") {
-        tier = MemoryTier::CollaborationPreference;
-        kind = "procedure".to_string();
-        "当改动较小时先运行针对性快测；当改动较大或风险较高时运行完整回归。".to_string()
-    } else if lower.contains("真实结果")
-        || lower.contains("推理引擎")
-        || lower.contains("检查有没有问题")
-        || lower.contains("dry-run")
-        || lower.contains("dry run")
-    {
-        tier = MemoryTier::CollaborationPreference;
-        kind = "procedure".to_string();
-        "当准备提交最终代码、分析结论或复杂任务结果时，先用真实输入或 dry-run 自检输出质量；发现问题后再修正。"
-            .to_string()
-    } else if (lower.contains("核心功能") && lower.contains("体验")) || lower.contains("用户视角")
-    {
-        tier = MemoryTier::CrossProjectPrinciple;
-        kind = "procedure".to_string();
-        "当规划或评估开发工作时，先确保核心功能链路和用户体验稳定；再考虑周边功能。".to_string()
-    } else if lower.contains("卡顿") || lower.contains("流畅") || lower.contains("响应") {
-        tier = MemoryTier::ProjectRule;
-        kind = "procedure".to_string();
-        "当执行多步骤任务或长耗时操作时，保持界面响应和进度反馈；目标是避免每个操作都造成明显卡顿。"
-            .to_string()
-    } else if lower.contains("大版本") && lower.contains("每次只推进一点") {
-        tier = MemoryTier::CrossProjectPrinciple;
-        kind = "procedure".to_string();
-        "当需求明显需要系统性改造时，先规划并推进完整版本级变更；避免长期只做零碎小改导致目标无法达成。"
-            .to_string()
-    } else if looks_like_low_quality_leftover(&lower) {
+    if looks_like_low_quality_leftover(&lower) {
         messages.push(format!(
             "{}: refine-reject (low-quality leftover)",
             super::candidate_factory::draft_id(candidate)
         ));
         return None;
-    } else {
-        return Some(candidate.clone());
-    };
-
-    if !is_valid_refined_body(&body) {
+    }
+    if !is_valid_refined_body(&candidate.body) {
         return None;
     }
-    refined.body = body;
-    refined.title = title_from_body(&refined.body);
-    refined.kind = kind;
-    refined.memory_tier = tier;
-    refined.scope = if refined.memory_tier == MemoryTier::ProjectRule {
-        "project".to_string()
-    } else {
-        "global".to_string()
-    };
-    refined.reason =
-        Some("Refined final candidate into condition-action agent memory.".to_string());
-    refined.matched_template = Some("deterministic-memory-refine".to_string());
-    refined.confidence = Some(
-        refined
-            .confidence
-            .unwrap_or(0.78)
-            .max(refined_min_confidence(&refined.body)),
-    );
-    Some(refined)
-}
-
-fn refined_min_confidence(body: &str) -> f32 {
-    let lower = body.to_lowercase();
-    if lower.contains("memory_card")
-        && (lower.contains("review") || lower.contains("merge"))
-        && lower.contains("审阅边界")
-    {
-        0.91
-    } else {
-        0.82
-    }
+    Some(candidate.clone())
 }
 
 fn looks_like_low_quality_leftover(lower: &str) -> bool {

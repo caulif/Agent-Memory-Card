@@ -31,7 +31,13 @@ export type ProjectReadModels = {
 
 export function readModelCommandsForPage(page: PageId): ProjectReadModelCommand[] {
   if (page === "drafts") {
-    return ["get_project_candidate_inbox", "get_project_review_inbox"];
+    return [
+      "get_project_candidate_inbox",
+      "get_project_review_inbox",
+      "get_project_memory_card_library",
+      "get_project_assignment_view",
+      "get_project_quality_view",
+    ];
   }
   if (page === "memory-cards") {
     return ["get_project_memory_card_library"];
@@ -73,7 +79,17 @@ export function readModelRefreshPagesForMutation(command: string): PageId[] {
   if (["install_catalog_package"].includes(command)) {
     return ["memory-cards", "agents"];
   }
-  if (["import_project", "import_artifact_drifts", "sync_project", "clear_project_history"].includes(command)) {
+  if ([
+    "import_project",
+    "import_artifact_drifts",
+    "import_artifact_drift_path",
+    "keep_artifact_drifts",
+    "keep_artifact_drift_path",
+    "discard_artifact_drifts",
+    "discard_artifact_drift_path",
+    "sync_project",
+    "clear_project_history",
+  ].includes(command)) {
     return ["drafts", "memory-cards", "agents"];
   }
   return ["drafts"];

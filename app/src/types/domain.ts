@@ -100,7 +100,7 @@ export type ProjectSnapshot = {
   catalog_status: { items: CatalogItem[] };
   target_matrix: { agents: string[]; rows: Array<{ memory_card_id: string; title: string; scope?: string; targets: Record<string, boolean> }> };
   rule_ci: { passed: number; failed: number };
-  build_preview: { actions: string[]; warnings: string[] };
+  build_preview: BuildPreview;
   status: { warnings: string[] };
 };
 
@@ -142,15 +142,35 @@ export type ProjectAssignmentView = {
 export type ProjectQualityView = {
   project_path: string;
   rule_ci: { passed: number; failed: number };
-  build_preview: { actions: string[]; warnings: string[] };
+  build_preview: BuildPreview;
   status: { warnings: string[] };
+};
+
+export type BuildPreview = {
+  actions: string[];
+  warnings: string[];
+  artifact_previews?: ArtifactPreviewRow[];
+};
+
+export type ArtifactPreviewRow = {
+  agent: string;
+  kind: string;
+  path: string;
+  status: "create" | "update" | "unchanged" | "drifted" | string;
+  current_hash?: string | null;
+  expected_hash: string;
+  diff_preview: string[];
+  diff_lines?: string[];
+  diff_truncated?: boolean;
 };
 
 export type CustomProviderConfig = {
   enabled: boolean;
+  protocol: "openai-compatible" | "anthropic-compatible";
   base_url: string;
   model: string;
   api_key_env: string;
+  api_key?: string;
 };
 
 // ===== 任务相关 =====
@@ -236,11 +256,20 @@ export type ExtractionMetadata = {
   matched_signal?: string;
   reason?: string;
   source_observations?: string[];
+  evidence_bundle?: EvidenceBundle | null;
   score_breakdown?: Record<string, number>;
   similar_record?: string | null;
   classification?: KnowledgeClassification | null;
   tags?: string[];
   suggested_action?: ExtractionAction | null;
+};
+
+export type EvidenceBundle = {
+  source_observation_ids?: string[];
+  quotes?: Array<{ observation_id: string; text: string; role?: string; created_at?: string }>;
+  context?: Array<{ observation_id: string; before?: string[]; after?: string[] }>;
+  source_trust?: "user_direct" | "user_feedback" | "assistant_summary" | "tool_output" | "artifact" | "unknown";
+  validity?: "valid" | "weak" | "invalid";
 };
 
 export type ExtractionAction = {

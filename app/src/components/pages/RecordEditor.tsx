@@ -1,6 +1,6 @@
 ﻿import React from "react";
 import { Check, Loader2, ShieldAlert, ShieldCheck, X } from "lucide-react";
-import { planKernelCommand, updateDraft, updateMemoryCard } from "../../tauri-client";
+import { planKernelCommand, updateCandidate, updateDraft, updateMemoryCard } from "../../tauri-client";
 import {
   buildKernelPlanForEditor,
   confirmedAgentManagedPolicy,
@@ -20,7 +20,7 @@ import {
 } from "../../ui-helpers";
 
 type RecordEditorProps = {
-  recordType: "draft" | "memory_card";
+  recordType: "draft" | "candidate" | "memory_card";
   initialForm: EditFormData;
   extraction?: ExtractionMetadata;
   previewMode: boolean;
@@ -51,7 +51,7 @@ export function RecordEditor({ recordType, initialForm, extraction, previewMode,
 
   function buildMutationInput() {
     const tags = parseCommaTags(form.tagsInput);
-    if (recordType === "draft") {
+    if (recordType === "draft" || recordType === "candidate") {
       return { title: form.title, brief: form.brief || undefined, body: form.body, kind: form.kind, scope: form.scope, tags, targets: form.targets };
     }
     return { title: form.title, brief: form.brief || undefined, body: form.body, kind: form.kind, scope: form.scope, tags };
@@ -122,6 +122,14 @@ export function RecordEditor({ recordType, initialForm, extraction, previewMode,
           confirmedPolicy: confirmedAgentManagedPolicy(),
           decisionToken: planResult?.decisionToken,
         });
+      } else if (recordType === "candidate") {
+        await updateCandidate({
+          projectPath,
+          id: recordId,
+          input: mutationInput,
+          confirmedPolicy: confirmedAgentManagedPolicy(),
+          decisionToken: planResult?.decisionToken,
+        });
       } else {
         await updateMemoryCard({
           projectPath,
@@ -141,7 +149,7 @@ export function RecordEditor({ recordType, initialForm, extraction, previewMode,
     }
   }
 
-  const recordLabel = recordType === "draft" ? "草稿" : "技能片段";
+  const recordLabel = recordType === "draft" ? "草稿" : recordType === "candidate" ? "候选" : "技能片段";
 
   return (
     <article className="edit-panel">
@@ -214,7 +222,7 @@ export function RecordEditor({ recordType, initialForm, extraction, previewMode,
           />
         </label>
 
-        {recordType === "draft" ? (
+        {recordType === "draft" || recordType === "candidate" ? (
           <fieldset className="edit-targets">
             <legend>目标智能体</legend>
             {EDITABLE_AGENTS.map((agent) => (

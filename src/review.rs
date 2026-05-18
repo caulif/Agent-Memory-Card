@@ -1,6 +1,9 @@
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::Path;
 
 use anyhow::Result;
+use chrono::Utc;
 use serde::Serialize;
 
 use crate::build;
@@ -75,6 +78,51 @@ mod tests {
     }
 
     #[test]
+    fn review_decision_records_feedback_event_for_eval_harvest() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        draft::add_draft(
+            temp.path(),
+            draft::NewDraft {
+                id: "project:temporary-rule".to_string(),
+                title: "Temporary Rule".to_string(),
+                body: "This sprint only, avoid touching build.rs.".to_string(),
+                kind: "constraint".to_string(),
+                scope: "project".to_string(),
+                targets: vec!["codex".to_string()],
+                evidence: "这轮先别改 build.rs，只看 app 页面".to_string(),
+                confidence: Some(0.8),
+                reason: Some("temporary task boundary".to_string()),
+                matched_template: Some("pipeline-v2".to_string()),
+                extraction: ExtractionMetadata {
+                    source_observations: vec!["obs:test:temporary".to_string()],
+                    ..ExtractionMetadata::default()
+                },
+            },
+        )
+        .expect("add draft");
+
+        apply_review_decisions(
+            temp.path(),
+            &[ReviewDecision::RejectDraftWithReason {
+                id: "project:temporary-rule".to_string(),
+                reason: "阶段性任务边界，不应进入长期记忆".to_string(),
+            }],
+        )
+        .expect("apply");
+
+        let events = std::fs::read_to_string(
+            temp.path()
+                .join(".agent-kernel")
+                .join("eval-corpus")
+                .join("review-events.jsonl"),
+        )
+        .expect("review events");
+        assert!(events.contains("\"decision\":\"reject\""));
+        assert!(events.contains("阶段性任务边界"));
+        assert!(events.contains("obs:test:temporary"));
+    }
+
+    #[test]
     fn review_summary_counts_artifact_drifts() {
         let temp = tempfile::tempdir().expect("tempdir");
         memory_card::add_memory_card(
@@ -117,6 +165,7 @@ pub struct ReviewReport {
 pub enum ReviewDecision {
     ApproveDraft(String),
     RejectDraft(String),
+    RejectDraftWithReason { id: String, reason: String },
 }
 
 #[derive(Debug, Serialize)]
@@ -183,6 +232,14 @@ pub fn apply_review_decisions(
     for decision in decisions {
         match decision {
             ReviewDecision::ApproveDraft(id) => {
+                if let Some(draft) = draft_snapshot(project_root, id)? {
+                    append_review_feedback_event(
+                        project_root,
+                        &draft,
+                        ReviewFeedbackDecision::Approve,
+                        None,
+                    )?;
+                }
                 draft::approve_draft(project_root, id)?;
                 results.push(ReviewDecisionResult {
                     action: "approve-draft".to_string(),
@@ -191,6 +248,30 @@ pub fn apply_review_decisions(
                 });
             }
             ReviewDecision::RejectDraft(id) => {
+                if let Some(draft) = draft_snapshot(project_root, id)? {
+                    append_review_feedback_event(
+                        project_root,
+                        &draft,
+                        ReviewFeedbackDecision::Reject,
+                        None,
+                    )?;
+                }
+                draft::reject_draft(project_root, id)?;
+                results.push(ReviewDecisionResult {
+                    action: "reject-draft".to_string(),
+                    id: id.clone(),
+                    status: "applied".to_string(),
+                });
+            }
+            ReviewDecision::RejectDraftWithReason { id, reason } => {
+                if let Some(draft) = draft_snapshot(project_root, id)? {
+                    append_review_feedback_event(
+                        project_root,
+                        &draft,
+                        ReviewFeedbackDecision::Reject,
+                        Some(reason),
+                    )?;
+                }
                 draft::reject_draft(project_root, id)?;
                 results.push(ReviewDecisionResult {
                     action: "reject-draft".to_string(),
@@ -201,4 +282,61 @@ pub fn apply_review_decisions(
         }
     }
     Ok(results)
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ReviewFeedbackDecision {
+    Approve,
+    Reject,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ReviewFeedbackEvent<'a> {
+    timestamp: String,
+    decision: ReviewFeedbackDecision,
+    id: &'a str,
+    title: &'a str,
+    kind: &'a str,
+    scope: &'a str,
+    body: &'a str,
+    evidence: &'a str,
+    source_observations: &'a [String],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<&'a str>,
+}
+
+fn draft_snapshot(project_root: &Path, id: &str) -> Result<Option<draft::DraftRecord>> {
+    Ok(draft::load_drafts(project_root)?
+        .into_iter()
+        .find(|draft| draft.id == id))
+}
+
+fn append_review_feedback_event(
+    project_root: &Path,
+    draft: &draft::DraftRecord,
+    decision: ReviewFeedbackDecision,
+    reason: Option<&str>,
+) -> Result<()> {
+    let root = crate::fsutil::normalize_project_root(project_root)?;
+    let dir = crate::config::kernel_dir(&root).join("eval-corpus");
+    std::fs::create_dir_all(&dir)?;
+    let event = ReviewFeedbackEvent {
+        timestamp: Utc::now().to_rfc3339(),
+        decision,
+        id: &draft.id,
+        title: &draft.title,
+        kind: &draft.kind,
+        scope: &draft.scope,
+        body: &draft.body,
+        evidence: &draft.evidence,
+        source_observations: &draft.extraction.source_observations,
+        reason,
+    };
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("review-events.jsonl"))?;
+    writeln!(file, "{}", serde_json::to_string(&event)?)?;
+    Ok(())
 }

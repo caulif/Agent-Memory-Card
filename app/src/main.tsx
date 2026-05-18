@@ -20,6 +20,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Circle,
   CloudCog,
   GitBranch,
@@ -105,6 +106,7 @@ function App() {
   const [synthesisEngine, setSynthesisEngine] = React.useState<"claude-code" | "codex" | "local" | "llm">("claude-code");
   const [theme, setTheme] = React.useState<"light" | "dark" | "system">("system");
   const [projectMenuOpen, setProjectMenuOpen] = React.useState(false);
+  const projectMenuListRef = React.useRef<HTMLDivElement | null>(null);
   const selectedProjectRef = React.useRef("");
   const readModels = useProjectReadModels({ page, previewMode, selectedProjectRef, setMessage });
   const {
@@ -329,19 +331,37 @@ function App() {
                   {projects.length === 0 ? (
                     <p className="empty">还没有发现项目。扫描后会读取常用目录。</p>
                   ) : (
-                    projects.map((project) => (
+                    <>
                       <button
-                        key={project.path}
-                        className={`project-item ${project.path === selectedProject ? "active" : ""}`}
-                        onClick={() => {
-                          void chooseProject(project.path);
-                          setProjectMenuOpen(false);
-                        }}
+                        className="project-menu-scroll"
+                        aria-label="向上滚动项目列表"
+                        onClick={() => projectMenuListRef.current?.scrollBy({ top: -220, behavior: "smooth" })}
                       >
-                        <span>{project.name}</span>
-                        <small>{formatAgents(project.agents)}</small>
+                        <ChevronUp size={14} />
                       </button>
-                    ))
+                      <div className="project-select-list" ref={projectMenuListRef}>
+                        {projects.map((project) => (
+                          <button
+                            key={project.path}
+                            className={`project-item ${project.path === selectedProject ? "active" : ""}`}
+                            onClick={() => {
+                              void chooseProject(project.path);
+                              setProjectMenuOpen(false);
+                            }}
+                          >
+                            <span>{project.name}</span>
+                            <small>{formatAgents(project.agents)}</small>
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        className="project-menu-scroll"
+                        aria-label="向下滚动项目列表"
+                        onClick={() => projectMenuListRef.current?.scrollBy({ top: 220, behavior: "smooth" })}
+                      >
+                        <ChevronDown size={14} />
+                      </button>
+                    </>
                   )}
                 </div>
               ) : null}
@@ -397,6 +417,9 @@ function App() {
                       snapshot={snapshot}
                       candidates={candidateInbox}
                       inbox={reviewInbox}
+                      assignment={assignmentView}
+                      library={memory_cardLibrary}
+                      quality={qualityView}
                       pendingAction={pendingAction}
                       disabled={!candidateInbox && !reviewInbox && !snapshot}
                       onAction={projectAction}
@@ -414,6 +437,7 @@ function App() {
                     <MemoryCards
                       snapshot={snapshot}
                       library={memory_cardLibrary}
+                      assignment={assignmentView}
                       pendingAction={pendingAction}
                       disabled={!memory_cardLibrary && !snapshot}
                       onAction={projectAction}
@@ -435,7 +459,7 @@ function App() {
                       projects={projects}
                     />
                   )}
-                  {page === "settings" && <Settings state={state} snapshot={snapshot} projectPath={selectedProject} previewMode={previewMode} synthesisEngine={synthesisEngine} theme={theme} onThemeChange={setTheme} />}
+                  {page === "settings" && <Settings state={state} snapshot={snapshot} projectPath={selectedProject} previewMode={previewMode} synthesisEngine={synthesisEngine} theme={theme} onThemeChange={setTheme} onSynthesisEngineChange={setSynthesisEngine} />}
                 </>
               )}
             </section>

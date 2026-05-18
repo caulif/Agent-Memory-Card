@@ -15,14 +15,18 @@ mod atomic;
 mod candidate_factory;
 pub mod chunk;
 pub mod classify;
+pub mod cluster;
+pub mod crystallize;
 mod dedupe;
 pub(crate) mod embedding;
 mod feedback_gate;
 pub mod gate;
+pub mod induce;
 pub mod lifecycle;
 mod llm;
 mod llm_pipeline_impl;
 pub(crate) mod memory_gate;
+pub mod pipeline;
 mod preference;
 pub mod quality;
 mod quality_gate;
@@ -33,6 +37,8 @@ mod report;
 pub mod scoring;
 mod shared_impl;
 mod signals;
+pub mod strip;
+pub mod truncate;
 
 pub use preference::{
     PreferenceRegistryValidationReport, PreferenceTemplatePreview, PreferenceTestMatch,
@@ -51,8 +57,6 @@ use candidate_factory::{
 };
 use dedupe::dedupe_candidates;
 use llm_pipeline_impl::extract_llm_text_to_drafts;
-#[cfg(test)]
-use preference::built_in_preferences;
 use preference::{KnownPreference, load_known_preferences, normalize_known_preference};
 use quality_gate::{QualityDisposition, evaluate_candidate_quality, quality_skip_message};
 use shared_impl::*;
@@ -717,12 +721,6 @@ fn route_action(action: candidate::ExtractionAction, route: &str) -> candidate::
     } else {
         action.with_route(route)
     }
-}
-
-#[cfg(test)]
-fn extract_candidates(input: &str) -> Vec<Candidate> {
-    let preferences = built_in_preferences();
-    extract_candidates_with_preferences(input, &preferences, false)
 }
 
 fn extract_candidates_with_preferences(
