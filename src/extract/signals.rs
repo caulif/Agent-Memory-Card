@@ -130,6 +130,10 @@ pub(super) fn is_low_value_task_sentence(sentence: &str) -> bool {
         return true;
     }
 
+    if super::gate::looks_like_one_off_project_execution_request(trimmed) {
+        return true;
+    }
+
     // 未解决的抱怨：用户表达不满或需求但无具体做法
     if looks_like_unresolved_user_request(trimmed) && !has_explicit_memory_marker(trimmed) {
         return true;
@@ -561,6 +565,11 @@ pub(super) fn has_collaboration_preference_signal(lower: &str) -> bool {
         "真实结果",
         "推理引擎",
         "检查有没有问题",
+        "可视化",
+        "mockup",
+        "对比图",
+        "流程图",
+        "架构图",
         "targeted test",
         "dry-run",
         "dry run",
@@ -581,12 +590,26 @@ pub(super) fn has_collaboration_preference_signal(lower: &str) -> bool {
         "验证",
     ];
 
-    collaboration_topics
+    (collaboration_topics
         .iter()
         .any(|topic| lower.contains(topic))
+        || has_project_startup_reference_signal(lower))
         && preference_markers
             .iter()
             .any(|marker| lower.contains(marker))
+}
+
+fn has_project_startup_reference_signal(lower: &str) -> bool {
+    (lower.contains("借鉴")
+        || lower.contains("参考")
+        || lower.contains("开源项目")
+        || lower.contains("同类产品")
+        || lower.contains("相关内容"))
+        && (lower.contains("规划")
+            || lower.contains("方案")
+            || lower.contains("启动")
+            || lower.contains("实现新功能")
+            || lower.contains("新增功能"))
 }
 
 // ============================================================

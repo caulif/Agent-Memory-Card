@@ -83,6 +83,7 @@ pub fn crystallize_one(candidate: &InducedCandidate) -> CrystallizationOutcome {
     check_kind_scope(candidate, &mut reasons);
     check_temporal_status(candidate, &mut reasons);
     check_memory_level(candidate, &body, &mut reasons);
+    check_product_preference_scope(candidate, &body, &mut reasons);
 
     if !reasons.is_empty() {
         return CrystallizationOutcome::Rejected {
@@ -297,6 +298,55 @@ fn check_memory_level(candidate: &InducedCandidate, body: &str, reasons: &mut Ve
         reasons.push(
             "low-level project/product detail is evidence context, not durable workflow memory"
                 .to_string(),
+        );
+    }
+}
+
+fn check_product_preference_scope(
+    candidate: &InducedCandidate,
+    body: &str,
+    reasons: &mut Vec<String>,
+) {
+    if candidate.scope != "global" || candidate.kind != "preference" {
+        return;
+    }
+    let combined = format!(
+        "{}\n{}\n{}\n{}\n{}",
+        candidate.title, candidate.when, candidate.what, candidate.why, body
+    )
+    .to_lowercase();
+    let product_design = [
+        "产品方案",
+        "产品体验",
+        "产品设计",
+        "新项目设计",
+        "设计或评估产品",
+        "极简",
+        "低资源占用",
+        "低摩擦",
+        "冗余功能",
+        "干净专注",
+    ]
+    .iter()
+    .filter(|marker| combined.contains(**marker))
+    .count()
+        >= 3;
+    let durable_global_marker = [
+        "所有项目",
+        "每个项目",
+        "每次",
+        "长期",
+        "总是",
+        "always",
+        "for every project",
+        "for all projects",
+    ]
+    .iter()
+    .any(|marker| combined.contains(marker));
+
+    if product_design && !durable_global_marker {
+        reasons.push(
+            "project product-design preference lacks durable cross-project scope".to_string(),
         );
     }
 }
@@ -666,6 +716,31 @@ mod tests {
         let outcome = crystallize_one(&c);
 
         assert!(matches!(outcome, CrystallizationOutcome::Accepted(_)));
+    }
+
+    #[test]
+    fn rejects_project_product_design_preference_promoted_to_global() {
+        let mut c = candidate(
+            "极简干净产品优先",
+            "设计或评估产品方案时",
+            "优先选择极简架构、低资源占用、干净专注的设计，避免冗余功能",
+            "用户偏好轻量专注的产品体验",
+            "preference",
+            2,
+        );
+        c.boundary = Some("仅适用于新项目设计阶段的取舍判断".to_string());
+        c.scope = "global".to_string();
+
+        let outcome = crystallize_one(&c);
+
+        match outcome {
+            CrystallizationOutcome::Rejected { reasons, .. } => assert!(
+                reasons.iter().any(|reason| reason
+                    .contains("product-design preference lacks durable cross-project scope")),
+                "{reasons:?}"
+            ),
+            other => panic!("expected reject, got {other:?}"),
+        }
     }
 
     #[test]

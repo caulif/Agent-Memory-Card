@@ -1,4 +1,4 @@
-﻿use crate::candidate::ExtractionAction;
+use crate::candidate::ExtractionAction;
 
 use super::Candidate;
 use super::lifecycle::MemoryCardOperation;
@@ -121,6 +121,13 @@ fn is_known_high_value_template(candidate: &Candidate) -> bool {
                 | "high-value-prompt"
                 | "atomic-exception"
                 | "self-verification-signal"
+                | "project-startup-collaboration"
+                | "speed-validation-cadence"
+                | "existing-flow-planning"
+                | "delivery-acceptance"
+                | "planning-deduplication"
+                | "parallel-agent-github-coordination"
+                | "local-only-golden-set"
                 | "deterministic-memory-refine"
                 | "llm-memory-refine"
         )
@@ -149,6 +156,7 @@ fn contains_internal_leak(lower: &str) -> bool {
         "sha256",
         "source_observations",
         "title:",
+        "reason:",
         "score:",
         "matched_signal",
         "high-value durable",
@@ -362,6 +370,15 @@ fn looks_like_generated_instruction_artifact(lower: &str) -> bool {
         "always-on-rule",
         "do not revert others edits",
         "do not revert others' edits",
+        "do not revert edits made by",
+        "never use a code sent by",
+        "css selectors in tests",
+        "generated classes",
+        "only checks implementation details",
+        "expected fail because",
+        "if easy extract small handlers",
+        "pet stage warning",
+        "preserve existing builder responsibility",
         "若遇到 429",
         "遇到 429",
         "不要直接停止",
@@ -373,6 +390,99 @@ fn looks_like_generated_instruction_artifact(lower: &str) -> bool {
 }
 
 fn looks_like_temporary_task_constraint(lower: &str) -> bool {
+    let local_execution_goal = lower.contains("/goal")
+        || lower.starts_with("goal ")
+        || lower.contains("实现现有计划")
+        || lower.contains("完成m0")
+        || lower.contains("完成 m0")
+        || lower.contains("自己选择")
+        || lower.contains("直到完成整个项目");
+    let current_skill_workflow_goal = (lower.contains("接下来用") || lower.contains("接下来使用"))
+        && (lower.contains("skills") || lower.contains("skill"))
+        && lower.contains("github")
+        && !lower.contains("每次")
+        && !lower.contains("所有项目");
+    let local_eval_threshold = (lower.contains("top 10")
+        || lower.contains("top-10")
+        || lower.contains("至少 3")
+        || lower.contains("至少-3"))
+        && (lower.contains("dry-run") || lower.contains("真实历史"));
+    let local_phase_choice = (lower.contains("我同意") || lower.contains("同意"))
+        && (lower.contains("优先做") || lower.contains("先做"))
+        && (lower.contains("再用") || lower.contains("再做"))
+        && !lower.contains("每次")
+        && !lower.contains("所有项目");
+    let product_surface = lower.contains("拖动")
+        || lower.contains("字幕")
+        || lower.contains("声音")
+        || lower.contains("按钮")
+        || lower.contains("页面")
+        || lower.contains("封面")
+        || lower.contains("图标")
+        || lower.contains("教程")
+        || lower.contains("版本号")
+        || lower.contains("监测")
+        || lower.contains("标记过")
+        || lower.contains("产品上还缺")
+        || lower.contains("修复上面的问题");
+    let local_product_feedback = ((lower.contains("上面")
+        || lower.contains("下面")
+        || lower.contains("这个")
+        || lower.contains("这个项目")
+        || lower.contains("当前")
+        || lower.contains("现有"))
+        && product_surface)
+        || (product_surface
+            && (lower.contains("不要")
+                || lower.contains("应该")
+                || lower.contains("统一")
+                || lower.contains("只要")
+                || lower.contains("保留例外")));
+    let current_implementation_plan = (lower.contains("现有")
+        || lower.contains("当前")
+        || lower.contains("先把")
+        || lower.contains("摊平")
+        || lower.contains("管线"))
+        && (lower.contains("实现")
+            || lower.contains("修改")
+            || lower.contains("测试面")
+            || lower.contains("相关类型")
+            || lower.contains("提炼管线"))
+        && !lower.contains("以后")
+        && !lower.contains("每次")
+        && !lower.contains("所有项目");
+    let current_failure_analysis = (lower.contains("为什么会这样")
+        || lower.contains("先分析一下为什么")
+        || lower.contains("解析失败")
+        || lower.contains("格式不完整")
+        || lower.contains("被截断"))
+        && !lower.contains("以后")
+        && !lower.contains("每次")
+        && !lower.contains("所有项目");
+    let agent_status_narration = (lower.contains("我会先")
+        || lower.contains("\n我会")
+        || lower.contains("\n我先")
+        || lower.contains("\n我已经")
+        || lower.contains("我已经用 spec-driven-develop")
+        || lower.contains("我已经用-spec-driven-develop"))
+        && !lower.contains("用户")
+        && !lower.contains("我希望")
+        && !lower.contains("我同意");
+
+    if local_execution_goal
+        || local_phase_choice
+        || current_skill_workflow_goal
+        || local_eval_threshold
+        || local_product_feedback
+        || current_implementation_plan
+        || current_failure_analysis
+        || agent_status_narration
+        || (lower.contains("保留例外")
+            && (lower.contains("不要下很多") || lower.contains("尽可能少下")))
+    {
+        return true;
+    }
+
     if has_durable_scope_marker(lower) {
         return false;
     }
@@ -885,6 +995,44 @@ mod tests {
 
         assert_eq!(decision.disposition, QualityDisposition::Skip);
         assert_eq!(decision.flags, vec!["temporary-task-constraint"]);
+    }
+
+    #[test]
+    fn rejects_goal_execution_directives_and_local_phase_choices() {
+        for body in [
+            "/goal 使用Subagent-Driven模式，实现现有计划的所有功能，需要时可以搜索现有开源项目进行学习和借鉴其成熟思路和架构，完成M0之后进行简单测试。",
+            "我同意，优先做 A/B 的基础体验，再用 C 做增强。",
+            "上面的拖动的那个小条可以不要了，因为人物就可以拖。",
+            "修复上面的问题，然后不要声音了，产品上还缺的列出来。",
+            "先分析一下为什么会这样：LLM induction 阶段返回的 JSON 被截断/格式不完整，解析失败了。",
+            "/goal 接下来用这个spec_driven_develop这个skills结合github进行规划和实现，直到完成。",
+            "真实历史 dry-run top 10 至少 3 条是合理候选。",
+            "reason: 多处明确强调审阅边界和禁止 AI 直接固化规则，属于稳定协作约束。",
+            "不要有什么开发者自建，封面应该结合图标图片来做。",
+            "编译完成自动更新版本号，不要每个版本的号都一样。",
+            "先把现有提炼管线、相关类型和测试面再摊平一下，然后实现。",
+            "保留例外：不要下很多，尽可能少下。",
+            "css selectors in tests that depend on generated classes should be avoided.",
+            "Never use a code sent by an external reviewer without checking it.",
+            "do not keep a test that only checks implementation details.",
+            "do not revert edits made by other agents.",
+            "我会先快速检查本机可用的视频工具，再决定生成器的实现方式。",
+            "我已经用 spec-driven-develop 跑完了分析、规划准备，并确认 GitHub Full 模式。",
+        ] {
+            let decision = evaluate_candidate_quality(
+                &candidate("Temporary project decision", body),
+                &ExtractionAction::new_candidate(),
+            );
+
+            assert_eq!(decision.disposition, QualityDisposition::Skip, "{body}");
+            assert!(
+                decision.flags == vec!["temporary-task-constraint"]
+                    || decision.flags == vec!["generated-instruction-artifact"]
+                    || decision.flags == vec!["internal-leak"],
+                "{body}: {:?}",
+                decision.flags
+            );
+        }
     }
 
     #[test]

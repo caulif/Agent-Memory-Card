@@ -114,7 +114,7 @@ pub fn induce_batch_with_provider(
         return Vec::new();
     }
     let request = build_batch_induce_request(clusters, max_cards);
-    let raw = match provider.call(&request, 4096) {
+    let raw = match provider.call(&request, 8192) {
         Ok(text) => text,
         Err(error) => {
             return vec![InductionOutcome::Failed {
@@ -282,6 +282,7 @@ Also include memory-governance, validation, review-boundary, and candidate-quali
 Merge duplicate concepts instead of emitting near-duplicates.\n\
 Treat product details, numeric thresholds, UI entry points, tutorial copy, storage keys, enum names, and one-off feature settings as evidence context, not Memory Cards.\n\
 If a project-specific workflow rule is present, prefer a concrete project-scoped workflow card over a low-level product-detail card.\n\
+Keep field values concise: title under 18 Chinese characters; when/what/why under 50 Chinese characters each; boundary under 40 Chinese characters.\n\
 Return only valid JSON with this shape: {{\"candidates\": [{{\"cluster_id\":\"...\",\"title\":\"...\",\"when\":\"...\",\"what\":\"...\",\"why\":\"...\",\"boundary\":\"...\",\"kind\":\"preference|constraint|procedure\",\"scope\":\"global|project\",\"memory_tier\":\"project_rule|cross_project_principle|collaboration_preference\",\"abstraction_level\":\"too_low|good|too_high\",\"support_level\":\"strong|medium|weak\",\"evidence_quotes\":[{{\"observation_id\":\"...\",\"text\":\"literal quote\"}}],\"temporal_status\":\"stable|reversed|refined\",\"confidence\":0.0}}]}}.\n\
 Do not include markdown fences or explanatory text. Each item must cite literal evidence_quotes from the messages.\n\
 Use cluster_id from one cited cluster as the candidate cluster_id when you include it.\n\
@@ -593,9 +594,12 @@ fn parse_json_lenient(response: &str) -> Result<serde_json::Value> {
         (None, Some(array)) => (array, ']'),
         (None, None) => anyhow::bail!("no JSON object or array in induce response"),
     };
-    let end = trimmed
-        .rfind(end_char)
-        .with_context(|| format!("no closing {end_char} in induce response"))?;
+    let Some(end) = trimmed.rfind(end_char) else {
+        anyhow::bail!(
+            "likely-truncated-json: no closing {end_char} in induce response; prefix={:.200}",
+            trimmed
+        );
+    };
     serde_json::from_str(&trimmed[start..=end])
         .with_context(|| format!("parse induce JSON: {:.200}", trimmed))
 }
@@ -843,6 +847,55 @@ mod tests {
             }
             other => panic!("expected accept, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn batch_induce_provider_call_gets_large_json_token_budget() {
+        struct TokenCaptureProvider {
+            seen_tokens: std::sync::Mutex<Vec<usize>>,
+        }
+
+        impl InduceProvider for TokenCaptureProvider {
+            fn call(&self, _request: &ProviderRequest, max_tokens: usize) -> Result<String> {
+                self.seen_tokens.lock().unwrap().push(max_tokens);
+                Ok(r#"{"candidates":[]}"#.to_string())
+            }
+        }
+
+        let cluster = cluster_with(vec![truncated("o1", "真实历史回归比静态样例更重要。")]);
+        let provider = TokenCaptureProvider {
+            seen_tokens: std::sync::Mutex::new(Vec::new()),
+        };
+
+        let _ = induce_batch_with_provider(&provider, &[cluster], 3);
+
+        assert_eq!(provider.seen_tokens.lock().unwrap().as_slice(), &[8192]);
+    }
+
+    #[test]
+    fn incomplete_json_response_reports_likely_truncation() {
+        let raw = r#"{"candidates":[{"title":"优先真实历史回归","boundary":"没有闭合"#;
+
+        let error = parse_batch_induce_response(raw, &[]).expect_err("truncated JSON should fail");
+
+        assert!(
+            error.to_string().contains("likely-truncated-json"),
+            "error should point to truncation, got: {error:?}"
+        );
+    }
+
+    #[test]
+    fn batch_induce_request_demands_concise_fields() {
+        let cluster = cluster_with(vec![truncated("o1", "真实历史回归比静态样例更重要。")]);
+
+        let request = build_batch_induce_request(&[cluster], 3);
+
+        assert!(request.user_prompt.contains("Keep field values concise"));
+        assert!(
+            request
+                .user_prompt
+                .contains("boundary under 40 Chinese characters")
+        );
     }
 
     #[test]

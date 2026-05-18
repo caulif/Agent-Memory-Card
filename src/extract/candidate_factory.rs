@@ -1,4 +1,4 @@
-﻿use crate::candidate::{self, EvidenceSpan};
+use crate::candidate::{self, EvidenceSpan};
 use crate::textutil;
 
 use super::{Candidate, chunk, classify, scoring, signals};
@@ -118,6 +118,309 @@ pub(super) fn self_verification_candidate(sentence: &str) -> Option<Candidate> {
         reason: Some("Matched durable self-verification preference signal.".to_string()),
         matched_template: Some("self-verification-signal".to_string()),
     })
+}
+
+pub(super) fn project_startup_collaboration_candidate(sentence: &str) -> Option<Candidate> {
+    let lower = sentence.to_lowercase();
+    let has_visual_planning =
+        contains_any(
+            &lower,
+            &["可视化", "mockup", "对比图", "流程图", "架构图", "浏览器"],
+        ) && contains_any(&lower, &["讨论", "边聊边做", "规划", "布局", "方案"]);
+    let has_reference_research =
+        contains_any(
+            &lower,
+            &["借鉴", "参考", "开源项目", "同类产品", "相关内容"],
+        ) && contains_any(&lower, &["规划", "方案", "启动", "实现新功能", "新增功能"]);
+    if !has_visual_planning && !has_reference_research {
+        return None;
+    }
+
+    let body = if has_visual_planning && has_reference_research {
+        "项目启动或方案讨论涉及界面、布局、架构或流程时，优先用轻量 mockup、对比图、流程图等可视化辅助讨论，并可参考开源项目或同类产品后再规划。"
+    } else if has_visual_planning {
+        "项目启动或方案讨论涉及界面、布局、架构或流程时，优先用轻量 mockup、对比图或流程图等可视化辅助讨论。"
+    } else {
+        "项目启动或规划新功能时，先参考可借鉴的开源项目、同类产品或相关资料，再制定方案。"
+    }
+    .to_string();
+
+    Some(Candidate {
+        title: title_from_body(&body),
+        body,
+        kind: "procedure".to_string(),
+        scope: "global".to_string(),
+        memory_tier: crate::candidate::MemoryTier::CollaborationPreference,
+        abstraction_of: None,
+        abstracted_from: None,
+        evidence: sentence.to_string(),
+        confidence: Some(0.86),
+        reason: Some(
+            "Matched durable project-startup planning and collaboration preference signal."
+                .to_string(),
+        ),
+        matched_template: Some("project-startup-collaboration".to_string()),
+    })
+}
+
+pub(super) fn speed_validation_cadence_candidate(sentence: &str) -> Option<Candidate> {
+    let lower = sentence.to_lowercase();
+    let has_speed = contains_any(
+        &lower,
+        &[
+            "迅速开发",
+            "快速开发",
+            "推进速度",
+            "不要过多检查",
+            "不要过多测试",
+            "不过度测试",
+            "小改",
+        ],
+    );
+    let has_validation = contains_any(
+        &lower,
+        &[
+            "必要时测试",
+            "必要检查",
+            "测试/检查",
+            "完整测试",
+            "总的测试",
+            "完成前",
+        ],
+    ) || (contains_any(&lower, &["检查", "验证", "测试"])
+        && contains_any(&lower, &["最后", "完成前", "总的"]));
+    if !has_speed || !has_validation {
+        return None;
+    }
+
+    let body = "快速推进开发时，小改只做必要检查；大改、收尾或交付前再跑完整测试，兼顾速度和质量。"
+        .to_string();
+
+    Some(Candidate {
+        title: title_from_body(&body),
+        body,
+        kind: "procedure".to_string(),
+        scope: "global".to_string(),
+        memory_tier: crate::candidate::MemoryTier::CollaborationPreference,
+        abstraction_of: None,
+        abstracted_from: None,
+        evidence: sentence.to_string(),
+        confidence: Some(0.84),
+        reason: Some(
+            "Matched durable development cadence preference balancing speed and verification."
+                .to_string(),
+        ),
+        matched_template: Some("speed-validation-cadence".to_string()),
+    })
+}
+
+pub(super) fn existing_flow_planning_candidate(sentence: &str) -> Option<Candidate> {
+    let lower = sentence.to_lowercase();
+    let touches_existing_system = contains_any(
+        &lower,
+        &[
+            "现有项目",
+            "既有流程",
+            "当前项目",
+            "当前流程",
+            "existing project",
+            "existing flow",
+        ],
+    );
+    let touches_change_surface = contains_any(
+        &lower,
+        &[
+            "提炼",
+            "memory card",
+            "ui 流程",
+            "ui流程",
+            "架构",
+            "规则",
+            "pipeline",
+        ],
+    );
+    let has_planning_order =
+        contains_any(&lower, &["先理解", "再提出", "再制定", "before changing"]);
+    if !touches_existing_system || !touches_change_surface || !has_planning_order {
+        return None;
+    }
+
+    let body = "改动提炼、Memory Card、UI 流程或架构前，先理解现有项目和既有流程，再提出方案。"
+        .to_string();
+
+    Some(Candidate {
+        title: title_from_body(&body),
+        body,
+        kind: "procedure".to_string(),
+        scope: "global".to_string(),
+        memory_tier: crate::candidate::MemoryTier::CollaborationPreference,
+        abstraction_of: None,
+        abstracted_from: None,
+        evidence: sentence.to_string(),
+        confidence: Some(0.87),
+        reason: Some(
+            "Matched durable preference to understand the existing project flow before changing it."
+                .to_string(),
+        ),
+        matched_template: Some("existing-flow-planning".to_string()),
+    })
+}
+
+pub(super) fn delivery_acceptance_candidate(sentence: &str) -> Option<Candidate> {
+    let lower = sentence.to_lowercase();
+    let has_test_green = contains_any(
+        &lower,
+        &[
+            "绿色测试",
+            "测试绿",
+            "测试通过",
+            "green tests",
+            "tests pass",
+        ],
+    );
+    let has_human_acceptance = contains_any(
+        &lower,
+        &[
+            "用户实际感知",
+            "用户视角",
+            "需求覆盖",
+            "实际感知",
+            "体验质量",
+            "user experience",
+            "requirements coverage",
+        ],
+    );
+    let has_acceptance_context = contains_any(
+        &lower,
+        &["交付", "验收", "最终", "完成", "acceptance", "delivery"],
+    );
+    if !has_test_green || !has_human_acceptance || !has_acceptance_context {
+        return None;
+    }
+
+    let body =
+        "交付验收时，绿色测试只是证据之一，还要从用户实际感知和需求覆盖判断质量。".to_string();
+
+    Some(Candidate {
+        title: title_from_body(&body),
+        body,
+        kind: "procedure".to_string(),
+        scope: "global".to_string(),
+        memory_tier: crate::candidate::MemoryTier::CollaborationPreference,
+        abstraction_of: None,
+        abstracted_from: None,
+        evidence: sentence.to_string(),
+        confidence: Some(0.89),
+        reason: Some(
+            "Matched durable delivery acceptance preference beyond green tests.".to_string(),
+        ),
+        matched_template: Some("delivery-acceptance".to_string()),
+    })
+}
+
+pub(super) fn planning_deduplication_candidate(sentence: &str) -> Option<Candidate> {
+    let lower = sentence.to_lowercase();
+    let mentions_planning = contains_any(&lower, &["规划", "计划", "github", "issue"]);
+    let mentions_dedup = contains_any(&lower, &["不要重复规划", "避免重复规划", "已经规划"]);
+    if !mentions_planning || !mentions_dedup {
+        return None;
+    }
+
+    let body =
+        "使用 GitHub 或计划文档规划时，先检查已有规划，只补充缺口，避免重复规划。".to_string();
+
+    Some(Candidate {
+        title: title_from_body(&body),
+        body,
+        kind: "procedure".to_string(),
+        scope: "global".to_string(),
+        memory_tier: crate::candidate::MemoryTier::CollaborationPreference,
+        abstraction_of: None,
+        abstracted_from: None,
+        evidence: sentence.to_string(),
+        confidence: Some(0.85),
+        reason: Some("Matched durable preference to avoid duplicating existing plans.".to_string()),
+        matched_template: Some("planning-deduplication".to_string()),
+    })
+}
+
+pub(super) fn parallel_agent_github_coordination_candidate(sentence: &str) -> Option<Candidate> {
+    let lower = sentence.to_lowercase();
+    let mentions_other_agent = contains_any(
+        &lower,
+        &["另一个agent", "另一个 agent", "其他agent", "other agent"],
+    );
+    let mentions_github = contains_any(&lower, &["github", "issue", "pr"]);
+    let mentions_overlap = contains_any(
+        &lower,
+        &["不要重复", "注意不要重复", "避免重复", "已经规划", "已经在"],
+    );
+    if !mentions_other_agent || !mentions_github || !mentions_overlap {
+        return None;
+    }
+
+    let body =
+        "多人或多 agent 并行使用 GitHub 工作时，先检查已有 Issue、PR 和规划，避免重复规划或重复修改。"
+            .to_string();
+
+    Some(Candidate {
+        title: title_from_body(&body),
+        body,
+        kind: "procedure".to_string(),
+        scope: "global".to_string(),
+        memory_tier: crate::candidate::MemoryTier::CollaborationPreference,
+        abstraction_of: None,
+        abstracted_from: None,
+        evidence: sentence.to_string(),
+        confidence: Some(0.86),
+        reason: Some(
+            "Matched durable coordination preference for parallel GitHub agent work.".to_string(),
+        ),
+        matched_template: Some("parallel-agent-github-coordination".to_string()),
+    })
+}
+
+pub(super) fn local_only_golden_set_candidate(sentence: &str) -> Option<Candidate> {
+    let lower = sentence.to_lowercase();
+    let mentions_golden = contains_any(&lower, &["golden set", "目标测试集", "测试集"]);
+    let mentions_local = contains_any(&lower, &["本地测试", "本地效果评估", "local"]);
+    let mentions_privacy = contains_any(
+        &lower,
+        &[
+            "不要把我自己的对话数据上传git",
+            "不要上传",
+            "真实数据",
+            "对话数据",
+            "git",
+        ],
+    );
+    if !mentions_golden || !mentions_local || !mentions_privacy {
+        return None;
+    }
+
+    let body =
+        "Golden Set 只用于本地效果评估；不要把真实对话数据提交或上传到 Git，链路测试使用合成或匿名样本。"
+            .to_string();
+
+    Some(Candidate {
+        title: title_from_body(&body),
+        body,
+        kind: "constraint".to_string(),
+        scope: "global".to_string(),
+        memory_tier: crate::candidate::MemoryTier::CollaborationPreference,
+        abstraction_of: None,
+        abstracted_from: None,
+        evidence: sentence.to_string(),
+        confidence: Some(0.94),
+        reason: Some(
+            "Matched durable privacy boundary for local Golden Set evaluation.".to_string(),
+        ),
+        matched_template: Some("local-only-golden-set".to_string()),
+    })
+}
+
+fn contains_any(text: &str, markers: &[&str]) -> bool {
+    markers.iter().any(|marker| text.contains(marker))
 }
 
 fn should_emit_collaboration_candidate(

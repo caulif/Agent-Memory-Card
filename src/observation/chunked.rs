@@ -450,6 +450,27 @@ fn looks_like_preview_noise(candidate: &extract::ExtractCandidatePreview) -> boo
         || (combined.contains("现在的架构")
             && (combined.contains("功能也实现不了") || combined.contains("体验也")))
         || (combined.contains("优化架构") && combined.contains("体验也很不"))
+        || combined.contains("do-not-keep-a-test-that")
+        || combined.contains("never-use-a-code-sent-by")
+        || combined.contains("never use a code sent by")
+        || combined.contains("expected-fail-because")
+        || combined.contains("if-easy-extract-small-handlers")
+        || combined.contains("pet-stage-warning")
+        || combined.contains("settings-panel-target-actions")
+        || combined.contains("preserve-existing-builder-responsibility")
+        || combined.contains("only checks implementation details")
+        || combined.contains("generated classes")
+        || combined.contains("css selectors in tests")
+        || combined.contains("我会先快速检查")
+        || combined.contains("我已经用-spec-driven-develop")
+        || combined.contains("我已经用 spec-driven-develop")
+        || combined.contains("reason-多处明确")
+        || combined.contains("接下来使用这个skills")
+        || combined.contains("接下来用这个skills")
+        || ((combined.contains("top-10") || combined.contains("top 10"))
+            && combined.contains("真实历史"))
+        || ((combined.contains("现有项目") || combined.contains("当前项目"))
+            && (combined.contains("全面提升") || combined.contains("实现")))
 }
 
 fn sort_previews_by_confidence(candidates: &mut [extract::ExtractCandidatePreview]) {
@@ -494,6 +515,15 @@ fn methodology_signal_score(body: &str) -> usize {
         "真实结果",
         "推理引擎",
         "检查有没有问题",
+        "可视化",
+        "mockup",
+        "对比图",
+        "流程图",
+        "架构图",
+        "开源项目",
+        "同类产品",
+        "借鉴",
+        "参考",
         "质量高不高",
         "自检",
         "dry-run",
@@ -668,6 +698,15 @@ fn looks_methodology_rich(body: &str) -> bool {
         "真实结果",
         "推理引擎",
         "检查有没有问题",
+        "可视化",
+        "mockup",
+        "对比图",
+        "流程图",
+        "架构图",
+        "开源项目",
+        "同类产品",
+        "借鉴",
+        "参考",
         "质量高不高",
         "自检",
         "dry-run",
