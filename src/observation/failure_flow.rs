@@ -12,6 +12,9 @@ pub(crate) enum FailureSignalKind {
     FalsePositiveNoise,
     PrivacyBoundary,
     ScopeBoundary,
+    RefactorCorrection,
+    TransferableWorkflow,
+    ReviewIterateLoop,
 }
 
 impl FailureSignalKind {
@@ -22,6 +25,9 @@ impl FailureSignalKind {
             Self::FalsePositiveNoise => "false_positive_noise",
             Self::PrivacyBoundary => "privacy_boundary",
             Self::ScopeBoundary => "scope_boundary",
+            Self::RefactorCorrection => "refactor_correction",
+            Self::TransferableWorkflow => "transferable_workflow",
+            Self::ReviewIterateLoop => "review_iterate_loop",
         }
     }
 }
@@ -103,6 +109,27 @@ pub(crate) fn summarize_failure_flow(observations: &[ObservationRecord]) -> Fail
             if looks_like_scope_boundary(&lower) {
                 signals.push(signal(
                     FailureSignalKind::ScopeBoundary,
+                    observation.id.clone(),
+                    line,
+                ));
+            }
+            if looks_like_refactor_correction(&lower) {
+                signals.push(signal(
+                    FailureSignalKind::RefactorCorrection,
+                    observation.id.clone(),
+                    line,
+                ));
+            }
+            if looks_like_transferable_workflow(&lower) {
+                signals.push(signal(
+                    FailureSignalKind::TransferableWorkflow,
+                    observation.id.clone(),
+                    line,
+                ));
+            }
+            if looks_like_review_iterate_loop(&lower) {
+                signals.push(signal(
+                    FailureSignalKind::ReviewIterateLoop,
                     observation.id.clone(),
                     line,
                 ));
@@ -205,6 +232,47 @@ fn looks_like_scope_boundary(lower: &str) -> bool {
     contains_any(lower, &["全局", "局部", "项目", "global", "local"])
         && contains_any(lower, &["分层", "边界", "不要污染", "区分", "scope"])
         && contains_any(lower, &["记忆", "memory", "卡片"])
+}
+
+fn looks_like_refactor_correction(lower: &str) -> bool {
+    contains_any(lower, &["重构", "拆分", "模块", "架构", "refactor"])
+        && contains_any(
+            lower,
+            &[
+                "纠偏",
+                "犯过的错",
+                "缺点",
+                "问题",
+                "质量太差",
+                "优化",
+                "改进",
+            ],
+        )
+        && contains_any(lower, &["经验", "吸取", "流程", "工作流", "边界", "高质量"])
+}
+
+fn looks_like_transferable_workflow(lower: &str) -> bool {
+    contains_any(
+        lower,
+        &[
+            "迁移到其他项目",
+            "其他项目",
+            "全局偏好",
+            "全局工作流",
+            "自己的工作流",
+            "可迁移",
+            "通用",
+        ],
+    ) && contains_any(
+        lower,
+        &["项目偏好", "特殊偏好", "流程", "模块", "记忆卡片", "固化"],
+    )
+}
+
+fn looks_like_review_iterate_loop(lower: &str) -> bool {
+    contains_any(lower, &["审核", "人工", "自己看", "真实数据", "真实历史"])
+        && contains_any(lower, &["分析问题", "解决方案", "修改", "优化", "反馈"])
+        && contains_any(lower, &["直到", "符合预期", "结果", "生成了什么", "测试"])
 }
 
 fn looks_like_generated_or_agent_chatter(lower: &str) -> bool {
@@ -318,5 +386,41 @@ mod tests {
         );
         assert!(material.contains("signal:privacy_boundary"), "{material}");
         assert!(material.contains("signal:scope_boundary"), "{material}");
+    }
+
+    #[test]
+    fn failure_flow_detects_refactor_transferable_and_review_loop_signals() {
+        let observations = vec![
+            observation(
+                "refactor",
+                "2026-01-01T00:00:00Z",
+                "我有几次重构和纠偏，这些都可以吸取经验，形成高质量工作流里的模块。",
+            ),
+            observation(
+                "transfer",
+                "2026-01-01T01:00:00Z",
+                "项目特殊偏好也可以提取或修改为全局偏好，迁移到其他项目或放进自己的工作流。",
+            ),
+            observation(
+                "review",
+                "2026-01-01T02:00:00Z",
+                "测试的时候必须看看真实数据上生成了什么记忆卡片，然后结合目标审核，分析问题和解决方案，修改优化直到符合预期。",
+            ),
+        ];
+
+        let material = summarize_failure_flow(&observations).to_extraction_material();
+
+        assert!(
+            material.contains("signal:refactor_correction"),
+            "{material}"
+        );
+        assert!(
+            material.contains("signal:transferable_workflow"),
+            "{material}"
+        );
+        assert!(
+            material.contains("signal:review_iterate_loop"),
+            "{material}"
+        );
     }
 }

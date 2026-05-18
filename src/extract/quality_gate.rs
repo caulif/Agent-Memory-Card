@@ -204,6 +204,9 @@ fn has_failure_flow_support(lower: &str) -> bool {
         || lower.contains("signal:false_positive_noise")
         || lower.contains("signal:privacy_boundary")
         || lower.contains("signal:scope_boundary")
+        || lower.contains("signal:refactor_correction")
+        || lower.contains("signal:transferable_workflow")
+        || lower.contains("signal:review_iterate_loop")
 }
 
 pub(crate) fn quality_skip_message(id: &str, decision: &QualityGateDecision) -> String {
@@ -393,7 +396,10 @@ fn looks_like_supported_failure_flow_workflow(lower: &str) -> bool {
             || lower.contains("signal:final_quality_correction")
             || lower.contains("signal:false_positive_noise")
             || lower.contains("signal:privacy_boundary")
-            || lower.contains("signal:scope_boundary"))
+            || lower.contains("signal:scope_boundary")
+            || lower.contains("signal:refactor_correction")
+            || lower.contains("signal:transferable_workflow")
+            || lower.contains("signal:review_iterate_loop"))
 }
 
 fn looks_like_durable_local_history_validation_workflow(lower: &str) -> bool {

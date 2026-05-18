@@ -60,6 +60,36 @@ pub(super) fn failure_flow_candidates(input: &str) -> Vec<Candidate> {
         ));
     }
 
+    if lower.contains("signal:refactor_correction") {
+        candidates.push(failure_flow_candidate(
+            "从重构和纠偏中沉淀流程模块",
+            "完成重构、架构调整或多轮纠偏后，复盘哪些做法可迁移为未来工作流模块；优先固化触发条件、操作步骤、验证方式和不适用边界。",
+            input,
+            "refactor-lessons",
+            0.86,
+        ));
+    }
+
+    if lower.contains("signal:transferable_workflow") {
+        candidates.push(failure_flow_candidate(
+            "把项目偏好抽象成可迁移工作流",
+            "审阅项目特殊偏好时，判断它背后的通用协作原则或工程流程；能迁移到其他项目的，改写成全局偏好或工作流模块，而不是保留项目实现细节。",
+            input,
+            "transferable-workflow",
+            0.87,
+        ));
+    }
+
+    if lower.contains("signal:review_iterate_loop") {
+        candidates.push(failure_flow_candidate(
+            "真实输出审核后继续迭代",
+            "优化提取或生成质量时，必须在真实数据 dry-run 后阅读生成的候选卡片，对照目标审核，分析问题和解决方案，再修改测试与实现直到结果符合预期。",
+            input,
+            "review-iterate-loop",
+            0.88,
+        ));
+    }
+
     candidates
 }
 

@@ -39,6 +39,7 @@ use incremental::{
 pub use replay::{ObservationReplayReport, replay_local_conversations};
 
 const DAILY_CANDIDATE_LIMIT: usize = 8;
+const REPLAY_CANDIDATE_LIMIT: usize = 16;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObservationRecord {
@@ -313,6 +314,37 @@ pub fn synthesize_observations_to_drafts_with_engine(
     dry_run: bool,
     engine: &str,
 ) -> Result<ObservationSynthesisReport> {
+    synthesize_observations_to_drafts_with_engine_and_limit(
+        project_root,
+        targets,
+        dry_run,
+        engine,
+        DAILY_CANDIDATE_LIMIT,
+    )
+}
+
+pub(crate) fn synthesize_observations_to_drafts_for_replay(
+    project_root: &Path,
+    targets: Vec<String>,
+    dry_run: bool,
+    engine: &str,
+) -> Result<ObservationSynthesisReport> {
+    synthesize_observations_to_drafts_with_engine_and_limit(
+        project_root,
+        targets,
+        dry_run,
+        engine,
+        REPLAY_CANDIDATE_LIMIT,
+    )
+}
+
+fn synthesize_observations_to_drafts_with_engine_and_limit(
+    project_root: &Path,
+    targets: Vec<String>,
+    dry_run: bool,
+    engine: &str,
+    candidate_limit: usize,
+) -> Result<ObservationSynthesisReport> {
     let observations = load_observations(project_root)?;
     let mut report = ObservationSynthesisReport {
         engine: engine.to_string(),
@@ -336,14 +368,14 @@ pub fn synthesize_observations_to_drafts_with_engine(
             &observations,
             targets.clone(),
             &source,
-            DAILY_CANDIDATE_LIMIT,
+            candidate_limit,
         )?,
         "llm" => chunked::extract_llm_chunks_to_report(
             project_root,
             &observations,
             targets.clone(),
             &source,
-            DAILY_CANDIDATE_LIMIT,
+            candidate_limit,
         )?,
         "claude-code" | "codex" => {
             let (prefiltered, filtered_material) = prefilter_agent_synthesis_material(
@@ -378,7 +410,7 @@ pub fn synthesize_observations_to_drafts_with_engine(
                         &observations,
                         targets.clone(),
                         &source,
-                        DAILY_CANDIDATE_LIMIT,
+                        candidate_limit,
                     )?
                 }
                 Err(error) => {
@@ -388,7 +420,7 @@ pub fn synthesize_observations_to_drafts_with_engine(
                         &observations,
                         targets.clone(),
                         &source,
-                        DAILY_CANDIDATE_LIMIT,
+                        candidate_limit,
                     )?
                 }
             }
@@ -398,7 +430,7 @@ pub fn synthesize_observations_to_drafts_with_engine(
             &observations,
             targets.clone(),
             &source,
-            DAILY_CANDIDATE_LIMIT,
+            candidate_limit,
         )?,
     };
     let synthesized_candidates = extracted

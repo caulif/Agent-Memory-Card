@@ -1431,4 +1431,35 @@ mod tests {
             "{report:#?}"
         );
     }
+
+    #[test]
+    fn high_value_extraction_surfaces_transferable_failure_lessons() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let input = "FailureFlowSummary:\n- signal:refactor_correction obs:a text:我有几次重构和纠偏，这些都可以吸取经验，形成高质量工作流里的模块。\n- signal:transferable_workflow obs:b text:项目特殊偏好也可以提取或修改为全局偏好，迁移到其他项目或放进自己的工作流。\n- signal:review_iterate_loop obs:c text:测试时必须看真实数据生成了什么记忆卡片，结合目标审核，分析问题和解决方案，修改优化直到符合预期。\n";
+
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            input,
+            vec!["codex".to_string()],
+            "failure flow prefilter",
+            Some("local".to_string()),
+            true,
+            8,
+        )
+        .expect("extract");
+
+        for template in [
+            "failure-flow:refactor-lessons",
+            "failure-flow:transferable-workflow",
+            "failure-flow:review-iterate-loop",
+        ] {
+            assert!(
+                report
+                    .candidates
+                    .iter()
+                    .any(|candidate| candidate.matched_template.as_deref() == Some(template)),
+                "{template}: {report:#?}"
+            );
+        }
+    }
 }

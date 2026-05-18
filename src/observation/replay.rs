@@ -9,7 +9,7 @@ use crate::fsutil;
 use super::conversation::{ConversationProjectMatch, conversation_project_match};
 use super::{
     CandidatePreviewText, ObservationImportReport, discover_local_conversation_files,
-    import_observation_text, synthesize_observations_to_drafts_with_engine,
+    import_observation_text, synthesize_observations_to_drafts_for_replay,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -81,7 +81,7 @@ pub fn replay_local_conversations(
     }
 
     let synthesized =
-        synthesize_observations_to_drafts_with_engine(&replay_root, targets, dry_run, engine)?;
+        synthesize_observations_to_drafts_for_replay(&replay_root, targets, dry_run, engine)?;
 
     Ok(ObservationReplayReport {
         engine: synthesized.engine,
