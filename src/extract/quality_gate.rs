@@ -30,6 +30,7 @@ pub(crate) fn evaluate_candidate_quality(
     );
     let lower = combined.to_lowercase();
     let candidate_text = format!("{}\n{}", candidate.title, candidate.body).to_lowercase();
+    let supported_failure_flow = is_supported_failure_flow_candidate(candidate, &lower);
 
     if candidate
         .matched_template
@@ -41,6 +42,19 @@ pub(crate) fn evaluate_candidate_quality(
             MemoryCardOperation::Noop,
             "unsupported-global-flow-inference",
             "Global-flow candidate lacks direct user, accepted-offer, repeated-pattern, or validation evidence.",
+        );
+    }
+
+    if candidate
+        .matched_template
+        .as_deref()
+        .is_some_and(|template| template.starts_with("failure-flow:"))
+        && !has_failure_flow_support(&lower)
+    {
+        return skip(
+            MemoryCardOperation::Noop,
+            "unsupported-failure-flow-inference",
+            "Failure-flow candidate lacks direct pipeline failure, quality correction, false-positive, privacy, or scope-boundary evidence.",
         );
     }
 
@@ -60,7 +74,7 @@ pub(crate) fn evaluate_candidate_quality(
         );
     }
 
-    if looks_like_code_analysis_praise(&lower) {
+    if !supported_failure_flow && looks_like_code_analysis_praise(&lower) {
         return skip(
             MemoryCardOperation::Noop,
             "code-analysis-noise",
@@ -68,7 +82,7 @@ pub(crate) fn evaluate_candidate_quality(
         );
     }
 
-    if looks_like_extraction_taxonomy_artifact(&lower) {
+    if !supported_failure_flow && looks_like_extraction_taxonomy_artifact(&lower) {
         return skip(
             MemoryCardOperation::Noop,
             "extraction-taxonomy-artifact",
@@ -84,7 +98,7 @@ pub(crate) fn evaluate_candidate_quality(
         );
     }
 
-    if looks_like_meta_discussion(&lower) {
+    if !supported_failure_flow && looks_like_meta_discussion(&lower) {
         return skip(
             MemoryCardOperation::Noop,
             "meta-discussion",
@@ -92,7 +106,7 @@ pub(crate) fn evaluate_candidate_quality(
         );
     }
 
-    if looks_like_temporary_task_constraint(&lower) {
+    if !supported_failure_flow && looks_like_temporary_task_constraint(&lower) {
         return skip(
             MemoryCardOperation::Noop,
             "temporary-task-constraint",
@@ -163,7 +177,17 @@ fn is_known_high_value_template(candidate: &Candidate) -> bool {
     ) || candidate
         .matched_template
         .as_deref()
-        .is_some_and(|template| template.starts_with("global-flow:"))
+        .is_some_and(|template| {
+            template.starts_with("global-flow:") || template.starts_with("failure-flow:")
+        })
+}
+
+fn is_supported_failure_flow_candidate(candidate: &Candidate, lower: &str) -> bool {
+    candidate
+        .matched_template
+        .as_deref()
+        .is_some_and(|template| template.starts_with("failure-flow:"))
+        && has_failure_flow_support(lower)
 }
 
 fn has_global_flow_support(lower: &str) -> bool {
@@ -172,6 +196,14 @@ fn has_global_flow_support(lower: &str) -> bool {
         || lower.contains("signal:repeated_pattern")
         || lower.contains("signal:validation_feedback")
         || lower.contains("signal:correction")
+}
+
+fn has_failure_flow_support(lower: &str) -> bool {
+    lower.contains("signal:pipeline_break")
+        || lower.contains("signal:final_quality_correction")
+        || lower.contains("signal:false_positive_noise")
+        || lower.contains("signal:privacy_boundary")
+        || lower.contains("signal:scope_boundary")
 }
 
 pub(crate) fn quality_skip_message(id: &str, decision: &QualityGateDecision) -> String {
@@ -295,6 +327,9 @@ fn looks_like_generation_quality_acceptance_chatter(lower: &str) -> bool {
     if looks_like_durable_local_history_validation_workflow(lower) {
         return false;
     }
+    if looks_like_supported_failure_flow_workflow(lower) {
+        return false;
+    }
     let generation_surface = [
         "prompt",
         "render",
@@ -350,6 +385,15 @@ fn looks_like_generation_quality_acceptance_chatter(lower: &str) -> bool {
     .any(|marker| lower.contains(marker));
 
     generation_surface && eval_surface && process_instruction
+}
+
+fn looks_like_supported_failure_flow_workflow(lower: &str) -> bool {
+    lower.contains("failureflowsummary:")
+        && (lower.contains("signal:pipeline_break")
+            || lower.contains("signal:final_quality_correction")
+            || lower.contains("signal:false_positive_noise")
+            || lower.contains("signal:privacy_boundary")
+            || lower.contains("signal:scope_boundary"))
 }
 
 fn looks_like_durable_local_history_validation_workflow(lower: &str) -> bool {
@@ -1129,6 +1173,21 @@ mod tests {
         );
 
         assert_eq!(decision.disposition, QualityDisposition::Keep);
+    }
+
+    #[test]
+    fn rejects_unsupported_failure_flow_candidate() {
+        let mut candidate = candidate(
+            "提取异常先定位链路断点",
+            "当记忆提取结果异常少、质量差或没有进入最终卡片阶段时，先定位链路断点。",
+        );
+        candidate.matched_template = Some("failure-flow:pipeline-break".to_string());
+        candidate.evidence = "FailureFlowSummary:\n- text:普通质量讨论，没有失败信号。".to_string();
+
+        let decision = evaluate_candidate_quality(&candidate, &ExtractionAction::new_candidate());
+
+        assert_eq!(decision.disposition, QualityDisposition::Skip);
+        assert_eq!(decision.flags, vec!["unsupported-failure-flow-inference"]);
     }
 
     #[test]

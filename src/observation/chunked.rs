@@ -7,6 +7,7 @@ use crate::candidate::MemoryTier;
 use crate::extract;
 
 use super::ObservationRecord;
+use super::failure_flow;
 use super::flow;
 
 pub(super) fn synthesis_material(observations: &[ObservationRecord], max_chars: usize) -> String {
@@ -72,6 +73,17 @@ pub(super) fn extract_local_chunks_to_report(
         source,
         max_candidates,
         "local".to_string(),
+        &mut merged,
+        &mut seen,
+    )?;
+
+    merge_failure_flow_candidates(
+        project_root,
+        observations,
+        targets.clone(),
+        source,
+        max_candidates,
+        Some("local".to_string()),
         &mut merged,
         &mut seen,
     )?;
@@ -328,6 +340,17 @@ pub(super) fn extract_llm_chunks_to_report(
         &mut seen,
     )?;
 
+    merge_failure_flow_candidates(
+        project_root,
+        observations,
+        targets.clone(),
+        source,
+        max_candidates,
+        None,
+        &mut merged,
+        &mut seen,
+    )?;
+
     if let Some(gold_snippets) = global_methodology_snippets(observations, 12) {
         let report = extract::extract_high_value_text_to_drafts(
             project_root,
@@ -437,6 +460,44 @@ fn merge_flow_candidates(
     let report = extract::extract_high_value_text_to_drafts(
         project_root,
         &flow_material,
+        targets,
+        &chunk_source,
+        provider,
+        true,
+        max_candidates,
+    )?;
+    merged.redacted |= report.redacted;
+    merged.skipped.extend(report.skipped);
+    for candidate in report.candidates {
+        if is_rejected_preview(&candidate) {
+            continue;
+        }
+        if seen.insert(candidate.id.clone()) {
+            merged.candidates.push(candidate);
+        }
+    }
+    Ok(())
+}
+
+fn merge_failure_flow_candidates(
+    project_root: &Path,
+    observations: &[ObservationRecord],
+    targets: Vec<String>,
+    source: &str,
+    max_candidates: usize,
+    provider: Option<String>,
+    merged: &mut extract::ExtractReport,
+    seen: &mut BTreeSet<String>,
+) -> Result<()> {
+    let failure_summary = failure_flow::summarize_failure_flow(observations);
+    if failure_summary.is_empty() {
+        return Ok(());
+    }
+    let failure_material = failure_summary.to_extraction_material();
+    let chunk_source = format!("{source}, failure flow prefilter");
+    let report = extract::extract_high_value_text_to_drafts(
+        project_root,
+        &failure_material,
         targets,
         &chunk_source,
         provider,
@@ -1147,6 +1208,49 @@ mod tests {
                     .as_deref()
                     .is_some_and(|template| template == "global-flow:real-history-validation")
             }),
+            "{report:#?}"
+        );
+    }
+
+    #[test]
+    fn local_chunk_extraction_surfaces_failure_flow_candidates() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let observations = vec![
+            observation(
+                "pipeline-break",
+                "2026-01-01T00:00:00Z",
+                "LLM induction 阶段返回的 JSON 被截断/格式不完整，解析失败了，所以没有进入最终 crystallize 卡片阶段。",
+            ),
+            observation(
+                "quality-correction",
+                "2026-01-01T01:00:00Z",
+                "不能只看指标，要自己看最终卡片质量。",
+            ),
+        ];
+
+        let report = extract_local_chunks_to_report(
+            temp.path(),
+            &observations,
+            vec!["codex".to_string()],
+            "test",
+            8,
+        )
+        .expect("report");
+
+        assert!(
+            report.candidates.iter().any(|candidate| {
+                candidate
+                    .matched_template
+                    .as_deref()
+                    .is_some_and(|template| template == "failure-flow:pipeline-break")
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report
+                .candidates
+                .iter()
+                .any(|candidate| candidate.body.contains("先定位链路断点")),
             "{report:#?}"
         );
     }

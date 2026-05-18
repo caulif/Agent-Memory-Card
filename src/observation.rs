@@ -17,6 +17,7 @@ use crate::textutil;
 mod agent_engine_impl;
 pub(crate) mod chunked;
 mod conversation;
+mod failure_flow;
 mod flow;
 mod incremental;
 mod replay;

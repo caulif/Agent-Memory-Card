@@ -54,13 +54,14 @@ pub use quality::{
 use atomic::split_atomic_sentences;
 use candidate_factory::{
     atomic_exception_candidate, classify_kind, delivery_acceptance_candidate, draft_id,
-    existing_flow_planning_candidate, extraction_metadata_for_chunk, global_flow_candidates,
-    high_value_prompt_candidate, infer_scope, local_only_golden_set_candidate,
-    looks_like_memory_card_signal, looks_like_rule, normalize_body,
-    normalize_project_improvement_body, parallel_agent_github_coordination_candidate,
-    planning_deduplication_candidate, principle_candidates,
-    project_startup_collaboration_candidate, scored_signal_candidate, self_verification_candidate,
-    speed_validation_cadence_candidate, title_from_body, title_from_project_improvement,
+    existing_flow_planning_candidate, extraction_metadata_for_chunk, failure_flow_candidates,
+    global_flow_candidates, high_value_prompt_candidate, infer_scope,
+    local_only_golden_set_candidate, looks_like_memory_card_signal, looks_like_rule,
+    normalize_body, normalize_project_improvement_body,
+    parallel_agent_github_coordination_candidate, planning_deduplication_candidate,
+    principle_candidates, project_startup_collaboration_candidate, scored_signal_candidate,
+    self_verification_candidate, speed_validation_cadence_candidate, title_from_body,
+    title_from_project_improvement,
 };
 use dedupe::dedupe_candidates;
 use llm_pipeline_impl::extract_llm_text_to_drafts;
@@ -736,7 +737,11 @@ fn extract_candidates_with_preferences(
     fallback_methodology_templates: bool,
 ) -> Vec<Candidate> {
     let mut candidates = Vec::new();
+    candidates.extend(failure_flow_candidates(input));
     candidates.extend(global_flow_candidates(input));
+    if is_structured_flow_material(input) {
+        return dedupe_candidates(candidates);
+    }
     if should_try_whole_input_candidate(input)
         && let Some(candidate) = project_startup_collaboration_candidate(input)
     {
@@ -862,7 +867,22 @@ fn extract_high_value_candidates_with_preferences(
     fallback_methodology_templates: bool,
 ) -> Vec<Candidate> {
     let mut candidates = Vec::new();
+    candidates.extend(failure_flow_candidates(input));
     candidates.extend(global_flow_candidates(input));
+    if is_structured_flow_material(input) {
+        let deduped = dedupe_candidates(candidates);
+        let selected = ranking::select_balanced_candidates(
+            &deduped,
+            max_candidates,
+            candidate_selection_score,
+            ranking::candidate_cluster_key,
+            |candidate| candidate.memory_tier.clone(),
+        );
+        return selected
+            .into_iter()
+            .filter_map(|index| deduped.get(index).cloned())
+            .collect();
+    }
     if should_try_whole_input_candidate(input)
         && let Some(candidate) = project_startup_collaboration_candidate(input)
     {
@@ -1016,6 +1036,10 @@ fn extract_high_value_candidates_with_preferences(
 
 fn should_try_whole_input_candidate(input: &str) -> bool {
     input.lines().filter(|line| !line.trim().is_empty()).count() <= 2 && input.len() <= 700
+}
+
+fn is_structured_flow_material(input: &str) -> bool {
+    input.contains("ConversationFlowSummary:") || input.contains("FailureFlowSummary:")
 }
 
 #[cfg(test)]
@@ -1317,6 +1341,94 @@ mod tests {
         assert!(
             report.candidates.is_empty(),
             "extraction taxonomy bullet should be filtered: {report:#?}"
+        );
+    }
+
+    #[test]
+    fn high_value_extraction_surfaces_failure_flow_pipeline_break_rule() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let input = "FailureFlowSummary:\n- signal:pipeline_break obs:a text:LLM induction JSON 被截断，解析失败，所以没有进入最终 crystallize 卡片阶段。\n- signal:final_quality_correction obs:b text:不能只看指标，要自己看最终卡片质量。\n";
+
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            input,
+            vec!["codex".to_string()],
+            "failure flow prefilter",
+            Some("local".to_string()),
+            true,
+            8,
+        )
+        .expect("extract");
+
+        assert!(
+            report
+                .candidates
+                .iter()
+                .any(|candidate| candidate.matched_template.as_deref()
+                    == Some("failure-flow:pipeline-break")),
+            "{report:#?}"
+        );
+        assert!(
+            report
+                .candidates
+                .iter()
+                .any(|candidate| candidate.body.contains("先定位链路断点")),
+            "{report:#?}"
+        );
+    }
+
+    #[test]
+    fn high_value_extraction_surfaces_failure_flow_boundary_rules() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let input = "FailureFlowSummary:\n- signal:false_positive_noise obs:a text:代码分析和抽取 taxonomy 不应该计入长期记忆。\n- signal:privacy_boundary obs:b text:真实历史 dry-run 只用于本地评估，不进入 Git 或 Golden Set。\n- signal:scope_boundary obs:c text:项目记忆和全局记忆要分层，避免局部流程污染全局记忆。\n";
+
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            input,
+            vec!["codex".to_string()],
+            "failure flow prefilter",
+            Some("local".to_string()),
+            true,
+            8,
+        )
+        .expect("extract");
+
+        for template in [
+            "failure-flow:false-positive-abstraction",
+            "failure-flow:local-only-regression",
+            "failure-flow:scope-boundary",
+        ] {
+            assert!(
+                report
+                    .candidates
+                    .iter()
+                    .any(|candidate| candidate.matched_template.as_deref() == Some(template)),
+                "{template}: {report:#?}"
+            );
+        }
+    }
+
+    #[test]
+    fn high_value_extraction_canonicalizes_design_stage_shorthand() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            "设计阶段：先提问、先澄清目标、先规划、从用户视角看。",
+            vec!["codex".to_string()],
+            "test",
+            Some("local".to_string()),
+            true,
+            8,
+        )
+        .expect("extract");
+
+        assert!(
+            report.candidates.iter().any(|candidate| {
+                candidate.scope == "global"
+                    && candidate.body
+                        == "设计阶段先提问、先澄清目标、先规划，并从用户视角检查方案。"
+            }),
+            "{report:#?}"
         );
     }
 }

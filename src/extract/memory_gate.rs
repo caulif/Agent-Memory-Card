@@ -177,6 +177,9 @@ fn looks_like_memory_pipeline_meta(lower: &str) -> bool {
     if looks_like_durable_local_history_validation_workflow(lower) {
         return false;
     }
+    if looks_like_supported_failure_flow_workflow(lower) {
+        return false;
+    }
     let candidate_pipeline_rule = lower.contains("候选记忆")
         || (lower.contains("候选质量") && lower.contains("候选数量"))
         || lower.contains("候选被判定为无长期价值")
@@ -202,6 +205,15 @@ fn looks_like_memory_pipeline_meta(lower: &str) -> bool {
         || (memory_pipeline_terms && lower.contains("候选"))
         || generic_planning_principle
         || generation_quality_acceptance
+}
+
+fn looks_like_supported_failure_flow_workflow(lower: &str) -> bool {
+    lower.contains("failureflowsummary:")
+        && (lower.contains("signal:pipeline_break")
+            || lower.contains("signal:final_quality_correction")
+            || lower.contains("signal:false_positive_noise")
+            || lower.contains("signal:privacy_boundary")
+            || lower.contains("signal:scope_boundary"))
 }
 
 fn looks_like_durable_local_history_validation_workflow(lower: &str) -> bool {
@@ -398,5 +410,18 @@ mod tests {
             decision("修改卡片改写器时，必须抽样审阅最终卡片，不要只看质量分。").disposition,
             MemoryGateDisposition::Reject
         );
+    }
+
+    #[test]
+    fn keeps_supported_failure_flow_workflow() {
+        let decision = evaluate_memory_candidate(
+            "提取异常先定位链路断点",
+            "当记忆提取结果异常少、质量差或没有进入最终卡片阶段时，先定位链路断点，包括候选召回、LLM induction、JSON 解析、质量门控和 crystallize。",
+            "FailureFlowSummary:\n- signal:pipeline_break obs:a text:LLM induction JSON 被截断，解析失败，所以没有进入最终 crystallize 卡片阶段。",
+            "procedure",
+            "global",
+        );
+
+        assert_eq!(decision.disposition, MemoryGateDisposition::Accept);
     }
 }

@@ -3,6 +3,88 @@ use crate::textutil;
 
 use super::{Candidate, chunk, classify, scoring, signals};
 
+pub(super) fn failure_flow_candidates(input: &str) -> Vec<Candidate> {
+    if !input.contains("FailureFlowSummary:") {
+        return Vec::new();
+    }
+    let lower = input.to_lowercase();
+    let mut candidates = Vec::new();
+
+    if lower.contains("signal:pipeline_break") {
+        candidates.push(failure_flow_candidate(
+            "提取异常先定位链路断点",
+            "当记忆提取结果异常少、质量差或没有进入最终卡片阶段时，先定位链路断点，包括候选召回、LLM induction、JSON 解析、质量门控和 crystallize，再决定是否调整 prompt。",
+            input,
+            "pipeline-break",
+            0.87,
+        ));
+    }
+
+    if lower.contains("signal:final_quality_correction") {
+        candidates.push(failure_flow_candidate(
+            "优化生成质量要检查最终卡片",
+            "优化生成链路时，除了看测试和指标，还要抽样阅读最终候选或 Memory Card，确认内容清楚、可触发、有边界并覆盖用户意图。",
+            input,
+            "final-quality-review",
+            0.86,
+        ));
+    }
+
+    if lower.contains("signal:false_positive_noise") {
+        candidates.push(failure_flow_candidate(
+            "实现细节不能直接固化为记忆",
+            "提炼记忆卡片时，不要把代码分析、实现细节、抽取 taxonomy 或单次执行说明直接固化为长期记忆；只有抽象成未来可触发的用户偏好或工作流时才保留。",
+            input,
+            "false-positive-abstraction",
+            0.84,
+        ));
+    }
+
+    if lower.contains("signal:privacy_boundary") {
+        candidates.push(failure_flow_candidate(
+            "真实历史失败样本转合成回归",
+            "真实历史 dry-run 暴露漏召、误召或低质量卡片时，不提交真实对话数据，而是把失败模式转成合成或匿名回归测试。",
+            input,
+            "local-only-regression",
+            0.88,
+        ));
+    }
+
+    if lower.contains("signal:scope_boundary") {
+        candidates.push(failure_flow_candidate(
+            "区分项目记忆和全局记忆",
+            "固化记忆卡片时，区分只适用于当前项目的流程规则和可跨项目复用的协作偏好，避免把局部实现流程污染到全局记忆。",
+            input,
+            "scope-boundary",
+            0.84,
+        ));
+    }
+
+    candidates
+}
+
+fn failure_flow_candidate(
+    title: &str,
+    body: &str,
+    evidence: &str,
+    template: &str,
+    confidence: f32,
+) -> Candidate {
+    Candidate {
+        title: title.to_string(),
+        body: body.to_string(),
+        kind: "procedure".to_string(),
+        scope: "global".to_string(),
+        memory_tier: crate::candidate::MemoryTier::CollaborationPreference,
+        abstraction_of: None,
+        abstracted_from: None,
+        evidence: evidence.to_string(),
+        confidence: Some(confidence),
+        reason: Some("Inferred from user corrections and extraction failure signals.".to_string()),
+        matched_template: Some(format!("failure-flow:{template}")),
+    }
+}
+
 pub(super) fn global_flow_candidates(input: &str) -> Vec<Candidate> {
     if !input.contains("ConversationFlowSummary:") {
         return Vec::new();
@@ -975,6 +1057,13 @@ fn normalize_methodology_body(sentence: &str) -> String {
         && (lower.contains("先 review") || lower.contains("先审阅") || lower.contains("review"))
     {
         return "先 review 再 merge，保留人工审阅边界，不要让 AI 直接固化规则。".to_string();
+    }
+    if lower.contains("设计阶段")
+        && lower.contains("先提问")
+        && lower.contains("先澄清目标")
+        && lower.contains("先规划")
+    {
+        return "设计阶段先提问、先澄清目标、先规划，并从用户视角检查方案。".to_string();
     }
     if (lower.contains("小改快测")
         || lower.contains("小修改快测")
