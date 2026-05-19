@@ -19,8 +19,8 @@ pub(crate) use super::project::{
     enforce_tauri_kernel_policy_for_project, get_app_state, get_project_assignment_view,
     get_project_candidate_inbox, get_project_dashboard, get_project_eval_run,
     get_project_memory_card_library, get_project_quality_view, get_project_review_inbox,
-    get_project_snapshot, import_project, plan_kernel_command, plan_kernel_command_input,
-    scan_projects,
+    get_project_skill_library, get_project_snapshot, import_project, plan_kernel_command,
+    plan_kernel_command_input, scan_projects,
 };
 pub(crate) use super::provider::{
     get_custom_provider_config, get_setup_checklist, save_custom_provider_config,

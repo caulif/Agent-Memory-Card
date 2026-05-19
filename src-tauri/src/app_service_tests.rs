@@ -241,6 +241,61 @@ use super::*;
     }
 
     #[test]
+    fn skill_library_shows_links_and_recommendations() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        config::save_skill_index(
+            temp.path(),
+            &config::SkillIndex {
+                generated_at: "test".to_string(),
+                skills: vec![config::SkillRecord {
+                    id: "skill:frontend".to_string(),
+                    name: "Frontend".to_string(),
+                    description: "Use when improving React frontend workflows".to_string(),
+                    source_path: ".agents/skills/frontend".to_string(),
+                    source_kind: "project".to_string(),
+                    source_hash: "hash".to_string(),
+                    warnings: Vec::new(),
+                }],
+            },
+        )
+        .expect("skill index");
+        config::add_mirror(temp.path(), "skill:frontend", "codex").expect("mirror skill");
+        seed_memory_card(temp.path(), "project:use-axios");
+        memory_card::add_memory_card(
+            temp.path(),
+            "project:frontend-workflow",
+            "Frontend Workflow",
+            "Run focused React tests before syncing frontend Skills.",
+            "procedure",
+            "project",
+            vec!["codex".to_string()],
+        )
+        .expect("workflow card");
+        attach_memory_card_to_skill(temp.path(), "project:use-axios", "skill:frontend")
+            .expect("attach memory_card");
+
+        let library = load_project_skill_library(temp.path()).expect("skill library");
+
+        assert_eq!(library.skills.len(), 1);
+        let skill = &library.skills[0];
+        assert_eq!(skill.id, "skill:frontend");
+        assert_eq!(skill.mirror_targets, vec!["codex"]);
+        assert_eq!(skill.linked_memory_cards[0].id, "project:use-axios");
+        assert!(
+            skill
+                .recommended_memory_cards
+                .iter()
+                .any(|card| card.id == "project:frontend-workflow")
+        );
+        assert!(
+            !skill
+                .recommended_memory_cards
+                .iter()
+                .any(|card| card.id == "project:use-axios")
+        );
+    }
+
+    #[test]
     fn install_catalog_package_service_installs_memory_card_with_targets() {
         let temp = tempfile::tempdir().expect("tempdir");
 

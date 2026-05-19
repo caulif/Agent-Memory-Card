@@ -109,6 +109,12 @@ export function buildKernelPlanForInvoke(commandName: string, args: Record<strin
       payload: { package_id: args.packageId, targets: args.targets ?? [] },
     };
   }
+  if (commandName === "attach_memory_card_to_skill") {
+    return {
+      command: { type: "attach-memory-card-to-skill", memory_card_id: args.memoryCardId, skill_id: args.skillId },
+      payload: { memory_card_id: args.memoryCardId, skill_id: args.skillId },
+    };
+  }
   if (commandName === "fuse_memory_cards_to_draft") {
     const input = (args.input ?? {}) as Record<string, unknown>;
     return {

@@ -1,4 +1,5 @@
 ﻿import { Bell, Boxes, CloudCog, GitBranch } from "lucide-react";
+import { LibraryBig } from "lucide-react";
 import type { CandidateRecord, DraftRecord, MemoryCardRecord, EditFormData, PageDef } from "../types/domain";
 
 export const KIND_OPTIONS = ["rule", "memory_card", "observation", "preference", "constraint", "procedure", "convention"];
@@ -8,6 +9,7 @@ export const EDITABLE_AGENTS = ["codex", "claude-code"];
 export const PAGES: PageDef[] = [
   { id: "drafts", label: "审阅", icon: Bell },
   { id: "memory-cards", label: "记忆卡", icon: Boxes },
+  { id: "skills", label: "技能", icon: LibraryBig },
   { id: "agents", label: "分配", icon: GitBranch },
   { id: "settings", label: "设置", icon: CloudCog },
 ];

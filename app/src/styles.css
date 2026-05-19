@@ -1645,6 +1645,89 @@ button:disabled {
   }
 }
 
+@media (max-width: 720px) {
+  body {
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+  }
+
+  .shell {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    height: auto;
+  }
+
+  .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    padding: 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .brand {
+    margin-bottom: 10px;
+  }
+
+  .sidebar-nav {
+    flex: none;
+    flex-direction: row;
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .sidebar-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .sidebar-nav .nav-item {
+    flex: 0 0 auto;
+    width: auto;
+    padding: 8px 10px;
+    white-space: nowrap;
+  }
+
+  .sidebar-footer {
+    display: none;
+  }
+
+  .workspace {
+    overflow: visible;
+  }
+
+  .preview-banner,
+  .topbar,
+  .overview-strip,
+  .content {
+    margin-left: 12px;
+    margin-right: 12px;
+  }
+
+  .preview-banner {
+    align-items: flex-start;
+  }
+
+  .topbar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 14px 12px 10px;
+  }
+
+  .topbar h1 {
+    font-size: 22px;
+    white-space: normal;
+  }
+
+  .topbar-right {
+    flex-wrap: wrap;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .spin {
     animation: none;

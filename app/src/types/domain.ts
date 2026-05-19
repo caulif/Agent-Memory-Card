@@ -1,7 +1,7 @@
 ﻿import type React from "react";
 
 // ===== 页面标识 =====
-export type PageId = "drafts" | "memory-cards" | "agents" | "settings";
+export type PageId = "drafts" | "memory-cards" | "skills" | "agents" | "settings";
 
 // ===== 项目注册 =====
 export type RegisteredProject = {
@@ -131,6 +131,24 @@ export type ProjectMemoryCardLibrary = {
   memory_cards: MemoryCardRecord[];
   global_memory_cards: MemoryCardRecord[];
   catalog_status: { items: CatalogItem[] };
+};
+
+export type ProjectSkillView = {
+  id: string;
+  name: string;
+  description: string;
+  source_path: string;
+  source_kind: string;
+  source_hash: string;
+  warnings: string[];
+  mirror_targets: string[];
+  linked_memory_cards: MemoryCardRecord[];
+  recommended_memory_cards: MemoryCardRecord[];
+};
+
+export type ProjectSkillLibrary = {
+  project_path: string;
+  skills: ProjectSkillView[];
 };
 
 export type ProjectAssignmentView = {

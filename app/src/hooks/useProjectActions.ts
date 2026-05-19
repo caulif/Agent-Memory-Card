@@ -156,6 +156,7 @@ export function useProjectActions({
         "set_memory_card_targets", "clear_memory_card_targets", "update_memory_card", "delete_memory_card",
         "set_agent_enabled", "merge_drafts", "merge_memory_cards",
         "fuse_memory_cards_to_draft",
+        "attach_memory_card_to_skill",
         "promote_memory_card_to_global", "install_global_memory_card_to_project",
         "sync_project",
         "import_artifact_drifts",

@@ -188,6 +188,13 @@ pub fn get_project_memory_card_library(
 }
 
 #[tauri::command]
+pub fn get_project_skill_library(
+    project_path: String,
+) -> CommandResult<app_service::ProjectSkillLibrary> {
+    app_service::load_project_skill_library(Path::new(&project_path)).map_err(error_to_string)
+}
+
+#[tauri::command]
 pub fn get_project_assignment_view(
     project_path: String,
 ) -> CommandResult<app_service::ProjectAssignmentView> {

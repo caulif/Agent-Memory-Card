@@ -141,6 +141,7 @@ pub fn run() {
             commands::project::get_project_candidate_inbox,
             commands::project::get_project_review_inbox,
             commands::project::get_project_memory_card_library,
+            commands::project::get_project_skill_library,
             commands::project::get_project_assignment_view,
             commands::project::get_project_quality_view,
             commands::project::get_project_eval_run,

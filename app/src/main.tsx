@@ -11,7 +11,7 @@ import { useProjectActions } from "./hooks/useProjectActions";
 import { useProjectReadModels } from "./hooks/useProjectReadModels";
 import { useProjectSelection } from "./hooks/useProjectSelection";
 import { JobCenter } from "./components/JobCenter";
-import { Agents, Drafts, ProjectOverviewStrip, Settings, MemoryCards } from "./components/project-pages";
+import { Agents, Drafts, ProjectOverviewStrip, Settings, MemoryCards, Skills } from "./components/project-pages";
 import { ActionButton, EmptyState, Panel, StatusList, TaskProgressBar } from "./components/common";
 import {
   AppWindow,
@@ -95,6 +95,7 @@ const tauriRuntimeHint = "未连接到 Tauri 运行时。请在项目根目录�
 const PAGE_DISPLAY: Record<PageId, { label: string; enLabel: string }> = {
   drafts: { label: "审阅", enLabel: "Draft Review" },
   "memory-cards": { label: "记忆卡", enLabel: "Memory Card Library" },
+  skills: { label: "技能", enLabel: "Skills Library" },
   agents: { label: "分配", enLabel: "Memory Card Loadout" },
   settings: { label: "设置", enLabel: "Settings" },
 };
@@ -118,6 +119,7 @@ function App() {
     reviewInbox,
     setReviewInbox,
     memory_cardLibrary,
+    skillLibrary,
     assignmentView,
     qualityView,
     evalRunView,
@@ -474,6 +476,17 @@ function App() {
                       onRefresh={() => {
                         void loadReadModelsForPage(selectedProject, "memory-cards");
                       }}
+                    />
+                  )}
+                  {page === "skills" && (
+                    <Skills
+                      snapshot={snapshot}
+                      skillLibrary={skillLibrary}
+                      memoryLibrary={memory_cardLibrary}
+                      quality={qualityView}
+                      pendingAction={pendingAction}
+                      disabled={!skillLibrary && !snapshot}
+                      onAction={projectAction}
                     />
                   )}
                   {page === "agents" && (

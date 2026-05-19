@@ -5,6 +5,7 @@
   ProjectReviewInbox,
   ProjectCandidateInbox,
   ProjectMemoryCardLibrary,
+  ProjectSkillLibrary,
   ProjectAssignmentView,
   ProjectEvalRunView,
   ProjectQualityView,
@@ -251,6 +252,39 @@ export function createDemoProjectMemoryCardLibrary(projectPath: string): Project
     memory_cards: [...snapshot.memory_cards],
     global_memory_cards: [...(snapshot.global_memory_cards ?? [])],
     catalog_status: snapshot.catalog_status,
+  };
+}
+
+export function createDemoProjectSkillLibrary(projectPath: string): ProjectSkillLibrary {
+  const snapshot = createDemoProjectSnapshot(projectPath);
+  return {
+    project_path: snapshot.project_path,
+    skills: [
+      {
+        id: "project:obsidian-markdown",
+        name: "obsidian-markdown",
+        description: "Use when editing Obsidian notes with wikilinks, callouts, embeds, and frontmatter.",
+        source_path: `${snapshot.project_path}/.github/obsidian-skills/skills/obsidian-markdown`,
+        source_kind: "project",
+        source_hash: "demo-hash-obsidian-markdown",
+        warnings: [],
+        mirror_targets: ["codex", "claude-code"],
+        linked_memory_cards: [snapshot.memory_cards[0]!],
+        recommended_memory_cards: [snapshot.memory_cards[1]!],
+      },
+      {
+        id: "project:json-canvas",
+        name: "json-canvas",
+        description: "Use when creating or editing JSON Canvas files.",
+        source_path: `${snapshot.project_path}/.github/obsidian-skills/skills/json-canvas`,
+        source_kind: "project",
+        source_hash: "demo-hash-json-canvas",
+        warnings: ["description is short; agents may not dispatch it reliably"],
+        mirror_targets: ["codex"],
+        linked_memory_cards: [],
+        recommended_memory_cards: snapshot.memory_cards,
+      },
+    ],
   };
 }
 

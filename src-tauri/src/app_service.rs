@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::thread;
 
@@ -42,6 +43,26 @@ pub struct ProjectMemoryCardLibrary {
     pub memory_cards: Vec<memory_card::MemoryCardRecord>,
     pub global_memory_cards: Vec<memory_card::MemoryCardRecord>,
     pub catalog_status: catalog::CatalogStatus,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProjectSkillLibrary {
+    pub project_path: String,
+    pub skills: Vec<ProjectSkillView>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProjectSkillView {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub source_path: String,
+    pub source_kind: String,
+    pub source_hash: String,
+    pub warnings: Vec<String>,
+    pub mirror_targets: Vec<String>,
+    pub linked_memory_cards: Vec<memory_card::MemoryCardRecord>,
+    pub recommended_memory_cards: Vec<memory_card::MemoryCardRecord>,
 }
 
 #[derive(Debug, Serialize)]
@@ -385,6 +406,71 @@ pub fn load_project_memory_card_library(
         global_memory_cards: memory_card::load_global_memory_cards(home)?,
         catalog_status: catalog::catalog_status(&root)?,
     })
+}
+
+pub fn load_project_skill_library(project_root: &Path) -> anyhow::Result<ProjectSkillLibrary> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    let project = config::load_or_default_project_config(&root)?;
+    let index = config::load_skill_index(&root)?;
+    let memory_cards = memory_card::load_memory_cards(&root)?;
+
+    let skills = index
+        .skills
+        .into_iter()
+        .map(|skill| {
+            let linked_ids = project
+                .skills
+                .supplements
+                .iter()
+                .find(|supplement| supplement.skill == skill.id)
+                .map(|supplement| supplement.memory_cards.iter().cloned().collect::<BTreeSet<_>>())
+                .unwrap_or_default();
+            let mirror_targets = project
+                .skills
+                .mirrors
+                .iter()
+                .find(|mirror| mirror.reference == skill.id)
+                .map(|mirror| mirror.targets.clone())
+                .unwrap_or_default();
+            let linked_memory_cards = memory_cards
+                .iter()
+                .filter(|record| linked_ids.contains(&record.id))
+                .cloned()
+                .collect::<Vec<_>>();
+            let recommended_memory_cards = memory_cards
+                .iter()
+                .filter(|record| !linked_ids.contains(&record.id))
+                .filter(|record| memory_card_recommends_for_skill(record))
+                .cloned()
+                .collect::<Vec<_>>();
+
+            ProjectSkillView {
+                id: skill.id,
+                name: skill.name,
+                description: skill.description,
+                source_path: skill.source_path,
+                source_kind: skill.source_kind,
+                source_hash: skill.source_hash,
+                warnings: skill.warnings,
+                mirror_targets,
+                linked_memory_cards,
+                recommended_memory_cards,
+            }
+        })
+        .collect();
+
+    Ok(ProjectSkillLibrary {
+        project_path: fsutil::path_to_slash(&root),
+        skills,
+    })
+}
+
+fn memory_card_recommends_for_skill(record: &memory_card::MemoryCardRecord) -> bool {
+    matches!(record.activation.as_str(), "skill")
+        || matches!(
+            record.kind.as_str(),
+            "procedure" | "workflow" | "template" | "supplement"
+        )
 }
 
 pub fn load_project_assignment_view(project_root: &Path) -> anyhow::Result<ProjectAssignmentView> {

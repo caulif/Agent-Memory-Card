@@ -3,6 +3,8 @@ import { readModelRefreshPagesForMutation } from "../project-read-models";
 import { readModelCommandsForPage } from "../project-read-models";
 import { buildKernelPlanForInvoke } from "./kernel-plan";
 
+const ALL_PROJECT_PAGES = ["drafts", "memory-cards", "skills", "agents"];
+
 describe("kernel mutation planning", () => {
   test("plans clear Memory Card target mutations and refreshes assignment views", () => {
     expect(buildKernelPlanForInvoke("clear_memory_card_targets", { agent: "codex" })).toEqual({
@@ -19,7 +21,7 @@ describe("kernel mutation planning", () => {
       payload: {},
     });
 
-    expect(readModelRefreshPagesForMutation("clear_project_history")).toEqual(["drafts", "memory-cards", "agents"]);
+    expect(readModelRefreshPagesForMutation("clear_project_history")).toEqual(ALL_PROJECT_PAGES);
   });
 
   test("plans Memory Card deletion and refreshes library plus assignments", () => {
@@ -28,7 +30,7 @@ describe("kernel mutation planning", () => {
       payload: { id: "project:use-axios" },
     });
 
-    expect(readModelRefreshPagesForMutation("delete_memory_card")).toEqual(["memory-cards", "agents"]);
+    expect(readModelRefreshPagesForMutation("delete_memory_card")).toEqual(["memory-cards", "skills", "agents"]);
   });
 
   test("plans Memory Card lifecycle tag updates", () => {
@@ -39,15 +41,11 @@ describe("kernel mutation planning", () => {
       payload: { id: "project:review-boundary", input },
     });
 
-    expect(readModelRefreshPagesForMutation("update_memory_card")).toEqual(["memory-cards", "agents"]);
+    expect(readModelRefreshPagesForMutation("update_memory_card")).toEqual(["memory-cards", "skills", "agents"]);
   });
 
   test("refreshes all project-facing read models after syncing agent files", () => {
-    expect(readModelRefreshPagesForMutation("sync_project")).toEqual([
-      "drafts",
-      "memory-cards",
-      "agents",
-    ]);
+    expect(readModelRefreshPagesForMutation("sync_project")).toEqual(ALL_PROJECT_PAGES);
   });
 
   test("plans artifact drift import and refreshes review-facing views", () => {
@@ -56,11 +54,7 @@ describe("kernel mutation planning", () => {
       payload: {},
     });
 
-    expect(readModelRefreshPagesForMutation("import_artifact_drifts")).toEqual([
-      "drafts",
-      "memory-cards",
-      "agents",
-    ]);
+    expect(readModelRefreshPagesForMutation("import_artifact_drifts")).toEqual(ALL_PROJECT_PAGES);
   });
 
   test("plans explicit artifact drift keep and discard resolutions", () => {
@@ -73,16 +67,8 @@ describe("kernel mutation planning", () => {
       payload: {},
     });
 
-    expect(readModelRefreshPagesForMutation("keep_artifact_drifts")).toEqual([
-      "drafts",
-      "memory-cards",
-      "agents",
-    ]);
-    expect(readModelRefreshPagesForMutation("discard_artifact_drifts")).toEqual([
-      "drafts",
-      "memory-cards",
-      "agents",
-    ]);
+    expect(readModelRefreshPagesForMutation("keep_artifact_drifts")).toEqual(ALL_PROJECT_PAGES);
+    expect(readModelRefreshPagesForMutation("discard_artifact_drifts")).toEqual(ALL_PROJECT_PAGES);
   });
 
   test("plans file-scoped artifact drift resolutions", () => {
@@ -98,11 +84,7 @@ describe("kernel mutation planning", () => {
       command: { type: "discard-artifact-drifts" },
       payload: { artifact_path: "AGENTS.md" },
     });
-    expect(readModelRefreshPagesForMutation("import_artifact_drift_path")).toEqual([
-      "drafts",
-      "memory-cards",
-      "agents",
-    ]);
+    expect(readModelRefreshPagesForMutation("import_artifact_drift_path")).toEqual(ALL_PROJECT_PAGES);
   });
 
   test("plans Memory Card fusion as a reviewable draft", () => {
@@ -118,11 +100,26 @@ describe("kernel mutation planning", () => {
       payload: { input },
     });
 
-    expect(readModelRefreshPagesForMutation("fuse_memory_cards_to_draft")).toEqual([
-      "drafts",
-      "memory-cards",
-      "agents",
-    ]);
+    expect(readModelRefreshPagesForMutation("fuse_memory_cards_to_draft")).toEqual(ALL_PROJECT_PAGES);
+  });
+
+  test("plans attaching Memory Cards as Skill supplements", () => {
+    expect(buildKernelPlanForInvoke("attach_memory_card_to_skill", {
+      memoryCardId: "project:frontend-workflow",
+      skillId: "project:obsidian-markdown",
+    })).toEqual({
+      command: {
+        type: "attach-memory-card-to-skill",
+        memory_card_id: "project:frontend-workflow",
+        skill_id: "project:obsidian-markdown",
+      },
+      payload: {
+        memory_card_id: "project:frontend-workflow",
+        skill_id: "project:obsidian-markdown",
+      },
+    });
+
+    expect(readModelRefreshPagesForMutation("attach_memory_card_to_skill")).toEqual(ALL_PROJECT_PAGES);
   });
 
   test("loads closure read models on the review page", () => {
@@ -133,6 +130,14 @@ describe("kernel mutation planning", () => {
       "get_project_assignment_view",
       "get_project_quality_view",
       "get_project_eval_run",
+    ]);
+  });
+
+  test("loads Skill Library read models on the Skills page", () => {
+    expect(readModelCommandsForPage("skills")).toEqual([
+      "get_project_skill_library",
+      "get_project_memory_card_library",
+      "get_project_quality_view",
     ]);
   });
 });

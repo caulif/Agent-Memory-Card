@@ -16,6 +16,7 @@ import type {
   ProjectQualityView,
   ProjectReviewInbox,
   ProjectMemoryCardLibrary,
+  ProjectSkillLibrary,
   ProjectSnapshot,
   MemoryCardRecord,
   SetupChecklistReport,
@@ -43,6 +44,10 @@ export function getProjectReviewInbox(projectPath: string) {
 
 export function getProjectMemoryCardLibrary(projectPath: string) {
   return invoke<ProjectMemoryCardLibrary>("get_project_memory_card_library", { projectPath });
+}
+
+export function getProjectSkillLibrary(projectPath: string) {
+  return invoke<ProjectSkillLibrary>("get_project_skill_library", { projectPath });
 }
 
 export function getProjectAssignmentView(projectPath: string) {
