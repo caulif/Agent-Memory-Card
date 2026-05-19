@@ -112,6 +112,8 @@ export function MemoryCards({
     () => buildMemoryGovernanceBatchActions(filteredProject, activeGovernance, assignment, allMemoryCards),
     [activeGovernance, allMemoryCards, assignment, filteredProject],
   );
+  const activeFilterLabel = governanceFiltersLabel(activeGovernance);
+  const priorityIssue = pickGovernancePriority(governanceSummary);
   const governanceFilters: Array<{ id: MemoryGovernanceFilter; label: string }> = [
     { id: "all", label: "全部治理" },
     { id: "needs-review", label: "需复核" },
@@ -163,6 +165,21 @@ export function MemoryCards({
             </div>
           </section>
 
+          <section className={`memory-priority-card ${priorityIssue.tone}`} aria-label="Memory Card 下一步">
+            <div>
+              <span>下一步</span>
+              <strong>{priorityIssue.label}</strong>
+              <p>{priorityIssue.detail}</p>
+            </div>
+            <button
+              className="secondary-action"
+              type="button"
+              onClick={() => setActiveGovernance(priorityIssue.filter)}
+            >
+              查看相关卡片
+            </button>
+          </section>
+
           {allTags.length > 0 ? (
             <nav className="tag-filter" aria-label="按标签筛选 Memory Card">
               <button
@@ -193,6 +210,25 @@ export function MemoryCards({
               </button>
             ))}
           </nav>
+          <div className="filter-summary-row">
+            <span>
+              当前显示 {filteredProject.length}/{projectMemoryCards.length} 张项目卡片
+              {activeGovernance !== "all" ? ` · ${activeFilterLabel}` : ""}
+              {activeTag !== "all" ? ` · 标签 ${activeTag}` : ""}
+            </span>
+            {(activeGovernance !== "all" || activeTag !== "all") ? (
+              <button
+                className="ghost-action"
+                type="button"
+                onClick={() => {
+                  setActiveGovernance("all");
+                  setActiveTag("all");
+                }}
+              >
+                清除筛选
+              </button>
+            ) : null}
+          </div>
 
           <MemoryGovernanceBatchBar
             actions={batchActions}
@@ -203,7 +239,10 @@ export function MemoryCards({
           />
 
           {filtered.length === 0 ? (
-            <p className="filter-note">当前标签筛选条件下暂无匹配的 Memory Card。</p>
+            <EmptyState
+              title="没有匹配的 Memory Card"
+              description="当前筛选条件没有结果。清除筛选后可查看全部项目卡片，或先批准新的 Suggestion。"
+            />
           ) : null}
 
           {filteredProject.length > 0 ? (
@@ -275,6 +314,71 @@ export function MemoryCards({
       )}
     </div>
   );
+}
+
+function governanceFiltersLabel(filter: MemoryGovernanceFilter): string {
+  switch (filter) {
+    case "needs-review":
+      return "需复核";
+    case "conflicts":
+      return "疑似重复";
+    case "unassigned":
+      return "未分配";
+    case "missing-source":
+      return "缺来源";
+    case "dormant":
+      return "休眠";
+    case "expired":
+      return "过期";
+    default:
+      return "全部治理";
+  }
+}
+
+function pickGovernancePriority(summary: ReturnType<typeof buildMemoryGovernanceSummary>): {
+  label: string;
+  detail: string;
+  filter: MemoryGovernanceFilter;
+  tone: "ready" | "attention" | "blocked";
+} {
+  if (summary.missingSource > 0) {
+    return {
+      label: "补齐来源证据",
+      detail: `${summary.missingSource} 张卡片缺少可追溯来源，建议先复核再同步到 Agent 文件。`,
+      filter: "missing-source",
+      tone: "blocked",
+    };
+  }
+  if (summary.conflicts > 0) {
+    return {
+      label: "处理疑似重复",
+      detail: `${summary.conflicts} 张卡片可能表达相近规则，先合并能降低 Agent 读取噪音。`,
+      filter: "conflicts",
+      tone: "attention",
+    };
+  }
+  if (summary.unassigned > 0) {
+    return {
+      label: "配置 Agent Loadout",
+      detail: `${summary.unassigned} 张卡片还没有分配给 Codex 或 Claude Code。`,
+      filter: "unassigned",
+      tone: "attention",
+    };
+  }
+  if (summary.needsReview > 0) {
+    return {
+      label: "复核不稳定卡片",
+      detail: `${summary.needsReview} 张卡片需要人工确认是否仍然有效。`,
+      filter: "needs-review",
+      tone: "attention",
+    };
+  }
+  return {
+    label: "治理状态良好",
+    detail: "当前项目卡片没有明显治理阻塞，可以继续分配 Loadout 或预览 Artifact。",
+    filter: "all",
+    tone: "ready",
+  };
 }
 
 function dedupeMemoryCards(

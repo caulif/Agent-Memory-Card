@@ -85,6 +85,11 @@ export function Drafts({
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = React.useState<string | null>(null);
 
+  React.useEffect(() => {
+    if (selectedCandidateId && allCandidates.some((candidate) => candidate.id === selectedCandidateId)) return;
+    setSelectedCandidateId(allCandidates[0]?.id ?? null);
+  }, [allCandidates, selectedCandidateId]);
+
   function startEdit(draft: (typeof drafts)[number]) {
     setEditingId(draft.id);
   }
@@ -176,9 +181,10 @@ export function Drafts({
           </div>
 
           {visibleCandidates.length === 0 ? (
-            <p className="empty" style={{ padding: "20px 0", textAlign: "center" }}>
-              暂无建议。
-            </p>
+            <EmptyState
+              title="还没有待审 Suggestion"
+              description="先运行提炼建议；系统会从本地历史里找出可复用偏好、约束和流程，再放到这里等待你确认。"
+            />
           ) : (
             <div className="candidate-queue">
               {visibleCandidates.map((candidate) => {
@@ -223,6 +229,7 @@ export function Drafts({
                   <div className="candidate-queue-evidence">
                     <span>{evidence.recurrenceLabel}</span>
                     <span>{evidence.riskLabel}</span>
+                    <span>{evidence.actionLabel}</span>
                   </div>
                 </article>
                 );
@@ -249,9 +256,14 @@ export function Drafts({
               />
             </>
           ) : (
-            <div className="drafts-column-head">
-              <h3>审阅详情</h3>
-              <EmptyState title="选择一个建议" description="从左侧建议队列中选择一条建议来查看证据、风险和操作。" />
+            <div className="review-onboarding-card">
+              <strong>审阅从证据开始</strong>
+              <p>左侧第一条建议会自动打开。批准前先确认来源、风险和将要写入的 Artifact 影响。</p>
+              <ol>
+                <li>确认它来自真实历史，而不是一次性闲聊。</li>
+                <li>必要时编辑措辞，让 Memory Card 更像可长期复用的规则。</li>
+                <li>批准后去 Loadout 分配给 Codex 或 Claude Code。</li>
+              </ol>
             </div>
           )}
         </div>
@@ -582,6 +594,14 @@ function CandidateDetail({
         {candidateBrief}
       </p>
       <div className="review-step-stack" aria-label="审阅步骤">
+        <section className={`review-decision-summary ${evidenceSummary.riskTone}`}>
+          <div>
+            <span>建议判断</span>
+            <strong>{evidenceSummary.riskLabel}</strong>
+            <p>{evidenceSummary.recurrenceLabel} · {evidenceSummary.artifactImpactLabel}</p>
+          </div>
+          <span>{evidenceSummary.confidenceLabel}</span>
+        </section>
         <section className="review-step">
           <span>1</span>
           <div>

@@ -92,12 +92,24 @@ export type WorkflowContractState = {
   productTerms: WorkflowProductTerm[];
   stages: WorkflowStage[];
   warnings: WorkflowWarning[];
+  completedStageCount: number;
+  progressPercent: number;
+  currentStage?: WorkflowStage;
   primaryAction: {
     id: WorkflowPrimaryAction;
     label: string;
     detail: string;
     targetPage?: "drafts" | "memory-cards" | "agents" | "settings";
   };
+};
+
+export type ProductQualitySummary = {
+  title: string;
+  detail: string;
+  tone: "ready" | "attention" | "blocked";
+  primaryActionLabel: string;
+  progressPercent: number;
+  stats: Array<{ label: string; value: number; tone?: "attention" | "blocked" }>;
 };
 
 export type WorkflowWarning = {
@@ -167,7 +179,7 @@ export function buildWorkflowContractState(input: WorkflowContractInput): Workfl
   const stages: WorkflowStage[] = [
     {
       id: "select-project",
-      productLabel: "Select Project",
+      productLabel: "选择项目",
       implementationTerms: ["ProjectRegistry", "ProjectDashboard"],
       primaryAction: "select-project",
       done: input.hasProject,
@@ -177,7 +189,7 @@ export function buildWorkflowContractState(input: WorkflowContractInput): Workfl
     },
     {
       id: "discover",
-      productLabel: "Discover Suggestions",
+      productLabel: "提炼建议",
       implementationTerms: ["Observation", "Candidate", "Draft"],
       primaryAction: "run-evolution",
       done: candidateCount > 0 || draftCount > 0 || observationCount > 0 || hasApprovedCards,
@@ -189,7 +201,7 @@ export function buildWorkflowContractState(input: WorkflowContractInput): Workfl
     },
     {
       id: "review",
-      productLabel: "Review Suggestions",
+      productLabel: "审阅建议",
       implementationTerms: ["Candidate", "Draft", "Review Inbox"],
       primaryAction: "review-suggestions",
       done: hasReviewedSuggestions,
@@ -199,7 +211,7 @@ export function buildWorkflowContractState(input: WorkflowContractInput): Workfl
     },
     {
       id: "approve",
-      productLabel: "Approve Memory Cards",
+      productLabel: "批准卡片",
       implementationTerms: ["DraftRecord", "MemoryCardRecord"],
       primaryAction: "approve-memory-cards",
       done: hasApprovedCards,
@@ -209,7 +221,7 @@ export function buildWorkflowContractState(input: WorkflowContractInput): Workfl
     },
     {
       id: "loadout",
-      productLabel: "Assign Agent Loadout",
+      productLabel: "配置 Loadout",
       implementationTerms: ["Assignment Matrix", "target_matrix"],
       primaryAction: "assign-loadout",
       done: hasLoadoutReady,
@@ -219,7 +231,7 @@ export function buildWorkflowContractState(input: WorkflowContractInput): Workfl
     },
     {
       id: "artifact-preview",
-      productLabel: "Preview Artifacts",
+      productLabel: "预览 Artifact",
       implementationTerms: ["BuildPreview", "ArtifactPreviewRow"],
       primaryAction: hasBlockingDrift ? "resolve-artifact-drift" : "preview-artifacts",
       done: hasArtifactActions && !hasBlockingDrift,
@@ -229,7 +241,7 @@ export function buildWorkflowContractState(input: WorkflowContractInput): Workfl
     },
     {
       id: "sync",
-      productLabel: "Sync Artifacts",
+      productLabel: "同步文件",
       implementationTerms: ["sync_project", "AGENTS.md", "CLAUDE.md"],
       primaryAction: "sync-artifacts",
       done: false,
@@ -239,7 +251,7 @@ export function buildWorkflowContractState(input: WorkflowContractInput): Workfl
     },
     {
       id: "verify",
-      productLabel: "Verify And Recover",
+      productLabel: "验证恢复",
       implementationTerms: ["Rule CI", "StatusReport", "JobCenter"],
       primaryAction: "monitor-jobs",
       done: false,
@@ -249,9 +261,15 @@ export function buildWorkflowContractState(input: WorkflowContractInput): Workfl
     },
   ];
 
+  const currentStage = chooseCurrentWorkflowStage(stages);
+  const completedStageCount = stages.filter((stage) => stage.done).length;
+
   return {
     productTerms: workflowProductTerms,
     stages,
+    completedStageCount,
+    progressPercent: Math.round((completedStageCount / stages.length) * 100),
+    currentStage,
     warnings: buildWorkflowWarnings({
       candidateCount,
       draftCount,
@@ -260,6 +278,28 @@ export function buildWorkflowContractState(input: WorkflowContractInput): Workfl
       runningJobCount,
     }),
     primaryAction: chooseWorkflowPrimaryAction(stages),
+  };
+}
+
+export function summarizeProductQuality(state: WorkflowContractState): ProductQualitySummary {
+  const blockedWarnings = state.warnings.filter((warning) => warning.tone === "blocked").length;
+  const attentionWarnings = state.warnings.filter((warning) => warning.tone === "warning").length;
+  const suggestionWarnings = state.warnings.filter((warning) => warning.id === "pending-suggestions").length;
+  const currentStage = state.currentStage;
+  const tone: ProductQualitySummary["tone"] = blockedWarnings > 0 ? "blocked" : attentionWarnings > 0 ? "attention" : "ready";
+
+  return {
+    title: currentStage ? currentStage.productLabel : "Ready",
+    detail: currentStage?.detail ?? state.primaryAction.detail,
+    tone,
+    primaryActionLabel: state.primaryAction.label,
+    progressPercent: state.progressPercent,
+    stats: [
+      { label: "完成阶段", value: state.completedStageCount },
+      { label: "提醒", value: attentionWarnings, tone: attentionWarnings > 0 ? "attention" : undefined },
+      { label: "阻塞", value: blockedWarnings, tone: blockedWarnings > 0 ? "blocked" : undefined },
+      { label: "待审队列", value: suggestionWarnings },
+    ],
   };
 }
 
@@ -597,6 +637,15 @@ function chooseNextStep({
     label: "提炼建议",
     detail: "运行本地提炼，从真实历史中发现可审查建议。",
   };
+}
+
+function chooseCurrentWorkflowStage(stages: WorkflowStage[]): WorkflowStage | undefined {
+  return (
+    stages.find((stage) => stage.active && stage.blocked) ??
+    stages.find((stage) => stage.active) ??
+    stages.find((stage) => !stage.done) ??
+    stages[stages.length - 1]
+  );
 }
 
 function chooseWorkflowPrimaryAction(stages: WorkflowStage[]): WorkflowContractState["primaryAction"] {

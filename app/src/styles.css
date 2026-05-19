@@ -565,9 +565,127 @@ button:disabled {
 /* ===== 概览指标条 ===== */
 .overview-strip {
   display: grid;
-  grid-template-columns: minmax(260px, 1.4fr) minmax(260px, 1.6fr) repeat(4, minmax(0, 1fr));
+  grid-template-columns: minmax(440px, 2.4fr) minmax(240px, 1.3fr) repeat(4, minmax(0, 1fr));
   gap: 10px;
   padding: 0 24px 14px;
+}
+
+.workflow-cockpit {
+  min-height: 118px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+}
+
+.workflow-cockpit.attention {
+  border-color: rgba(212, 162, 59, 0.28);
+  background: rgba(255, 247, 232, 0.75);
+}
+
+.workflow-cockpit.blocked {
+  border-color: rgba(160, 58, 58, 0.28);
+  background: rgba(160, 58, 58, 0.05);
+}
+
+.workflow-cockpit-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.workflow-cockpit-head div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.workflow-cockpit-head span,
+.workflow-cockpit-head small {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.workflow-cockpit-head strong {
+  color: var(--color-text-primary);
+  font-size: 16px;
+  line-height: 1.25;
+}
+
+.workflow-primary-action {
+  min-height: 32px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.workflow-progress {
+  height: 7px;
+  margin: 12px 0 10px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--color-canvas);
+  border: 1px solid var(--color-border);
+}
+
+.workflow-progress div {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent);
+  transition: width 0.25s ease;
+}
+
+.workflow-stage-rail {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.workflow-stage-rail button {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 5px;
+  padding: 5px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-canvas);
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 650;
+  text-align: left;
+}
+
+.workflow-stage-rail button span {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--color-border-strong);
+}
+
+.workflow-stage-rail button.done {
+  color: var(--color-accent);
+}
+
+.workflow-stage-rail button.done span {
+  background: var(--color-accent);
+}
+
+.workflow-stage-rail button.active {
+  color: var(--color-text-primary);
+  background: var(--color-accent-soft);
+}
+
+.workflow-stage-rail button.blocked {
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
 }
 
 .overview-next-action {
@@ -647,6 +765,45 @@ button:disabled {
   min-height: 0;
   overflow: auto;
   padding: 0 24px 24px;
+}
+
+.first-run-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 16px;
+  padding: 22px;
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+}
+
+.first-run-panel span {
+  color: var(--color-accent);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.first-run-panel h2 {
+  margin: 4px 0 6px;
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.first-run-panel p {
+  max-width: 720px;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.first-run-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
 }
 
 .workspace-layout {
@@ -1475,6 +1632,10 @@ button:disabled {
   }
 
   .overview-strip {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workflow-stage-rail {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

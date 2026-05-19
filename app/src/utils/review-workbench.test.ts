@@ -4,6 +4,7 @@ import {
   buildWorkflowContractState,
   buildReviewClosureState,
   paginateArtifactBlockingTargets,
+  summarizeProductQuality,
   summarizeArtifactPreview,
   summarizeCandidateEvidence,
   summarizeDraftEvidence,
@@ -176,6 +177,23 @@ describe("review workbench utilities", () => {
         tone: "info",
       },
     ]);
+  });
+
+  test("summarizes product workflow progress for the cockpit", () => {
+    const state = buildWorkflowContractState({
+      hasProject: true,
+      candidates: [candidate()],
+    });
+
+    expect(state.currentStage).toMatchObject({ productLabel: "审阅建议" });
+    expect(state.completedStageCount).toBe(2);
+    expect(state.progressPercent).toBe(25);
+    expect(summarizeProductQuality(state)).toMatchObject({
+      title: "审阅建议",
+      primaryActionLabel: "审阅建议",
+      tone: "ready",
+      progressPercent: 25,
+    });
   });
 
   test("treats artifact drift as a blocking workflow state", () => {

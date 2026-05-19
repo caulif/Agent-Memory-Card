@@ -300,7 +300,7 @@ function App() {
         <header className="topbar">
           <div className="topbar-left">
             <div className="title-block">
-              <h1>{activeProject ? PAGE_DISPLAY[page]?.enLabel ?? "工作台" : "Agent Memory Kernel"}</h1>
+              <h1>{activeProject ? PAGE_DISPLAY[page]?.label ?? "工作台" : "Agent Memory Kernel"}</h1>
               {activeProject ? (
                 <span className="path">{activeProject.path}</span>
               ) : null}
@@ -401,8 +401,8 @@ function App() {
           </div>
         </header>
 
-        {/* 概览指标条 — 仅审阅页显示 */}
-        {page === "drafts" ? (
+        {/* 概览指标条 */}
+        {selectedProject ? (
           <ProjectOverviewStrip
             snapshot={snapshot}
             dashboard={dashboard}
@@ -414,6 +414,25 @@ function App() {
 
         {/* 内容区 */}
         <section className="content">
+          {!selectedProject && projects.length === 0 ? (
+            <section className="first-run-panel" aria-label="首次使用引导">
+              <div>
+                <span>首次使用</span>
+                <h2>先扫描本地项目，建立你的 Agent Memory 工作台</h2>
+                <p>扫描会读取常见 Codex / Claude Code 项目索引。找到项目后，再运行提炼建议、审阅证据、批准 Memory Card，并同步到 Agent 文件。</p>
+              </div>
+              <div className="first-run-actions">
+                <button className="primary-action" type="button" onClick={() => void scanProjects()}>
+                  <ScanLine size={14} />
+                  扫描项目
+                </button>
+                <button className="secondary-action" type="button" onClick={() => enterPreviewMode()}>
+                  <AppWindow size={14} />
+                  查看演示
+                </button>
+              </div>
+            </section>
+          ) : null}
           <div className="workspace-layout">
             <section className="primary-pane">
               {appStateError ? (
