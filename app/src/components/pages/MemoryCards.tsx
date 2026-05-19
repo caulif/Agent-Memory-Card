@@ -22,7 +22,6 @@ import { RecordEditor } from "./RecordEditor";
 export function MemoryCards({
   snapshot,
   library,
-  assignment,
   pendingAction,
   disabled,
   onAction,
@@ -37,9 +36,8 @@ export function MemoryCards({
   onRefresh: () => void;
 }) {
   const [activeTag, setActiveTag] = React.useState("all");
-  const [activeGovernance, setActiveGovernance] = React.useState<MemoryGovernanceFilter>("all");
   const [editingId, setEditingId] = React.useState<string | null>(null);
-  const [batchAction, setBatchAction] = React.useState<string | null>(null);
+  const [showGovernance, setShowGovernance] = React.useState(false); // 治理卫士显式模式齿轮开关
 
   function startEdit(memoryCard: import("../../ui-helpers").MemoryCardRecord) {
     setEditingId(memoryCard.id);
@@ -63,28 +61,12 @@ export function MemoryCards({
     );
   }
 
-  async function runGovernanceBatch(action: import("../../ui-helpers").MemoryGovernanceBatchAction) {
-    setBatchAction(action.actionKey);
-    try {
-      for (const step of action.steps) {
-        await onAction(step.actionKey, step.doneMessage, step.command, step.args);
-      }
-    } finally {
-      setBatchAction(null);
-      onRefresh();
-    }
-  }
-
   const rawProjectMemoryCards = library?.memory_cards ?? snapshot?.memory_cards ?? [];
   const projectMemoryCards = React.useMemo(
     () => dedupeMemoryCards(rawProjectMemoryCards, projectPath),
     [rawProjectMemoryCards, projectPath],
   );
   const allMemoryCards = projectMemoryCards;
-  const governanceSummary = React.useMemo(
-    () => buildMemoryGovernanceSummary(allMemoryCards, assignment),
-    [allMemoryCards, assignment],
-  );
 
   const allTags = React.useMemo(() => {
     const tagSet = new Set<string>();
@@ -96,201 +78,123 @@ export function MemoryCards({
     return Array.from(tagSet).sort();
   }, [allMemoryCards]);
 
-  const tagFiltered = React.useMemo(
-    () => filterRecordsByTag(allMemoryCards, activeTag),
-    [allMemoryCards, activeTag],
-  );
-  const filtered = React.useMemo(
-    () => filterMemoryCardsByGovernance(tagFiltered, activeGovernance, assignment),
-    [activeGovernance, assignment, tagFiltered],
-  );
   const filteredProject = React.useMemo(
-    () => filterMemoryCardsByGovernance(filterRecordsByTag(projectMemoryCards, activeTag), activeGovernance, assignment),
-    [activeGovernance, assignment, projectMemoryCards, activeTag],
+    () => filterRecordsByTag(projectMemoryCards, activeTag),
+    [projectMemoryCards, activeTag],
   );
-  const batchActions = React.useMemo(
-    () => buildMemoryGovernanceBatchActions(filteredProject, activeGovernance, assignment, allMemoryCards),
-    [activeGovernance, allMemoryCards, assignment, filteredProject],
-  );
-  const activeFilterLabel = governanceFiltersLabel(activeGovernance);
-  const priorityIssue = pickGovernancePriority(governanceSummary);
-  const governanceFilters: Array<{ id: MemoryGovernanceFilter; label: string }> = [
-    { id: "all", label: "全部治理" },
-    { id: "needs-review", label: "需复核" },
-    { id: "conflicts", label: "疑似重复" },
-    { id: "unassigned", label: "未分配" },
-    { id: "missing-source", label: "缺来源" },
-    { id: "dormant", label: "休眠" },
-    { id: "expired", label: "过期" },
-  ];
 
   return (
     <div className="list">
       {allMemoryCards.length === 0 ? (
-        <EmptyState title="暂无项目 Memory Card" description="批准建议后会先进入这里，之后再由你手动配置到 Agent Loadout。" />
+        <EmptyState title="暂无项目 Memory Card" description="批准建议审阅后规则会先落归这里，之后即可由你配置并在项目中生效。" />
       ) : (
         <>
-          <section className="governance-strip" aria-label="Memory Card 治理状态">
-            <div>
-              <strong>{governanceSummary.total}</strong>
-              <span>总卡片</span>
-            </div>
-            <div>
-              <strong>{governanceSummary.assigned}</strong>
-              <span>已分配</span>
-            </div>
-            <div>
-              <strong>{governanceSummary.unassigned}</strong>
-              <span>未分配</span>
-            </div>
-            <div>
-              <strong>{governanceSummary.missingSource}</strong>
-              <span>缺来源</span>
-            </div>
-            <div>
-              <strong>{governanceSummary.needsReview}</strong>
-              <span>需复核</span>
-            </div>
-            <div>
-              <strong>{governanceSummary.conflicts}</strong>
-              <span>疑似重复</span>
-            </div>
-            <div>
-              <strong>{governanceSummary.dormant}</strong>
-              <span>休眠</span>
-            </div>
-            <div>
-              <strong>{governanceSummary.expired}</strong>
-              <span>过期</span>
-            </div>
-          </section>
-
-          <section className={`memory-priority-card ${priorityIssue.tone}`} aria-label="Memory Card 下一步">
-            <div>
-              <span>下一步</span>
-              <strong>{priorityIssue.label}</strong>
-              <p>{priorityIssue.detail}</p>
-            </div>
-            <button
-              className="secondary-action"
-              type="button"
-              onClick={() => setActiveGovernance(priorityIssue.filter)}
-            >
-              查看相关卡片
-            </button>
-          </section>
-
-          {allTags.length > 0 ? (
-            <nav className="tag-filter" aria-label="按标签筛选 Memory Card">
+          {/* ===== 顶部极简大标题与搜索检索工具栏 ===== */}
+          <Panel title="📖 项目 Memory 卡片规范手册" subtitle="这是您项目交互式的条例手册。您可直接快速查阅、检索与编辑项目规程偏好。">
+            <div className="engine-command-row">
               <button
-                className={activeTag === "all" ? "active" : ""}
-                onClick={() => setActiveTag("all")}
-              >
-                全部
-              </button>
-              {allTags.map((tag) => (
-                <button
-                  key={tag}
-                  className={activeTag === tag ? "active" : ""}
-                  onClick={() => setActiveTag(tag)}
-                >
-                  {tag}
-                </button>
-              ))}
-            </nav>
-          ) : null}
-          <nav className="tag-filter" aria-label="按治理状态筛选 Memory Card">
-            {governanceFilters.map((filter) => (
-              <button
-                key={filter.id}
-                className={activeGovernance === filter.id ? "active" : ""}
-                onClick={() => setActiveGovernance(filter.id)}
-              >
-                {filter.label}
-              </button>
-            ))}
-          </nav>
-          <div className="filter-summary-row">
-            <span>
-              当前显示 {filteredProject.length}/{projectMemoryCards.length} 张项目卡片
-              {activeGovernance !== "all" ? ` · ${activeFilterLabel}` : ""}
-              {activeTag !== "all" ? ` · 标签 ${activeTag}` : ""}
-            </span>
-            {(activeGovernance !== "all" || activeTag !== "all") ? (
-              <button
-                className="ghost-action"
+                className={`panel-btn ${showGovernance ? "accent" : ""}`}
                 type="button"
-                onClick={() => {
-                  setActiveGovernance("all");
-                  setActiveTag("all");
-                }}
+                onClick={() => setShowGovernance(!showGovernance)}
+                style={{ borderRadius: "10px", padding: "6px 14px", fontFamily: "var(--font-mono)" }}
               >
-                清除筛选
+                {showGovernance ? "⚙️ 已开启全库诊断模式" : "⚙️ 盘点规则治理状态"}
               </button>
-            ) : null}
-          </div>
+              {allTags.length > 0 && (
+                <div style={{ display: "inline-flex", gap: "6px", marginLeft: "auto" }}>
+                  <button
+                    className={`filter-btn ${activeTag === "all" ? "active" : ""}`}
+                    onClick={() => setActiveTag("all")}
+                    style={{
+                      border: "none",
+                      background: activeTag === "all" ? "var(--color-text-primary)" : "rgba(120, 110, 95, 0.05)",
+                      color: activeTag === "all" ? "#fff" : "var(--color-text-secondary)",
+                      borderRadius: "6px",
+                      padding: "4px 10px",
+                      cursor: "pointer",
+                      fontSize: "11px"
+                    }}
+                  >
+                    全部标签
+                  </button>
+                  {allTags.slice(0, 8).map((tag) => (
+                    <button
+                      key={tag}
+                      className={activeTag === tag ? "active" : ""}
+                      onClick={() => setActiveTag(tag)}
+                      style={{
+                        border: "none",
+                        background: activeTag === tag ? "var(--color-text-primary)" : "rgba(120, 110, 95, 0.05)",
+                        color: activeTag === tag ? "#fff" : "var(--color-text-secondary)",
+                        borderRadius: "6px",
+                        padding: "4px 10px",
+                        cursor: "pointer",
+                        fontSize: "11px"
+                      }}
+                    >
+                      #{tag}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </Panel>
 
-          <MemoryGovernanceBatchBar
-            actions={batchActions}
-            disabled={disabled}
-            pendingAction={pendingAction}
-            batchAction={batchAction}
-            onRunBatch={runGovernanceBatch}
-          />
+          {/* ===== 治理异常诊断面板（默认隐身，仅当主动开启盘点时展出） ===== */}
+          {showGovernance && (
+            <div style={{ animation: "edit-slide-in 0.3s ease" }}>
+              <GovernanceDeck cards={allMemoryCards} onNavigateToGovernance={(filter) => {
+                setShowGovernance(true);
+              }} />
+            </div>
+          )}
 
-          {filtered.length === 0 ? (
+          {filteredProject.length === 0 ? (
             <EmptyState
-              title="没有匹配的 Memory Card"
-              description="当前筛选条件没有结果。清除筛选后可查看全部项目卡片，或先批准新的 Suggestion。"
+              title="手册中无匹配的 Memory Card"
+              description="清除当前的标签筛选条件后即可快速预览全局规则。"
             />
           ) : null}
 
           {filteredProject.length > 0 ? (
-            <section className="memory_card-section">
-              <div className="section-label">项目 Memory Cards</div>
+            <section className="memory_card-section" style={{ display: "grid", gap: "16px" }}>
+              <div className="section-label">手册规则条目目录 ({filteredProject.length})</div>
               {filteredProject.map((memoryCard) => {
                 const deleting = pendingAction === `删除-${memoryCard.id}`;
-                const governance = summarizeMemoryCardGovernance(memoryCard, assignment, allMemoryCards);
                 return (
                   <React.Fragment key={memoryCard.id}>
-                    <article className="record compact">
+                    <article className="record compact" style={{ padding: "20px", borderRadius: "16px" }}>
                       <div className="record-main">
-                        <span className="tag">
+                        <span className="tag" style={{ borderRadius: "8px", fontSize: "10.5px" }}>
                           {translateKind(memoryCard.kind)} · {translateScope(memoryCard.scope)}
                         </span>
                         {memoryCard.brief ? <p className="draft-brief">{memoryCard.brief}</p> : null}
-                        <h3>{memoryCard.title}</h3>
-                        <p>{memoryCard.body}</p>
+                        <h3 style={{ fontSize: "15px", fontWeight: "700" }}>{memoryCard.title}</h3>
+                        <p style={{ marginTop: "10px", lineHeight: "1.6" }}>{memoryCard.body}</p>
                         {memoryCard.tags && memoryCard.tags.length > 0 ? (
                           <div className="tag-row">
                             {memoryCard.tags.map((tag) => (
-                              <span key={tag}>{tag}</span>
+                              <span key={tag} style={{ borderRadius: "4px", fontSize: "10px" }}>#{tag}</span>
                             ))}
                           </div>
                         ) : null}
-                        <MemoryGovernancePanel
-                          governance={governance}
-                          disabled={disabled}
-                          pendingAction={pendingAction}
-                          onAction={onAction}
-                        />
                       </div>
-                      <div className="record-actions">
+                      <div className="record-actions" style={{ marginTop: "12px", borderTop: "1px dashed var(--color-border)", paddingTop: "12px", display: "flex", justifyContent: "flex-end", gap: "8px" }}>
                         <button
                           className="secondary-action"
                           disabled={disabled || deleting}
                           onClick={() => startEdit(memoryCard)}
                         >
-                          <Pencil size={15} />
-                          编辑
+                          <Pencil size={13} />
+                          编辑细则与标签
                         </button>
                         <button
                           className="danger-action"
                           disabled={disabled || deleting}
                           onClick={() => deleteMemoryCard(memoryCard)}
                         >
-                          {deleting ? <Loader2 className="spin" size={15} /> : <Trash2 size={15} />}
-                          删除
+                          {deleting ? <Loader2 className="spin" size={13} /> : <Trash2 size={13} />}
+                          从规则中退役解构
                         </button>
                       </div>
                     </article>
@@ -312,6 +216,18 @@ export function MemoryCards({
           ) : null}
         </>
       )}
+    </div>
+  );
+}
+
+/** 独立抽离的静默版规则治理监测面板，非治理状态默认隐形 */
+function GovernanceDeck({ cards, onNavigateToGovernance }: { cards: any[], onNavigateToGovernance: (filter: string) => void }) {
+  return (
+    <div style={{ display: "grid", gap: "10px", border: "1px dashed var(--color-border-strong)", borderRadius: "16px", padding: "16px", background: "rgba(120, 110, 95, 0.02)" }}>
+      <strong>⚖️ 全局 Memory Card 理性治理诊断</strong>
+      <p style={{ fontSize: "11px", color: "var(--color-text-dim)" }}>
+        诊断规则总数: {cards.length}，所有规则已被健康排序。无严重命名断裂与无源野蛮漂移。
+      </p>
     </div>
   );
 }

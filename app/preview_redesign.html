@@ -1,0 +1,1194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Memory Kernel - 温暖呼吸美学重构</title>
+  <style>
+    :root {
+      /* Japandi 极致温润空气美学色彩系统 */
+      --bg-base: #FAF8F5;            /* 温润燕麦泥白底 */
+      --bg-surface: #FFFFFF;         /* 白瓷卡片，纯净无暇 */
+      --bg-evidence: #F6F4F0;        /* 证据舱采用极柔和的古宣纸色 */
+      --text-main: #1C1917;          /* 暖砚黑，极其温和的字石色 */
+      --text-muted: #57534E;         /* 暖烟灰 */
+      --text-dim: #8C857B;           /* 砂布灰 */
+
+      --color-primary: #7C2D12;      /* 琥珀陶红 */
+      --color-secondary: #0F766E;    /* 寂静松绿 */
+      --color-emerald: #065F46;      /* 凝脂山葵 */
+      --color-amber: #B45309;        /* 晨晖金 */
+
+      --border-thin: rgba(120, 110, 95, 0.08); /* 带着暖意的超柔切边线 */
+      --border-dash: rgba(120, 110, 95, 0.15);
+
+      --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+
+      /* 极舒适的大范围云雾微悬浮阴影，消除锐利边界产生的廉价俗气感 */
+      --shadow-air: 0 4px 30px -4px rgba(139, 126, 116, 0.08), 0 1px 2px rgba(139, 126, 116, 0.02);
+      --shadow-hover: 0 20px 50px -10px rgba(139, 126, 116, 0.15), 0 1px 3px rgba(139, 126, 116, 0.03);
+      --transition-cozy: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border-thin) transparent;
+    }
+
+    body {
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      font-family: var(--font-family);
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      font-size: 13.5px;
+      letter-spacing: 0.01em;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* 空气微光遮罩，呈现温柔晨雾透射效果 */
+    body::before {
+      content: "";
+      position: absolute;
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, rgba(251, 146, 60, 0.03) 0%, rgba(255,255,255,0) 70%);
+      top: -200px;
+      left: -200px;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    /* ==========================================
+       SIDEBAR CONTAINER - 极美空气悬浮侧栏
+       ========================================== */
+    .nebula-aside {
+      width: 250px;
+      background: rgba(255, 255, 255, 0.6);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-right: 1px solid var(--border-thin);
+      padding: 36px 20px;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      z-index: 10;
+    }
+
+    .brand-container {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 40px;
+      padding-left: 6px;
+    }
+
+    /* 精致扁平无边界的微标 */
+    .brand-pulsar {
+      width: 14px;
+      height: 14px;
+      background: #E0E2EC;
+      border: 3px solid var(--text-main);
+      border-radius: 50%;
+    }
+
+    .brand-text strong {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-main);
+      display: block;
+      letter-spacing: -0.02em;
+    }
+
+    .brand-text span {
+      font-size: 9px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-top: 2px;
+      display: block;
+      font-weight: 600;
+    }
+
+    .nav-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex: 1;
+    }
+
+    .nav-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 12px 14px;
+      text-align: left;
+      font-size: 13px;
+      font-weight: 500;
+      border-radius: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      transition: var(--transition-cozy);
+    }
+
+    .nav-btn svg {
+      width: 16px;
+      height: 16px;
+      stroke-width: 1.8px;
+      opacity: 0.7;
+      transition: var(--transition-cozy);
+    }
+
+    .nav-btn:hover {
+      color: var(--text-main);
+      background: rgba(255, 255, 255, 0.8);
+      box-shadow: 0 4px 12px rgba(120, 110, 95, 0.03);
+    }
+
+    .nav-btn:hover svg {
+      opacity: 1;
+    }
+
+    .nav-btn.active {
+      color: var(--text-main);
+      background: #FFFFFF;
+      box-shadow: var(--shadow-air);
+      font-weight: 600;
+    }
+
+    .nav-btn.active svg {
+      color: var(--color-primary);
+      opacity: 1;
+    }
+
+    .sidebar-footer {
+      border-top: 1px solid var(--border-thin);
+      padding-top: 24px;
+    }
+
+    .project-pill {
+      background: #FFFFFF;
+      border: 1px solid var(--border-thin);
+      padding: 12px 14px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      box-shadow: var(--shadow-air);
+      transition: var(--transition-cozy);
+    }
+
+    .project-pill:hover {
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-hover);
+    }
+
+    .project-info span {
+      font-size: 9px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      display: block;
+      font-weight: 600;
+    }
+
+    .project-info strong {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-main);
+      margin-top: 2px;
+      display: block;
+    }
+
+    /* ==========================================
+       WORKSPACE SHELL - 亮色优雅主画布
+       ========================================== */
+    .workspace-shell {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      position: relative;
+    }
+
+    /* Topbar Header */
+    .topbar-header {
+      height: 76px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 48px;
+      background: transparent;
+    }
+
+    .topbar-title h1 {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-main);
+      letter-spacing: -0.02em;
+    }
+
+    .topbar-controls {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .engine-switcher {
+      display: flex;
+      background: rgba(120, 110, 95, 0.05);
+      padding: 3px;
+      border-radius: 10px;
+    }
+
+    .engine-opt {
+      background: transparent;
+      border: none;
+      color: var(--text-dim);
+      padding: 6px 14px;
+      font-size: 11px;
+      font-weight: 650;
+      border-radius: 8px;
+      cursor: pointer;
+      font-family: var(--font-mono);
+      transition: var(--transition-cozy);
+    }
+
+    .engine-opt.active {
+      background: var(--bg-surface);
+      color: var(--text-main);
+      box-shadow: 0 2px 8px rgba(120, 110, 95, 0.05);
+    }
+
+    .btn-circle {
+      width: 36px;
+      height: 36px;
+      border-radius: 12px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-thin);
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: var(--shadow-air);
+      transition: var(--transition-cozy);
+    }
+
+    .btn-circle:hover {
+      background: rgba(255, 255, 255, 0.8);
+      transform: scale(1.02);
+    }
+
+    /* 运行状态：高质感的温润山葵绿标 */
+    .status-capsule {
+      background: rgba(6, 95, 70, 0.04);
+      border: 1px solid rgba(6, 95, 70, 0.08);
+      color: var(--color-emerald);
+      padding: 6px 14px;
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11.5px;
+      font-weight: 650;
+    }
+
+    .status-capsule::before {
+      content: "";
+      width: 5px;
+      height: 5px;
+      background: var(--color-emerald);
+      border-radius: 50%;
+    }
+
+    /* Main Grid Area */
+    .main-workspace-content {
+      flex: 1;
+      padding: 24px 48px 48px;
+      overflow-y: auto;
+      display: flex;
+      gap: 36px;
+    }
+
+    .pane-primary {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    .pane-secondary {
+      width: 310px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    /* Overview Banner Grid - 舒适极柔看板 */
+    .overview-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+    }
+
+    .overview-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-thin);
+      padding: 24px;
+      border-radius: 16px;
+      box-shadow: var(--shadow-air);
+      position: relative;
+      transition: var(--transition-cozy);
+    }
+
+    .overview-card:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-hover);
+    }
+
+    .overview-card span {
+      font-size: 10px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      display: block;
+      font-weight: 600;
+    }
+
+    .overview-card h3 {
+      font-size: 26px;
+      font-weight: 800;
+      color: var(--text-main);
+      margin-top: 8px;
+      letter-spacing: -0.04em;
+    }
+
+    .overview-card p {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* 审阅流瀑布标题栏 */
+    .section-title-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 2px;
+    }
+
+    .section-title-bar h2 {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-main);
+      letter-spacing: -0.01em;
+    }
+
+    .stream-container {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* Cloud Card - 丝滑空气感微圆弧卡片 */
+    .draft-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-thin);
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: var(--shadow-air);
+      transition: var(--transition-cozy);
+    }
+
+    .draft-card:hover {
+      box-shadow: var(--shadow-hover);
+    }
+
+    .draft-card-header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border-thin);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(120, 110, 95, 0.01);
+    }
+
+    /* 优雅清雅的标签形式 */
+    .meta-tag {
+      background: #FAF8F5;
+      color: var(--text-main);
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      border: 1px solid var(--border-thin);
+    }
+
+    .synthesis-tag {
+      background: rgba(15, 118, 110, 0.05);
+      color: var(--color-secondary);
+      border-color: rgba(15, 118, 110, 0.1);
+      margin-left: 8px;
+    }
+
+    .draft-actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    /* 优雅暖色实体按键 */
+    .panel-btn {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-thin);
+      color: var(--text-muted);
+      padding: 8px 18px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 650;
+      cursor: pointer;
+      box-shadow: var(--shadow-air);
+      transition: var(--transition-cozy);
+    }
+
+    .panel-btn:hover {
+      background: rgba(120, 110, 95, 0.03);
+      color: var(--text-main);
+      transform: translateY(-0.5px);
+    }
+
+    .panel-btn.accent {
+      background: var(--text-main); /* 纯石墨深碳色 */
+      border-color: var(--text-main);
+      color: #FFFFFF;
+      box-shadow: 0 4px 12px rgba(28, 25, 22, 0.15);
+    }
+
+    .panel-btn.accent:hover {
+      background: rgba(28, 25, 22, 0.9);
+      box-shadow: 0 6px 18px rgba(28, 25, 22, 0.25);
+    }
+
+    .draft-card-body {
+      padding: 24px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+
+    .body-col {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .body-col-title {
+      font-size: 10.5px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .evidence-block {
+      background: var(--bg-evidence);
+      border-radius: 14px;
+      padding: 16px;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      line-height: 1.6;
+      color: var(--text-muted);
+      max-height: 180px;
+      overflow-y: auto;
+      border: 1px dashed rgba(120, 110, 95, 0.05);
+    }
+
+    /* 柔软的温暖荧光选句 */
+    .evidence-block mark {
+      background: rgba(251, 146, 60, 0.12);
+      color: var(--color-primary);
+      border-bottom: 1.5px solid rgba(251, 146, 60, 0.4);
+      padding: 0 2px;
+    }
+
+    .distilled-preview-card {
+      background: rgba(255, 255, 255, 0.5);
+      border: 1px dashed var(--border-dash);
+      border-radius: 14px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .distilled-meta {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .distilled-summary {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    .distilled-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .tag-pill {
+      background: rgba(120, 110, 95, 0.05);
+      color: var(--text-muted);
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 9.5px;
+      font-family: var(--font-mono);
+    }
+
+    /* RIGHT PANEL - AGETNS VIEW (分配控制槽) */
+    .agent-matrix-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+
+    .agent-slot-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-thin);
+      border-radius: 20px;
+      padding: 20px;
+      box-shadow: var(--shadow-air);
+      transition: var(--transition-cozy);
+      position: relative;
+    }
+
+    .agent-slot-card::after {
+      content: "";
+      position: absolute;
+      top: 22px;
+      right: 22px;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--color-secondary);
+    }
+
+    .agent-slot-card.warning::after {
+      background: var(--color-amber);
+    }
+
+    .agent-slot-card:hover {
+      box-shadow: var(--shadow-hover);
+    }
+
+    .agent-slot-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .agent-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 10px;
+      background: rgba(120, 110, 95, 0.08);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .agent-slot-header-text h4 {
+      font-size: 13.5px;
+      font-weight: 750;
+      color: var(--text-main);
+    }
+
+    .agent-slot-header-text span {
+      font-size: 10px;
+      color: var(--text-dim);
+    }
+
+    .loadout-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .loadout-chip {
+      background: rgba(120, 110, 95, 0.03);
+      border: 1px solid var(--border-thin);
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 11.5px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: var(--transition-cozy);
+    }
+
+    .loadout-chip:hover {
+      background: rgba(120, 110, 95, 0.06);
+      color: var(--text-main);
+    }
+
+    .loadout-chip svg {
+      width: 10px;
+      height: 10px;
+      color: var(--color-secondary);
+    }
+
+    .loadout-chip.add-btn {
+      color: var(--text-dim);
+      border-style: dashed;
+      cursor: pointer;
+    }
+
+    .loadout-chip.add-btn:hover {
+      color: var(--color-primary);
+      border-color: var(--color-primary);
+    }
+
+    /* RIGHT SIDEBAR - 质量控制监测塔 (INSPECTOR PANEL) */
+    .inspector-panel {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-thin);
+      border-radius: 20px;
+      padding: 24px;
+      box-shadow: var(--shadow-air);
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .inspector-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid var(--border-thin);
+      padding-bottom: 14px;
+    }
+
+    .inspector-header h3 {
+      font-size: 13.5px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    /* 禅意百分比：无垠地平线长轨道 */
+    .radial-impact-container {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      padding: 10px 0;
+    }
+
+    .horizon-indicator-block {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .horizon-label {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+    }
+
+    .horizon-label strong {
+      font-size: 24px;
+      font-weight: 800;
+      color: var(--text-main);
+      letter-spacing: -0.04em;
+    }
+
+    .horizon-label span {
+      font-size: 9.5px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-weight: 700;
+    }
+
+    /* 极细禅意地平线轨 */
+    .horizon-rail {
+      height: 2px;
+      background: rgba(120, 110, 95, 0.1);
+      position: relative;
+    }
+
+    /* 指针玉小点 */
+    .horizon-dot {
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-main);
+      top: -3px;
+      left: 93%;
+      box-shadow: 0 0 0 3px #FFFFFF;
+    }
+
+    .radial-impact-container p {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    .quality-warning-item {
+      display: flex;
+      gap: 10px;
+      padding: 14px;
+      border-radius: 12px;
+      background: rgba(180, 83, 9, 0.03);
+      border: 1px solid rgba(180, 83, 9, 0.06);
+      color: #78350F;
+      font-size: 11.5px;
+      line-height: 1.5;
+    }
+
+    .quality-warning-item strong {
+      color: #92400E;
+    }
+
+    /* Tab Visibility Matrix */
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .flex-row-center-between {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+  </style>
+</head>
+<body>
+
+  <!-- ==============================================
+       SIDEBAR CONTAINER - 极美空气悬浮侧栏
+       ============================================== -->
+  <aside class="nebula-aside" aria-label="核心控制导航">
+    <div class="brand-container">
+      <div class="brand-pulsar"></div>
+      <div class="brand-text">
+        <strong>Memory Kernel</strong>
+        <span>AGENT SPACE</span>
+      </div>
+    </div>
+
+    <nav class="nav-group" aria-label="核脑功能板块">
+      <button class="nav-btn active" onclick="switchTab('drafts', this)">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
+        </svg>
+        提炼审阅 (Drafts)
+      </button>
+      <button class="nav-btn" onclick="switchTab('memory-cards', this)">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"></path>
+        </svg>
+        记忆卡库 (Library)
+      </button>
+      <button class="nav-btn" onclick="switchTab('agents', this)">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
+        </svg>
+        装载分配 (Loadout)
+      </button>
+      <button class="nav-btn" onclick="switchTab('skills', this)">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path>
+        </svg>
+        本地技能 (Skills)
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="project-pill">
+        <div class="project-info">
+          <span>Active Deck</span>
+          <strong>cogent-workflow</strong>
+        </div>
+        <svg width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="opacity: 0.6;">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+        </svg>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ==============================================
+       WORKSPACE SHELL - 亮色优雅主画布
+       ============================================== -->
+  <section class="workspace-shell" aria-label="核心工作画布">
+
+    <!-- Topbar Header -->
+    <header class="topbar-header">
+      <div class="topbar-title">
+        <h1 id="page-title-label">提炼审阅 (Drafts)</h1>
+      </div>
+
+      <div class="topbar-controls">
+        <!-- 引擎切换器 -->
+        <div class="engine-switcher">
+          <button class="engine-opt active">Claude 4.5</button>
+          <button class="engine-opt">Codex-v2</button>
+          <button class="engine-opt">Local-LLM</button>
+        </div>
+
+        <!-- 任务通知 -->
+        <button class="btn-circle" title="本地任务池状态">
+          <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
+          </svg>
+        </button>
+
+        <!-- 极简运行状态舱 -->
+        <div class="status-capsule">
+          <span>Operational</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Workspace Scrollable Content -->
+    <div class="main-workspace-content">
+
+      <!-- Primary Action Area -->
+      <div class="pane-primary">
+
+        <!-- 4大核心概览指标卡 -->
+        <section class="overview-grid" aria-label="核心治理指标板">
+          <div class="overview-card">
+            <span>待审提炼</span>
+            <h3>04</h3>
+            <p>1 条置信认证推荐</p>
+          </div>
+          <div class="overview-card">
+            <span>记忆卡总目</span>
+            <h3>18</h3>
+            <p>已部署 12 本地契约卡</p>
+          </div>
+          <div class="overview-card">
+            <span>装填分发率</span>
+            <h3>93%</h3>
+            <p>核心槽已全量配置</p>
+          </div>
+          <div class="overview-card">
+            <span>核脑风险</span>
+            <h3>01</h3>
+            <p>存在 1 个记忆卡冲突</p>
+          </div>
+        </section>
+
+        <!-- ==============================================
+             PANEL: 提炼审阅 (DRAFTS TAB)
+             ============================================== -->
+        <div id="tab-drafts" class="tab-content active">
+          <div class="section-title-bar">
+            <h2>待吸纳记忆候选流</h2>
+            <button class="panel-btn">批量吸纳</button>
+          </div>
+
+          <div class="stream-container">
+            <!-- 审阅卡片 1 -->
+            <article class="draft-card">
+              <div class="draft-card-header">
+                <div>
+                  <span class="meta-tag">Memory Draft // #104</span>
+                  <span class="meta-tag synthesis-tag">置信值 96%</span>
+                </div>
+                <div class="draft-actions">
+                  <button class="panel-btn">拒绝</button>
+                  <button class="panel-btn accent">批准提炼</button>
+                </div>
+              </div>
+              <div class="draft-card-body">
+                <div class="body-col">
+                  <div class="body-col-title">
+                    ORIGINAL SESSION / 原始会话证据
+                  </div>
+                  <div class="evidence-block">
+                    user: 不要再模拟数据库了，我们上个月因为<mark>模拟的测试通过但物理迁移挂掉</mark>吃过大亏，以后这里必须直连。<br>
+                    assistant: 明白，后续所有与数据迁移验证的流程均采用物理数据库验证。<br>
+                    user: 正是如此，另外把这个作为全局约束。
+                  </div>
+                </div>
+                <div class="body-col">
+                  <div class="body-col-title">
+                    DISTILLED CORE / 提纯后的记忆卡
+                  </div>
+                  <div class="distilled-preview-card">
+                    <div class="distilled-meta">测试验证策略：禁用数据库 Mock 行为</div>
+                    <div class="distilled-summary">
+                      所有集成测试必须基于真实物理数据库运行，严禁在迁移验证中进行 Mock 模拟。原因：防止 Mock 与物理实例差异导致部署失败。
+                    </div>
+                    <div class="distilled-tags">
+                      <span class="tag-pill">#testing</span>
+                      <span class="tag-pill">#database</span>
+                      <span class="tag-pill">#strict</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <!-- 审阅卡片 2 -->
+            <article class="draft-card">
+              <div class="draft-card-header">
+                <div>
+                  <span class="meta-tag">Memory Draft // #103</span>
+                  <span class="meta-tag synthesis-tag" style="color:var(--color-amber); background:rgba(180, 83, 9, 0.05); border-color:rgba(180, 83, 9, 0.1);">置信值 78%</span>
+                </div>
+                <div class="draft-actions">
+                  <button class="panel-btn">拒绝</button>
+                  <button class="panel-btn accent">批准提炼</button>
+                </div>
+              </div>
+              <div class="draft-card-body">
+                <div class="body-col">
+                  <div class="body-col-title">
+                    ORIGINAL SESSION / 原始会话证据
+                  </div>
+                  <div class="evidence-block">
+                    user: 记住这个项目的 <mark>CLAUDE.md 中包含的主题颜色只能是 slate 级别</mark>。<br>
+                    assistant: 好的，后续前端设计规范强绑定 slate 系列。
+                  </div>
+                </div>
+                <div class="body-col">
+                  <div class="body-col-title">
+                    DISTILLED CORE / 提纯后的记忆卡
+                  </div>
+                  <div class="distilled-preview-card">
+                    <div class="distilled-meta">界面约束：强制约束 Slate 皮肤主题</div>
+                    <div class="distilled-summary">
+                      将项目的调色板默认值限制在 slate 色阶下，所有新增的前端界面与图标禁止越级使用鲜艳冲突色。
+                    </div>
+                    <div class="distilled-tags">
+                      <span class="tag-pill">#ui-design</span>
+                      <span class="tag-pill">#theme</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <!-- ==============================================
+             PANEL: 记忆卡库 (LIBRARY TAB)
+             ============================================== -->
+        <div id="tab-memory-cards" class="tab-content">
+          <div class="section-title-bar">
+            <h2>本地已存记忆全景视图</h2>
+            <button class="panel-btn accent">增加空白记忆</button>
+          </div>
+
+          <div class="stream-container">
+            <article class="draft-card">
+              <div class="draft-card-header">
+                <div>
+                  <span class="meta-tag" style="color:var(--color-secondary); background:rgba(15,118,110,0.05); border-color:rgba(15,118,110,0.1);">固封存盘 ACTIVE</span>
+                  <span class="meta-tag" style="margin-left: 12px;">card-091a</span>
+                </div>
+                <div class="draft-actions">
+                  <button class="panel-btn">备份克隆</button>
+                  <button class="panel-btn">注销解构</button>
+                </div>
+              </div>
+              <div class="draft-card-body" style="grid-template-columns: 1fr;">
+                <div class="distilled-preview-card" style="border-style: solid;">
+                  <div class="flex-row-center-between">
+                    <div class="distilled-meta">命名与代码风格契约：多文件重构优先法则</div>
+                    <span style="font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);">2026/05/01</span>
+                  </div>
+                  <div class="distilled-summary" style="margin-top: 10px;">
+                    当跨模块、涉及文件数超过 3 个的全局字段更新时，必须优先以“演化升级（Evolutionary deprecants）”形式逐步变更，禁止进行暴力一刀切重命名，防范第三方依赖的断裂。
+                  </div>
+                  <div class="distilled-tags" style="margin-top: 10px;">
+                    <span class="tag-pill">#coding-standard</span>
+                    <span class="tag-pill">#refactor</span>
+                    <span class="tag-pill">#multi-files</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <!-- ==============================================
+             PANEL: 智能体装填 (AGENTS TAB)
+             ============================================= -->
+        <div id="tab-agents" class="tab-content">
+          <div class="section-title-bar">
+            <h2>分配装载矩阵</h2>
+            <button class="panel-btn accent">全核能装填同步</button>
+          </div>
+
+          <div class="agent-matrix-grid">
+            <!-- 智能体槽位 1 -->
+            <div class="agent-slot-card">
+              <div class="agent-slot-header">
+                <div class="agent-avatar">C</div>
+                <div class="agent-slot-header-text">
+                  <h4>codex-refactorer // 后端核</h4>
+                  <span>架构体系与高级重构 Agent</span>
+                </div>
+              </div>
+              <div class="loadout-chips">
+                <span class="loadout-chip">禁用数据库 Mock 行为</span>
+                <span class="loadout-chip">多文件重构优先法则</span>
+                <span class="loadout-chip add-btn">+ 载入新卡</span>
+              </div>
+            </div>
+
+            <!-- 智能体槽位 2 -->
+            <div class="agent-slot-card warning">
+              <div class="agent-slot-header">
+                <div class="agent-avatar" style="background: rgba(180, 83, 9, 0.08); color: var(--color-amber);">U</div>
+                <div class="agent-slot-header-text">
+                  <h4>ux-designer-agent // 体验核</h4>
+                  <span>体验规范与交互样式协同 Agent</span>
+                </div>
+              </div>
+              <div class="loadout-chips">
+                <span class="loadout-chip">强制约束 Slate 皮肤主题</span>
+                <span class="loadout-chip add-btn">+ 载入新卡</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==============================================
+             PANEL: 技能库 (SKILLS TAB)
+             ============================================== -->
+        <div id="tab-skills" class="tab-content">
+          <div class="section-title-bar">
+            <h2>核心技能索引地图</h2>
+            <button class="panel-btn accent">外接拓展技能</button>
+          </div>
+
+          <div class="stream-container">
+            <article class="draft-card" style="border-left: 3px solid var(--text-main);">
+              <div class="draft-card-header">
+                <div>
+                  <span class="meta-tag">mcp-builder</span>
+                  <span style="font-size: 11px; color: var(--text-dim); margin-left: 14px;">MODEL CONTEXT PROTOCOL BUILDER</span>
+                </div>
+              </div>
+              <div class="draft-card-body" style="grid-template-columns: 1fr;">
+                <div class="distilled-preview-card" style="border-style: solid;">
+                  <div class="distilled-summary">
+                    支持在系统检测到 Python FastMCP 或 TypeScript SDK 时自动化调度，指导开发人员在本地进行 API 连接与智能体工具链映射的构建。
+                  </div>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Secondary Inspector Column (质量治理系统) -->
+      <div class="pane-secondary">
+
+        <!-- 核心治理面板 -->
+        <section class="inspector-panel" aria-label="核心质量治理监测器">
+          <div class="inspector-header">
+            <h3>Governance // 质量治理</h3>
+          </div>
+
+          <!-- 分配覆盖率仪表盘（禅意地平线刻度轨） -->
+          <div class="radial-impact-container">
+            <div class="horizon-indicator-block">
+              <div class="horizon-label">
+                <strong>93.0%</strong>
+                <span>LOADOUT RATIO</span>
+              </div>
+              <div class="horizon-rail">
+                <div class="horizon-dot"></div>
+              </div>
+            </div>
+
+            <p>
+              在 18 个记忆契约定义中，有 17 项已通过硬通道成功部署至核脑 2 个主力 Agent，边缘效益趋于稳健达成。
+            </p>
+          </div>
+
+          <!-- 冲突预警通知 -->
+          <div class="flex-row-center-between" style="border-top:1px solid var(--border-thin); padding-top:18px;">
+            <span style="font-size:11px; font-weight:700; color:var(--text-main);">当前发现预警</span>
+            <span style="font-size:10px; color:var(--text-dim); font-family: var(--font-mono);">SWEEP: 1M AGO</span>
+          </div>
+
+          <div class="quality-warning-item">
+            <div>
+              <strong>记忆卡异常漂移 (card-103):</strong><br>
+              ux-designer-agent 主动尝试打破全局 slate 配色骨架约束。
+            </div>
+          </div>
+
+        </section>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ==============================================
+       INTERACTION SCRIPT
+       ============================================== -->
+  <script>
+    function switchTab(tabId, el) {
+      // 1. 关闭所有 Tab
+      document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.classList.remove('active');
+      });
+      // 2. 取消菜单激活态
+      document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.classList.remove('active');
+      });
+
+      // 3. 激活当前
+      document.getElementById('tab-' + tabId).classList.add('active');
+      el.classList.add('active');
+
+      // 4. 更新 Title 名
+      const titles = {
+        'drafts': '提炼审阅 (Drafts)',
+        'memory-cards': '全局记忆卡图库 (Library)',
+        'skills': '智能体技能全景织网 (Skills)',
+        'agents': '智能体分配与装载核心 (Loadout)'
+      };
+
+      document.getElementById('page-title-label').innerText = titles[tabId];
+    }
+  </script>
+</body>
+</html>

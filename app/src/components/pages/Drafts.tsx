@@ -35,15 +35,12 @@ export function Drafts({
   assignment,
   library,
   quality,
-  evalRun,
   pendingAction,
   disabled,
   onAction,
   onBatchCandidateAction,
   previewMode,
   projectPath,
-  synthesisEngine,
-  onSynthesisEngineChange,
   onRefresh,
 }: PanelPageProps & {
   candidates: ProjectCandidateInbox | null;
@@ -51,7 +48,6 @@ export function Drafts({
   assignment: ProjectAssignmentView | null;
   library: ProjectMemoryCardLibrary | null;
   quality: ProjectQualityView | null;
-  evalRun: ProjectEvalRunView | null;
   onBatchCandidateAction: (
     actionKey: string,
     doneMessage: string,
@@ -61,8 +57,6 @@ export function Drafts({
   ) => Promise<void>;
   previewMode: boolean;
   projectPath: string;
-  synthesisEngine: "claude-code" | "codex" | "local" | "llm";
-  onSynthesisEngineChange: (engine: "claude-code" | "codex" | "local" | "llm") => void;
   onRefresh: () => void;
 }) {
   const [selectedCandidateIds, setSelectedCandidateIds] = React.useState<string[]>([]);
@@ -72,7 +66,6 @@ export function Drafts({
   const lowConfidenceCount = allCandidates.filter((candidate) => (candidate.confidence ?? 0) < 0.72).length;
   const sourceDrafts = inbox?.drafts ?? snapshot?.drafts ?? [];
   const drafts = visibleDrafts(sourceDrafts);
-  const hiddenCount = Math.max(sourceDrafts.length - drafts.length, 0);
   const memoryCards = library?.memory_cards ?? snapshot?.memory_cards ?? [];
   const closureState = buildReviewClosureState({
     candidates: allCandidates,
@@ -82,26 +75,12 @@ export function Drafts({
     quality,
   });
   const artifactPreview = summarizeArtifactPreview(quality);
-  const [editingId, setEditingId] = React.useState<string | null>(null);
   const [selectedCandidateId, setSelectedCandidateId] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (selectedCandidateId && allCandidates.some((candidate) => candidate.id === selectedCandidateId)) return;
     setSelectedCandidateId(allCandidates[0]?.id ?? null);
   }, [allCandidates, selectedCandidateId]);
-
-  function startEdit(draft: (typeof drafts)[number]) {
-    setEditingId(draft.id);
-  }
-
-  function cancelEdit() {
-    setEditingId(null);
-  }
-
-  async function handleSaved() {
-    setEditingId(null);
-    onRefresh();
-  }
 
   function toggleCandidateSelected(id: string) {
     setSelectedCandidateIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [id, ...current]);
@@ -121,72 +100,47 @@ export function Drafts({
 
   return (
     <div className="stack">
-      {/* ===== 顶部指标行 ===== */}
-      <Panel title="Suggestion Review" subtitle="审阅系统建议，确认真实证据后批准为 Memory Card，再配置 Loadout 并预览 Artifact。">
+      {/* ===== 顶部极简指示行 ===== */}
+      <Panel title="Suggestion Review" subtitle="审阅系统近期会话提炼出的建议规则，确认匹配真实历史证据后，一键吸纳转正。">
         <div className="engine-command-row">
-          <div className="engine-row" aria-label="整理引擎">
-            <button className={synthesisEngine === "claude-code" ? "active" : ""} onClick={() => onSynthesisEngineChange("claude-code")}>
-              Claude Code
-            </button>
-            <button className={synthesisEngine === "codex" ? "active" : ""} onClick={() => onSynthesisEngineChange("codex")}>
-              Codex
-            </button>
-            <button className={synthesisEngine === "llm" ? "active" : ""} onClick={() => onSynthesisEngineChange("llm")}>
-              LLM
-            </button>
-          </div>
           <ActionButton
             className="hero-button"
             icon={RefreshCw}
-            label="提炼建议"
-            busyLabel="正在整理"
+            label="从历史会话提炼建议"
+            busyLabel="正在高精度整理中"
             busy={pendingAction === "整理历史"}
             disabled={disabled}
             onClick={() =>
-              onAction("整理历史", "已开始整理建议", "evolve_project", {
+              onAction("整理历史", "已开始整理分析建议", "evolve_project", {
                 targets: ["codex", "claude-code"],
                 dryRun: false,
-                engine: synthesisEngine,
+                engine: "claude-code",
               })
             }
           />
-        </div>
-        <div className="review-closure-strip" aria-label="审查闭环状态">
-          <div className="review-closure-next">
-            <span>下一步</span>
-            <strong>{closureState.nextStep.label}</strong>
-            <small>{closureState.nextStep.detail}</small>
-          </div>
-          <div className="review-closure-metrics">
-            <span>{closureState.candidateCount + closureState.draftCount} 建议</span>
-            <span>{closureState.unassignedCount} 未分配</span>
-            <span>{closureState.driftWarningCount} Drift</span>
-            <span>{closureState.buildActionCount} Artifact 动作</span>
+          <div className="review-closure-metrics" style={{ marginLeft: "auto" }}>
+            <span>{closureState.candidateCount} 待审建议</span>
+            <span>{closureState.unassignedCount} 待载入装载</span>
+            <span>{closureState.driftWarningCount} 个异常信号</span>
           </div>
         </div>
-        <ArtifactPreviewStrip
-          preview={artifactPreview}
-          disabled={disabled}
-          pendingAction={pendingAction}
-          onAction={onAction}
-        />
       </Panel>
 
-      {/* ===== 三栏布局：建议队列 / 详情 / 质量状态 ===== */}
-      <div className="drafts-grid">
-        {/* 左栏：建议队列 */}
+      {/* ===== 极致两栏 triage 装配工作区 ===== */}
+      <div className="drafts-grid" style={{ gridTemplateColumns: "310px minmax(0, 1fr)" }}>
+        {/* 左栏：建议收件箱列表 */}
         <div className="drafts-column">
           <div className="drafts-column-head">
-            <h3>建议队列</h3>
+            <h3>待审建议收件件箱 ({visibleCandidates.length})</h3>
           </div>
 
           {visibleCandidates.length === 0 ? (
             <EmptyState
-              title="还没有待审 Suggestion"
-              description="先运行提炼建议；系统会从本地历史里找出可复用偏好、约束和流程，再放到这里等待你确认。"
+              title="待审箱空空如也"
+              description="先点击顶部提炼建议；机器会高精度从你最近的代码和对话中归纳偏好并排队等待核准。"
             />
           ) : (
-            <div className="candidate-queue">
+            <div className="candidate-queue" style={{ maxHeight: "640px" }}>
               {visibleCandidates.map((candidate) => {
                 const isSelected = selectedCandidateIds.includes(candidate.id);
                 const isActive = selectedCandidateId === candidate.id;
@@ -207,7 +161,7 @@ export function Drafts({
                     <div className="candidate-queue-head-right">
                       {candidate.confidence != null ? (
                         <span className={`confidence-badge ${evidence.riskTone}`}>
-                          {Math.round(candidate.confidence * 100)}%
+                          {Math.round(candidate.confidence * 100)}% 置信
                         </span>
                       ) : null}
                       <button
@@ -226,11 +180,6 @@ export function Drafts({
                   >
                     {candidate.brief ?? candidate.body.slice(0, 80)}
                   </button>
-                  <div className="candidate-queue-evidence">
-                    <span>{evidence.recurrenceLabel}</span>
-                    <span>{evidence.riskLabel}</span>
-                    <span>{evidence.actionLabel}</span>
-                  </div>
                 </article>
                 );
               })}
@@ -238,12 +187,12 @@ export function Drafts({
           )}
         </div>
 
-        {/* 中栏：选中建议详情/审阅 */}
+        {/* 右栏：沉浸式详阅与工作台 */}
         <div className="drafts-column drafts-detail">
           {selectedCandidate ? (
             <>
               <div className="drafts-column-head">
-                <h3>审阅详情</h3>
+                <h3>建议卡片实证详查</h3>
               </div>
               <CandidateDetail
                 candidate={selectedCandidate}
@@ -256,183 +205,21 @@ export function Drafts({
               />
             </>
           ) : (
-            <div className="review-onboarding-card">
-              <strong>审阅从证据开始</strong>
-              <p>左侧第一条建议会自动打开。批准前先确认来源、风险和将要写入的 Artifact 影响。</p>
-              <ol>
-                <li>确认它来自真实历史，而不是一次性闲聊。</li>
-                <li>必要时编辑措辞，让 Memory Card 更像可长期复用的规则。</li>
-                <li>批准后去 Loadout 分配给 Codex 或 Claude Code。</li>
-              </ol>
+            <div className="review-onboarding-card" style={{ padding: "32px", textAlign: "center" }}>
+              <strong>请在左侧列表中点击选择一条规则</strong>
+              <p style={{ marginTop: "14px" }}>为了给您最静心的开发体验，我们清空了多余的模型调优诊断看板。在此处，您只需专注干脆、快速地阅读证据并核准卡片：</p>
+              <ul style={{ textAlign: "left", display: "inline-block", marginTop: "14px" }}>
+                <li>阅读机器从最新对话或代码分析中归纳出的规则提议。</li>
+                <li>确认下方的「引录真实对话历史片段」，排查这是否为一次性需求。</li>
+                <li>点击底部的「保存编辑」或直接「批准」，将其收编为生效规则，卡片将立刻前往「记忆库（手册）」保存。</li>
+              </ul>
             </div>
           )}
         </div>
-
-        {/* 右栏：质量状态 */}
-        <div className="drafts-column">
-          <div className="drafts-column-head">
-            <h3>质量状态</h3>
-          </div>
-          <div className="drafts-quality-card">
-            <div className="quality-ring">
-              <svg width="72" height="72" viewBox="0 0 72 72">
-                <circle cx="36" cy="36" r="30" fill="none" stroke="var(--color-border)" strokeWidth="5" />
-                <circle
-                  cx="36"
-                  cy="36"
-                  r="30"
-                  fill="none"
-                  stroke="var(--color-accent)"
-                  strokeWidth="5"
-                  strokeDasharray={`${(allCandidates.length > 0 ? drafts.length / Math.max(allCandidates.length, 1) : 0) * 188.5} 188.5`}
-                  strokeLinecap="round"
-                  transform="rotate(-90 36 36)"
-                />
-              </svg>
-              <div className="quality-ring-text">
-                <strong>{drafts.length}</strong>
-                <span>已审建议</span>
-              </div>
-            </div>
-            <div className="quality-bars">
-              <div className="quality-bar-row">
-                <span>建议</span>
-                <div className="quality-bar-track">
-                  <div className="quality-bar-fill" style={{ width: `${Math.min(100, allCandidates.length * 20)}%` }} />
-                </div>
-                <strong>{allCandidates.length}</strong>
-              </div>
-              <div className="quality-bar-row">
-                <span>已审建议</span>
-                <div className="quality-bar-track">
-                  <div className="quality-bar-fill" style={{ width: `${Math.min(100, drafts.length * 25)}%`, background: "var(--color-accent)" }} />
-                </div>
-                <strong>{drafts.length}</strong>
-              </div>
-              <div className="quality-bar-row">
-                <span>低置信</span>
-                <div className="quality-bar-track">
-                  <div className="quality-bar-fill" style={{ width: `${Math.min(100, lowConfidenceCount * 25)}%`, background: "#d4a23b" }} />
-                </div>
-                <strong>{lowConfidenceCount}</strong>
-              </div>
-            </div>
-          </div>
-          <EvalRunPanel evalRun={evalRun} />
-        </div>
       </div>
 
-      {/* 已审建议列表 */}
-      {drafts.length > 0 ? (
-        <>
-          {hiddenCount > 0 ? <p className="filter-note">已隐藏 {hiddenCount} 条低置信度或过碎建议，避免审阅列表失控。</p> : null}
-          {drafts.map((draft) => (
-            <React.Fragment key={draft.id}>
-            <article className="record">
-              <div className="record-main">
-                <span className="tag">
-                  {translateKind(draft.kind)} · {translateScope(draft.scope)}
-                  {draft.confidence ? ` · 置信度 ${Math.round(draft.confidence * 100)}%` : ""}
-                </span>
-                <p className="draft-brief">
-                    <span className="brief-label">建议摘要</span>
-                  {describeDraftForReview(draft)}
-                </p>
-                <h3>{draft.title}</h3>
-                <p>{draft.body}</p>
-                {draft.tags && draft.tags.length > 0 ? (
-                  <div className="tag-row">
-                    {draft.tags.map((t) => (
-                      <span key={t}>{t}</span>
-                    ))}
-                  </div>
-                ) : null}
-                <small>{draft.reason ?? draft.evidence}</small>
-                {draft.extraction?.reason ? (
-                  <p className="record-reason">
-                    {draft.extraction.matched_signal ? `${draft.extraction.matched_signal} · ` : ""}
-                    {draft.extraction.origin ? `${draft.extraction.origin} · ` : ""}
-                    {draft.extraction.reason}
-                  </p>
-                ) : null}
-                {draft.extraction?.classification ? (
-                  <div className="classification-chips">
-                    {draft.extraction.classification.signal ? (
-                      <span className="chip chip-signal">{draft.extraction.classification.signal}</span>
-                    ) : null}
-                    {draft.extraction.classification.artifact_kind ? (
-                      <span className="chip chip-artifact">
-                        {routeLabel(draft.extraction.classification.artifact_kind)}
-                      </span>
-                    ) : null}
-                    {draft.extraction.classification.hardness ? (
-                      <span className="chip chip-hardness">{draft.extraction.classification.hardness}</span>
-                    ) : null}
-                    {draft.extraction.classification.activation ? (
-                      <span className="chip chip-activation">{draft.extraction.classification.activation}</span>
-                    ) : null}
-                  </div>
-                ) : null}
-                {draft.extraction?.suggested_action ? (
-                  <div className="classification-chips">
-                    <span className="chip chip-artifact">
-                      {routeLabel(draft.extraction.suggested_action.route)}
-                    </span>
-                    <span className="chip chip-activation">
-                      {compileLabel(draft.extraction.suggested_action.compile_enabled)}
-                    </span>
-                    <span className="chip chip-signal">
-                      {actionLabel(draft.extraction.suggested_action.action)}
-                    </span>
-                  </div>
-                ) : null}
-                <EvidencePanel summary={summarizeDraftEvidence(draft)} />
-              </div>
-              <div className="record-actions">
-                <button
-                  className="secondary-action"
-                  disabled={disabled}
-                  onClick={() => startEdit(draft)}
-                >
-                  <Pencil size={14} />
-                  编辑
-                </button>
-                <ActionButton
-                  icon={Check}
-                  label="批准为 Memory Card"
-                  busyLabel="批准中"
-                  busy={pendingAction === `批准-${draft.id}`}
-                  disabled={disabled}
-                  onClick={() => onAction(`批准-${draft.id}`, "已批准为 Memory Card", "approve_draft", { id: draft.id })}
-                />
-                <ActionButton
-                  className="danger-action"
-                  icon={X}
-                  label="拒绝"
-                  busyLabel="删除中"
-                  busy={pendingAction === `删除-${draft.id}`}
-                  disabled={disabled}
-                  onClick={() => onAction(`删除-${draft.id}`, "已拒绝建议", "reject_draft", { id: draft.id })}
-                />
-              </div>
-            </article>
-            {editingId === draft.id ? (
-              <RecordEditor
-                recordType="draft"
-                initialForm={buildEditFormFromDraft(draft)}
-                extraction={draft.extraction}
-                previewMode={previewMode}
-                projectPath={projectPath}
-                recordId={draft.id}
-                onSaved={handleSaved}
-                onCancel={cancelEdit}
-              />
-            ) : null}
-            </React.Fragment>
-          ))}
-        </>
-      ) : allCandidates.length === 0 ? (
-        <EmptyState title="暂无高价值建议" description={'点击「提炼建议」后，稳定偏好、硬约束、流程和可复用 Skill 补充会出现在这里等待审核。'} />
+      {allCandidates.length === 0 ? (
+        <EmptyState title="目前没有待审项目条例" description={'点击「从历史会话提炼建议」后，分析出的偏好、流程和卡片草案会自动排队在此。'} />
       ) : null}
 
       {/* 底部批量操作栏 */}
@@ -444,16 +231,16 @@ export function Drafts({
               type="text"
               value={batchRejectReason}
               onChange={(event) => setBatchRejectReason(event.target.value)}
-              placeholder="批量拒绝原因"
+              placeholder="批量忽略/驳回理由"
             />
             <button className="primary-action" disabled={disabled || selectedCandidateIds.length === 0} onClick={() => void runBatch("promote_candidate")}>
-              批量批准建议
+              批量批准入库
             </button>
             <button className="secondary-action" disabled={disabled || selectedCandidateIds.length === 0} onClick={() => void runBatch("hide_candidate")}>
-              批量隐藏建议
+              批量隐藏
             </button>
             <button className="danger-action" disabled={disabled || selectedCandidateIds.length === 0} onClick={() => void runBatch("reject_candidate")}>
-              批量拒绝建议
+              批量驳回忽略
             </button>
           </div>
         </div>

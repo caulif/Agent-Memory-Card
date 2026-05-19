@@ -18,11 +18,9 @@ export function Agents({
   snapshot,
   assignment,
   library,
-  quality,
   pendingAction,
   disabled,
   onAction,
-  projects,
 }: PanelPageProps & {
   assignment: ProjectAssignmentView | null;
   library: ProjectMemoryCardLibrary | null;
@@ -49,8 +47,6 @@ export function Agents({
   const assignmentDisabled = disabled;
   const syncBusy = pendingAction === "写入-Agent-文件";
   const clearAllBusy = pendingAction === "清空-全部分配";
-  const verification = quality?.build_preview.verification ?? null;
-  const ruleCi = verification?.rule_ci ?? quality?.rule_ci ?? snapshot?.rule_ci ?? null;
 
   React.useEffect(() => {
     setHasUnwrittenChanges(false);
@@ -144,7 +140,7 @@ export function Agents({
   }
 
   async function copyReloadPrompt() {
-    const prompt = verification?.reload_prompt ?? `请重新读取本项目的 AGENTS.md / CLAUDE.md 以及 .agents/.claude skills，并在当前会话中遵循最新 Enabled Memory Cards。项目路径：${projectPath}`;
+    const prompt = `请重新读取本项目的 AGENTS.md / CLAUDE.md 以及 .agents/.claude skills，并在当前会话中遵循最新 Enabled Memory Cards。项目路径：${projectPath}`;
     try {
       await navigator.clipboard.writeText(prompt);
       setReloadPromptStatus("已复制重读提示");
@@ -164,33 +160,28 @@ export function Agents({
     assignMemoryCardToAgent(memory_cardId, agent);
   }
 
-  /** 计算覆盖率 */
-  const totalMemoryCards = allAvailable.length;
-  const assignedMemoryCards = rows.filter((row) => Object.values(row.targets).some(Boolean)).length;
-  const coveragePercent = totalMemoryCards > 0 ? Math.round((assignedMemoryCards / totalMemoryCards) * 100) : 0;
-  const unassignedCount = totalMemoryCards - assignedMemoryCards;
-
   return (
     <div className="stack">
-      {/* ===== Loadout 标题 ===== */}
-      <Panel title="Memory Card Loadout" subtitle="为当前项目配置记忆卡；分配后写入 Agent 文件才会更新生成产物。" icon={GitBranch}>
+      {/* ===== Loadout 极简大盘头部 ===== */}
+      <Panel title="Memory Card Loadout" subtitle="将左侧建议池的 Memory Card 挂载分配至右侧对应的目标智能体并一键同步写入。">
         {agents.length === 0 ? (
           <EmptyState title="暂无目标智能体" description="当前项目未检测到 Codex 或 Claude Code 配置。" />
         ) : (
           <>
             <div className="target-scope-row">
               <div className="target-scope-label">
-                <strong>当前项目</strong>
+                <strong>当前项目大纲</strong>
                 <span>{projectLabel}</span>
               </div>
-              <div className="target-scope-current">
-                <strong>{hasUnwrittenChanges ? "有未写入变更" : "生成产物待检查"}</strong>
-                <span>{projectPath}</span>
+              <div className="target-scope-current" style={{ marginLeft: "auto", marginRight: "24px" }}>
+                <strong style={{ color: hasUnwrittenChanges ? "var(--color-accent)" : "var(--color-success)" }}>
+                  {hasUnwrittenChanges ? "● 存在未保存的分配改动" : "● 分配产物已完美保持同步"}
+                </strong>
               </div>
               <div className="assignment-toolbar">
                 <ActionButton
                   icon={Save}
-                  label="写入 Agent 文件"
+                  label="写入 Agent 文件生效"
                   busyLabel="写入中"
                   busy={syncBusy}
                   disabled={disabled || syncBusy}
@@ -198,7 +189,7 @@ export function Agents({
                 />
                 <ActionButton
                   icon={MessageSquareText}
-                  label="提示重读"
+                  label="一键复制重读提示"
                   busyLabel="准备中"
                   busy={false}
                   disabled={!projectPath}
@@ -207,7 +198,7 @@ export function Agents({
                 <ActionButton
                   variant="danger"
                   icon={Trash2}
-                  label="清空本项目分配"
+                  label="清空本项目全部分配"
                   busyLabel="清空中"
                   busy={clearAllBusy}
                   disabled={assignmentDisabled || clearAllBusy || rows.length === 0}
@@ -215,204 +206,168 @@ export function Agents({
                 />
               </div>
             </div>
-            {reloadPromptStatus ? <div className="target-apply-note">{reloadPromptStatus}</div> : null}
-            <div className={`sync-verification-card ${verification?.status ?? "pending"}`}>
-              <div>
-                <span>Sync Verification</span>
-                <strong>
-                  Rule CI {ruleCi?.passed ?? 0} passed / {ruleCi?.failed ?? 0} failed
-                </strong>
-              </div>
-              {(verification?.next_actions ?? ["写入 Agent 文件后，这里会显示验证结果和下一步。"]).slice(0, 2).map((action) => (
-                <p key={action}>{action}</p>
-              ))}
-            </div>
-            <div className="loadout-grid">
-              {agents.map((agent) => {
-                const equipped = getEquippedFor(agent);
-                const clearAgentBusy = pendingAction === `清空-${agent}`;
-                return (
-                  <div
-                    className={`loadout-column ${dragOverAgent === agent ? "drag-over" : ""}`}
-                    key={agent}
-                    onDragOver={(event) => {
-                      if (assignmentDisabled) return;
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = "copy";
-                      setDragOverAgent(agent);
-                    }}
-                    onDragEnter={(event) => {
-                      if (assignmentDisabled) return;
-                      event.preventDefault();
-                      setDragOverAgent(agent);
-                    }}
-                    onDragLeave={() => setDragOverAgent((current) => (current === agent ? null : current))}
-                    onDrop={(event) => handleDrop(event, agent)}
-                  >
-                    <h3>
-                      <span className="loadout-dot" />
-                      {formatAgent(agent)}
-                      <span className="loadout-count">
-                        {equipped.length} 已装备
-                      </span>
-                      <button
-                        className="icon-action"
-                        disabled={assignmentDisabled || clearAgentBusy || equipped.length === 0}
-                        title={`清空 ${formatAgent(agent)} 的全部分配`}
-                        aria-label={`清空 ${formatAgent(agent)} 的全部分配`}
-                        onClick={() => clearAgentAssignments(agent)}
-                      >
-                        {clearAgentBusy ? <Loader2 className="spin" size={13} /> : <Trash2 size={13} />}
-                      </button>
-                    </h3>
-                    {equipped.length === 0 ? (
-                      <p className="empty" style={{ textAlign: "center", padding: "12px 0" }}>
-                        暂无装备的 Memory Card
-                      </p>
-                    ) : (
-                      equipped.map((row) => (
-                        <button
-                          key={`${row.memory_card_id}-${agent}`}
-                          className="equipped-item"
-                          draggable={!assignmentDisabled}
-                          disabled={assignmentDisabled}
-                          title={`点击取消分配给 ${formatAgent(agent)}`}
-                          onDragStart={(event) => startMemoryCardDrag(event, { id: row.memory_card_id, title: row.title, scope: row.scope ?? "project" })}
-                          onClick={() => {
-                            const currentTargets = agents.filter((a) => row.targets[a]);
-                            const nextTargets = nextMemoryCardTargets(currentTargets, agent, false);
-                            void runAssignmentAction(
-                              `切换-${row.memory_card_id}|${agent}`,
-                              `已更新"${row.title}"的目标智能体`,
-                              "set_memory_card_targets",
-                              { id: row.memory_card_id, targets: nextTargets },
-                            );
-                          }}
-                        >
-                          {togglingMemoryCardId === row.memory_card_id && togglingAgent === agent ? (
-                            <Loader2 className="spin" size={13} />
-                          ) : (
-                            <Check size={13} className="equip-check" />
-                          )}
-                          <span className="equip-name">{row.title}</span>
-                          <span className="equip-kind">
-                            {row.scope === "global" ? "全局" : "项目"}
-                          </span>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+            {reloadPromptStatus ? <div className="target-apply-note" style={{ borderRadius: "12px" }}>{reloadPromptStatus}</div> : null}
           </>
         )}
       </Panel>
 
-      {/* ===== Memory Card 池 ===== */}
-      <div className="skill-pool">
-        <div className="skill-pool-head">
-          <h3>可用 Memory Cards</h3>
-          <span>拖到上方智能体完成 Loadout 配置</span>
-        </div>
-        {allAvailable.length === 0 ? (
-          <EmptyState title="暂无可用 Memory Card" description="批准建议后，这里会显示可配置到 Loadout 的 Memory Card。" />
-        ) : (
-          <div className="pool-groups">
-            {(["rule", "procedure", "constraint", "preference", "other"] as const).map((kind) => {
-              const items = kind === "other"
-                ? allAvailable.filter((item) => !["rule", "procedure", "constraint", "preference"].includes(item.kind))
-                : poolByKind[kind];
-              if (!items || items.length === 0) return null;
-              return (
-                <div className="pool-group" key={kind}>
-                  <h4>{kind === "other" ? "其他" : translateKind(kind)}</h4>
-                  <div className="pool-items">
-                    {items.map((s) => {
-                      const equipped = isEquippedAnywhere(s.id);
-                      return (
-                        <div
-                          key={s.id}
-                          role="button"
-                          tabIndex={assignmentDisabled ? -1 : 0}
-                          className={`pool-item ${equipped ? "equipped" : ""}`}
-                          draggable={!assignmentDisabled}
-                          onDragStart={(event) => startMemoryCardDrag(event, s)}
-                          onDragEnd={() => setDragOverAgent(null)}
-                          aria-disabled={assignmentDisabled}
-                          title={s.title}
-                          onKeyDown={(event) => {
-                            if (assignmentDisabled || event.key !== "Enter" || agents.length === 0) return;
-                            assignMemoryCardToAgent(s.id, agents[0]!);
-                          }}
-                        >
-                          {equipped ? <Check size={12} className="pool-check" /> : <Circle size={12} />}
-                          <span className="pool-title">{s.title}</span>
-                          <span className="pool-source">{sourceScopeLabel(s)}</span>
-                        </div>
-                      );
-                    })}
+      {/* ===== 双栏极简左右互锁分配区 ===== */}
+      <div className="drafts-grid" style={{ gridTemplateColumns: "1.1fr 0.9fr", gap: "28px" }}>
+        {/* 左栏：可用 Memory Cards 卡池 */}
+        <div className="skill-pool" style={{ borderRadius: "20px", padding: "24px" }}>
+          <div className="skill-pool-head" style={{ marginBottom: "16px" }}>
+            <h3 style={{ fontSize: "14px", fontWeight: "750" }}>可用 Memory Card 规则池</h3>
+            <span style={{ fontSize: "11px", color: "var(--color-text-dim)" }}>
+              你可以直接选择规则卡片拖动到右侧目标 Agent 中进行快速绑定装填。
+            </span>
+          </div>
+          {allAvailable.length === 0 ? (
+            <EmptyState title="暂无可用 Memory Card" description="请先去「建议审阅」提取和批准一些条例卡片。" />
+          ) : (
+            <div className="pool-groups">
+              {(["rule", "procedure", "constraint", "preference", "other"] as const).map((kind) => {
+                const items = kind === "other"
+                  ? allAvailable.filter((item) => !["rule", "procedure", "constraint", "preference"].includes(item.kind))
+                  : poolByKind[kind];
+                if (!items || items.length === 0) return null;
+                return (
+                  <div className="pool-group" key={kind} style={{ marginTop: "12px" }}>
+                    <h4 style={{ fontSize: "10.5px", color: "var(--color-text-dim)", textTransform: "uppercase" }}>
+                      {kind === "other" ? "其他" : translateKind(kind)}
+                    </h4>
+                    <div className="pool-items" style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "6px" }}>
+                      {items.map((s) => {
+                        const equipped = isEquippedAnywhere(s.id);
+                        return (
+                          <div
+                            key={s.id}
+                            role="button"
+                            tabIndex={assignmentDisabled ? -1 : 0}
+                            className={`pool-item ${equipped ? "equipped" : ""}`}
+                            draggable={!assignmentDisabled}
+                            onDragStart={(event) => startMemoryCardDrag(event, s)}
+                            onDragEnd={() => setDragOverAgent(null)}
+                            aria-disabled={assignmentDisabled}
+                            title={s.title}
+                            onKeyDown={(event) => {
+                              if (assignmentDisabled || event.key !== "Enter" || agents.length === 0) return;
+                              assignMemoryCardToAgent(s.id, agents[0]!);
+                            }}
+                            style={{
+                              borderRadius: "8px",
+                              padding: "6px 12px",
+                              border: equipped ? "1.5px solid var(--color-success)" : "1px dashed var(--color-border)",
+                              boxShadow: "var(--shadow-sm)"
+                            }}
+                          >
+                            {equipped ? <Check size={12} className="pool-check" style={{ color: "var(--color-success)" }} /> : <Circle size={12} />}
+                            <span className="pool-title" style={{ fontWeight: equipped ? "650" : "500" }}>{s.title}</span>
+                            <span className="pool-source" style={{ borderRadius: "4px" }}>{sourceScopeLabel(s)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
-      {/* ===== 分配矩阵（原有功能保留） ===== */}
-      <Panel title="Loadout Matrix" subtitle="精细管理每个 Memory Card 到每个智能体的分配关系。" icon={GitBranch}>
-        {rows.length === 0 ? (
-          <EmptyState title="暂无 Loadout 数据" description="安装包或批准 Memory Card 后，这里会显示目标智能体矩阵。" />
-        ) : (
-          <div className="matrix" style={{ gridTemplateColumns: `minmax(180px, 1fr) repeat(${Math.max(agents.length, 1)}, 100px)` }}>
-            <div className="matrix-head">Memory Card</div>
-            {agents.map((agent) => (
-              <div className="matrix-head" key={agent}>
-                {formatAgent(agent)}
+        {/* 右栏：智能体槽位分配清单 */}
+        <div className="loadout-grid" style={{ display: "grid", gridTemplateColumns: "1fr", gap: "16px" }}>
+          {agents.map((agent) => {
+            const equipped = getEquippedFor(agent);
+            const clearAgentBusy = pendingAction === `清空-${agent}`;
+            return (
+              <div
+                className={`loadout-column ${dragOverAgent === agent ? "drag-over" : ""}`}
+                key={agent}
+                onDragOver={(event) => {
+                  if (assignmentDisabled) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "copy";
+                  setDragOverAgent(agent);
+                }}
+                onDragEnter={(event) => {
+                  if (assignmentDisabled) return;
+                  event.preventDefault();
+                  setDragOverAgent(agent);
+                }}
+                onDragLeave={() => setDragOverAgent((current) => (current === agent ? null : current))}
+                onDrop={(event) => handleDrop(event, agent)}
+                style={{
+                  borderRadius: "20px",
+                  padding: "20px",
+                  border: dragOverAgent === agent ? "1.5px solid var(--color-accent)" : "1px solid var(--color-border)",
+                  boxShadow: "var(--shadow-md)"
+                }}
+              >
+                <h3 style={{ display: "flex", alignItems: "center", borderBottom: "1px dashed var(--color-border)", paddingBottom: "12px", marginBottom: "12px" }}>
+                  <span className="loadout-dot" style={{ background: "var(--color-accent-ring)" }} />
+                  {formatAgent(agent)}
+                  <span className="loadout-count" style={{ borderRadius: "8px", fontSize: "11px", fontWeight: "700" }}>
+                    已分配 {equipped.length} 条记忆规则
+                  </span>
+                  <button
+                    className="icon-action"
+                    disabled={assignmentDisabled || clearAgentBusy || equipped.length === 0}
+                    title={`清空 ${formatAgent(agent)} 的全部分配`}
+                    aria-label={`清空 ${formatAgent(agent)} 的全部分配`}
+                    onClick={() => clearAgentAssignments(agent)}
+                    style={{ marginLeft: "12px", width: "28px", height: "28px", borderRadius: "8px" }}
+                  >
+                    {clearAgentBusy ? <Loader2 className="spin" size={12} /> : <Trash2 size={12} />}
+                  </button>
+                </h3>
+                {equipped.length === 0 ? (
+                  <p className="empty" style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-dim)" }}>
+                    暂无分配 Memory Card，可从左边拖入或点击绑定。
+                  </p>
+                ) : (
+                  <div style={{ display: "grid", gap: "6px" }}>
+                    {equipped.map((row) => (
+                      <button
+                        key={`${row.memory_card_id}-${agent}`}
+                        className="equipped-item"
+                        draggable={!assignmentDisabled}
+                        disabled={assignmentDisabled}
+                        title={`点击取消分配给 ${formatAgent(agent)}`}
+                        onDragStart={(event) => startMemoryCardDrag(event, { id: row.memory_card_id, title: row.title, scope: row.scope ?? "project" })}
+                        onClick={() => {
+                          const currentTargets = agents.filter((a) => row.targets[a]);
+                          const nextTargets = nextMemoryCardTargets(currentTargets, agent, false);
+                          void runAssignmentAction(
+                            `切换-${row.memory_card_id}|${agent}`,
+                            `已更新"${row.title}"的目标智能体`,
+                            "set_memory_card_targets",
+                            { id: row.memory_card_id, targets: nextTargets },
+                          );
+                        }}
+                        style={{
+                          borderRadius: "10px",
+                          background: "var(--color-canvas)",
+                          padding: "10px 14px",
+                          border: "1px solid var(--color-border)",
+                          display: "flex",
+                          alignItems: "center"
+                        }}
+                      >
+                        {togglingMemoryCardId === row.memory_card_id && togglingAgent === agent ? (
+                          <Loader2 className="spin" size={12} />
+                        ) : (
+                          <Check size={12} className="equip-check" style={{ color: "var(--color-success)", marginRight: "8px" }} />
+                        )}
+                        <span className="equip-name" style={{ fontWeight: "600", fontSize: "12.5px" }}>{row.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            ))}
-            {rows.flatMap((row) => {
-              const currentTargets = agents.filter((a) => row.targets[a]);
-              return [
-                <div key={`${row.memory_card_id}-title`} className="matrix-title">
-                  {row.title}
-                  <span className="matrix-scope">{row.scope === "global" ? "全局来源" : "项目"}</span>
-                </div>,
-                ...agents.map((agent) => {
-                  const isOn = row.targets[agent];
-                  const isToggling = togglingMemoryCardId === row.memory_card_id && togglingAgent === agent;
-                  const nextTargets = nextMemoryCardTargets(currentTargets, agent, !isOn);
-                  return (
-                    <button
-                      key={`${row.memory_card_id}-${agent}`}
-                      className={`matrix-cell interactive ${isOn ? "on" : "off"} ${isToggling ? "toggling" : ""}`}
-                      disabled={assignmentDisabled}
-                      title={isOn ? `点击取消分配给 ${formatAgent(agent)}` : `点击分配给 ${formatAgent(agent)}`}
-                      onClick={() =>
-                        runAssignmentAction(
-                          `切换-${row.memory_card_id}|${agent}`,
-                          `已更新"${row.title}"的目标智能体`,
-                          "set_memory_card_targets",
-                          { id: row.memory_card_id, targets: nextTargets },
-                        )
-                      }
-                    >
-                      {isToggling ? (
-                        <Loader2 className="spin" size={14} />
-                      ) : isOn ? (
-                        <Check size={15} />
-                      ) : (
-                        <Circle size={13} />
-                      )}
-                    </button>
-                  );
-                }),
-              ];
-            })}
-          </div>
-        )}
-      </Panel>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
