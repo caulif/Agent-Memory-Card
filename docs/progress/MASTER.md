@@ -23,11 +23,12 @@ Branch: codex/ui-product-quality-pass
 | UQ1 Workflow Cockpit And First-Run Guidance | #22 | done |
 | UQ2 Suggestion Review Clarity | #23 | done |
 | UQ3 Memory Card Management Clarity | #24 | done |
+| BUG Corrupt Project Registry Recovery | #25 | done |
 
 ## Current Status
 
 - Active task: complete
-- Next step: package, commit, and hand off the trial build.
+- Next step: hand off the repaired registry state and refreshed trial build.
 
 ## Quick Status Commands
 

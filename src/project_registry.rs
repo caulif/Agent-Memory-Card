@@ -1,11 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tempfile::NamedTempFile;
 
 use crate::fsutil;
 
@@ -82,15 +84,18 @@ pub fn registry_path(home: &Path) -> PathBuf {
 pub fn load_registry(home: &Path) -> Result<ProjectRegistry> {
     let path = registry_path(home);
     if !path.exists() {
-        return Ok(ProjectRegistry {
-            version: 1,
-            projects: Vec::new(),
-        });
+        return Ok(empty_registry());
     }
 
     let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-    let registry =
-        serde_yaml::from_str(&text).with_context(|| format!("parse {}", path.display()))?;
+    let registry = match serde_yaml::from_str(&text) {
+        Ok(registry) => registry,
+        Err(_error) => {
+            quarantine_invalid_registry(&path)
+                .with_context(|| format!("quarantine invalid {}", path.display()))?;
+            return Ok(empty_registry());
+        }
+    };
     Ok(dedupe_registry(registry))
 }
 
@@ -107,7 +112,21 @@ pub fn save_registry(home: &Path, registry: &ProjectRegistry) -> Result<()> {
     }
     let deduped = dedupe_registry(registry.clone());
     let text = serde_yaml::to_string(&deduped)?;
-    fs::write(&path, text).with_context(|| format!("write {}", path.display()))
+    let parent = path
+        .parent()
+        .with_context(|| format!("find parent for {}", path.display()))?;
+    let mut temp_file = NamedTempFile::new_in(parent)
+        .with_context(|| format!("create temp file in {}", parent.display()))?;
+    temp_file
+        .write_all(text.as_bytes())
+        .with_context(|| format!("write {}", temp_file.path().display()))?;
+    temp_file
+        .flush()
+        .with_context(|| format!("flush {}", temp_file.path().display()))?;
+    temp_file
+        .into_temp_path()
+        .persist(&path)
+        .with_context(|| format!("replace {}", path.display()))
 }
 
 pub fn add_project(home: &Path, project: &Path) -> Result<RegisteredProject> {
@@ -240,6 +259,22 @@ fn dedupe_registry(registry: ProjectRegistry) -> ProjectRegistry {
         version: registry.version.max(1),
         projects: projects.into_values().collect(),
     }
+}
+
+fn empty_registry() -> ProjectRegistry {
+    ProjectRegistry {
+        version: 1,
+        projects: Vec::new(),
+    }
+}
+
+fn quarantine_invalid_registry(path: &Path) -> Result<()> {
+    let backup_path = path.with_file_name(format!(
+        "projects.invalid-{}.yml",
+        Utc::now().format("%Y%m%dT%H%M%S%fZ")
+    ));
+    fs::rename(path, &backup_path)
+        .with_context(|| format!("move {} to {}", path.display(), backup_path.display()))
 }
 
 fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
@@ -506,5 +541,40 @@ mod tests {
 
         assert_eq!(loaded.projects.len(), 1);
         assert_eq!(loaded.projects[0].name, "project");
+    }
+
+    #[test]
+    fn scan_recovers_from_corrupt_registry_file() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let home = temp.path().join("home");
+        let registry_dir = home.join(".agent-kernel");
+        fs::create_dir_all(&registry_dir).expect("registry dir");
+        fs::write(
+            registry_dir.join("projects.yml"),
+            "version: 1\nprojects:\n- name: broken\n  path: C:/broken\n  last_seen: now\ntrailing-garbage\n",
+        )
+        .expect("corrupt registry");
+
+        let project = temp.path().join("project");
+        fs::create_dir_all(project.join(".agent-kernel")).expect("kernel dir");
+
+        let report =
+            scan_and_register(&home, std::slice::from_ref(&project), 1).expect("scan recovers");
+
+        assert_eq!(report.total, 1);
+        assert_eq!(
+            load_registry(&home).expect("load registry").projects.len(),
+            1
+        );
+        assert!(
+            fs::read_dir(&registry_dir)
+                .expect("registry entries")
+                .any(|entry| entry
+                    .expect("entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("projects.invalid-")),
+            "corrupt registry should be preserved for manual recovery"
+        );
     }
 }
