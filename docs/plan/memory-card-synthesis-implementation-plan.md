@@ -46,8 +46,16 @@ When the implementation grows beyond this first synthesis contract, do not hand-
 - event/trace stream for UI and audit
 - explicit stop conditions instead of fixed tool-call limits
 - read-only tools by default for synthesis
+- progressive Skill discovery: list metadata first, load full `SKILL.md` only for likely project-level targets
+- append-only session/trace entries so retries and merge decisions are auditable
 
 This slice should prepare compatible metadata (`synthesis_trace`, value tools, stop reasons) without prematurely implementing the full runtime.
+
+Before implementing a full agent runtime, make an explicit build-or-adapt decision:
+
+1. Prefer embedding or wrapping `@earendil-works/pi-agent-core` if the runtime can stay in the TypeScript/Tauri boundary without weakening Rust ownership of Memory Card writes.
+2. If Rust must own the loop, port the pi contracts directly: `SynthesisSession`, `SynthesisMessage`, `transform_context`, `convert_to_provider_messages`, typed read-only tools, pre/post tool hooks, event stream, and stop-condition evaluator.
+3. Avoid a one-off loop that mixes retrieval, prompting, tool execution, validation, and persistence in one service. That would violate the project's S.U.P.E.R boundaries and make later replacement expensive.
 
 ## Phase Breakdown
 

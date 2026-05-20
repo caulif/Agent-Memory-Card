@@ -69,6 +69,25 @@ The agent must not send private conversation excerpts as raw web search queries.
 - `earendil-works/pi` is useful as a reference for a lightweight agent base: stateful agent sessions, tool execution, event streaming, context transforms, preflight hooks, post-tool hooks, and stop conditions.
 - Current Agent Memory Kernel already has observations, candidates, Memory Cards, Skills, provider calls, merge paths, and review UI. The next step is not a rewrite; it is a sharper synthesis layer above the existing pipeline.
 
+## Mature Agent Reuse Constraint
+
+Do not build the Memory Card synthesis agent as an ad hoc ReAct loop. If the product needs a true runtime, first evaluate whether the `earendil-works/pi` packages can be embedded or adapted. If direct reuse is not practical because this project keeps its core in Rust/Tauri, port the architecture shape rather than inventing a looser one.
+
+The minimum compatible shape should mirror pi's mature boundaries:
+
+| Pi pattern | Memory Card synthesis implication |
+|---|---|
+| Stateful agent context | Keep `SynthesisSession` state instead of rebuilding prompts from scattered strings. |
+| `AgentMessage -> transformContext -> convertToLlm` | Separate product trace/context records from provider-ready prompt messages. |
+| Typed tools with validated arguments | Expose `search_observations`, `read_skill_summary`, `find_memory_duplicates`, and web tools as schema-checked read-only tools. |
+| `beforeToolCall` / `afterToolCall` hooks | Enforce read-only access, evidence caps, source citation, duplicate checks, and trace normalization around tool use. |
+| Event stream | Emit compact reviewable events for the UI: reads, comparisons, duplicate decisions, stop reason. |
+| Explicit stop conditions | Stop on enough evidence, already-covered proof, merge target found, insufficient evidence, or context pressure. Do not use a fixed tool-count cutoff as the main control. |
+| Session tree / resumable history | Store synthesis attempts as append-only trace entries so review can explain what changed across retries. |
+| Progressive skill loading | Scan Skills broadly, but load full `SKILL.md` details only for likely project-level targets. |
+
+This constraint exists to keep the agent boring in the good way: observable, typed, bounded, resumable, and replaceable. The user should experience better Memory Cards, not a custom agent framework leaking into the product.
+
 ## Proposed Pipeline
 
 ```mermaid
