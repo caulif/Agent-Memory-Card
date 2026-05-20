@@ -25,14 +25,14 @@ export function Agents({
   const agents = assignment?.target_matrix.agents ?? snapshot?.target_matrix.agents ?? [];
   const rows = assignment?.target_matrix.rows ?? snapshot?.target_matrix.rows ?? [];
   const memory_cards = library?.memory_cards ?? snapshot?.memory_cards ?? [];
-  const globalMemoryCards = library?.global_memory_cards ?? snapshot?.global_memory_cards ?? [];
   const togglingKey = pendingAction.startsWith("切换-") ? pendingAction : "";
   const [dragOverAgent, setDragOverAgent] = React.useState<string | null>(null);
+  const [selectedMemoryCardId, setSelectedMemoryCardId] = React.useState<string | null>(null);
 
   const projectPath = assignment?.project_path ?? snapshot?.project_path ?? "";
   const allAvailable = React.useMemo(
-    () => dedupeAvailableMemoryCards([...memory_cards, ...globalMemoryCards], projectPath),
-    [globalMemoryCards, projectPath, memory_cards],
+    () => dedupeAvailableMemoryCards(memory_cards, projectPath).filter((card) => isProjectSource(card, projectPath)),
+    [projectPath, memory_cards],
   );
 
   const assignmentDisabled = disabled;
@@ -82,6 +82,7 @@ export function Agents({
       "set_memory_card_targets",
       { id: memory_cardId, targets: nextTargets },
     );
+    setSelectedMemoryCardId(null);
   }
 
   function clearAgentAssignments(agent: string) {
@@ -104,6 +105,8 @@ export function Agents({
     assignMemoryCardToAgent(memory_cardId, agent);
   }
 
+  const selectedMemoryCard = allAvailable.find((card) => card.id === selectedMemoryCardId) ?? null;
+
   return (
     <div className="stack">
       {/* ===== Loadout 极简大盘头部 ===== */}
@@ -111,7 +114,7 @@ export function Agents({
         <div>
           <h2 style={{ margin: 0, fontSize: "20px", fontWeight: "bold" }}>Memory Card Loadout</h2>
           <p style={{ margin: "4px 0 0 0", color: "var(--color-text-secondary)", fontSize: "13px" }}>
-            将左侧建议池的 Memory Card 挂载分配至右侧对应的目标智能体插件槽中。
+            只装配当前项目的 Memory Card。先点选左侧卡片，再点右侧智能体槽位装入。
           </p>
         </div>
         <div style={{ borderRadius: "8px", border: "1px solid var(--color-border)", padding: "6px 12px", background: "var(--color-surface)", display: "flex", alignItems: "center", gap: "8px" }}>
@@ -126,13 +129,13 @@ export function Agents({
         <EmptyState title="暂无目标智能体" description="当前项目未检测到 Codex 或 Claude Code 配置。" />
       ) : (
         /* ===== 双栏极简左右互锁分配区 ===== */
-        <div className="drafts-grid" style={{ gridTemplateColumns: "1.1fr 0.9fr", gap: "28px" }}>
+        <div className="drafts-grid agents-loadout-shell" style={{ gap: "28px" }}>
           {/* 左栏：可用 Memory Cards 卡池 */}
           <div className="skill-pool" style={{ borderRadius: "20px", padding: "24px", background: "var(--color-surface)", border: "1px solid var(--color-border)" }}>
             <div className="skill-pool-head" style={{ marginBottom: "16px" }}>
               <h3 style={{ fontSize: "14px", fontWeight: "750", margin: 0 }}>可用 Memory Card 规则池</h3>
               <p style={{ fontSize: "11px", color: "var(--color-text-dim)", margin: "4px 0 0 0" }}>
-                可以直接选择规则卡片拖动到右侧目标智能体槽位中进行装填。
+                点击选择卡片；也可以拖动到右侧目标智能体槽位中。
               </p>
             </div>
             {allAvailable.length === 0 ? (
@@ -157,15 +160,20 @@ export function Agents({
                               key={s.id}
                               role="button"
                               tabIndex={assignmentDisabled ? -1 : 0}
-                              className={`pool-item ${equipped ? "equipped" : ""}`}
+                              className={`pool-item ${equipped ? "equipped" : ""} ${selectedMemoryCardId === s.id ? "selected" : ""}`}
                               draggable={!assignmentDisabled}
+                              aria-pressed={selectedMemoryCardId === s.id}
                               onDragStart={(event) => startMemoryCardDrag(event, s)}
                               onDragEnd={() => setDragOverAgent(null)}
+                              onClick={() => {
+                                if (assignmentDisabled) return;
+                                setSelectedMemoryCardId((current) => current === s.id ? null : s.id);
+                              }}
                               aria-disabled={assignmentDisabled}
                               title={s.title}
                               onKeyDown={(event) => {
-                                if (assignmentDisabled || event.key !== "Enter" || agents.length === 0) return;
-                                assignMemoryCardToAgent(s.id, agents[0]!);
+                                if (assignmentDisabled || event.key !== "Enter") return;
+                                setSelectedMemoryCardId((current) => current === s.id ? null : s.id);
                               }}
                               style={{
                                 borderRadius: "8px",
@@ -176,7 +184,6 @@ export function Agents({
                             >
                               {equipped ? <Check size={12} className="pool-check" style={{ color: "var(--color-success)" }} /> : <Circle size={12} />}
                               <span className="pool-title" style={{ fontWeight: equipped ? "650" : "500" }}>{s.title}</span>
-                              <span className="pool-source" style={{ borderRadius: "4px" }}>{sourceScopeLabel(s)}</span>
                             </div>
                           );
                         })}
@@ -190,9 +197,21 @@ export function Agents({
 
           {/* 右栏：智能体槽位分配清单 */}
           <div className="loadout-grid" style={{ display: "grid", gridTemplateColumns: "1fr", gap: "16px" }}>
+            {selectedMemoryCard ? (
+              <div className="loadout-selection">
+                <strong>已选择</strong>
+                <span>{selectedMemoryCard.title}</span>
+                <button type="button" className="ghost-action" onClick={() => setSelectedMemoryCardId(null)}>
+                  取消选择
+                </button>
+              </div>
+            ) : null}
             {agents.map((agent) => {
               const equipped = getEquippedFor(agent);
               const clearAgentBusy = pendingAction === `清空-${agent}`;
+              const selectedAlreadyEquipped = selectedMemoryCardId
+                ? equipped.some((row) => row.memory_card_id === selectedMemoryCardId)
+                : false;
               return (
                 <div
                   className={`loadout-column ${dragOverAgent === agent ? "drag-over" : ""}`}
@@ -224,20 +243,31 @@ export function Agents({
                     <span className="loadout-count" style={{ borderRadius: "8px", fontSize: "11px", fontWeight: "700", marginLeft: "8px" }}>
                       已装配 {equipped.length} 条规范
                     </span>
+                    {selectedMemoryCardId ? (
+                      <button
+                        className="secondary-action compact"
+                        disabled={assignmentDisabled || selectedAlreadyEquipped}
+                        title={selectedAlreadyEquipped ? "该卡片已在此智能体中" : `装入 ${formatAgent(agent)}`}
+                        onClick={() => assignMemoryCardToAgent(selectedMemoryCardId, agent)}
+                        style={{ marginLeft: "auto" }}
+                      >
+                        装入已选
+                      </button>
+                    ) : null}
                     <button
                       className="icon-action"
                       disabled={assignmentDisabled || clearAgentBusy || equipped.length === 0}
                       title={`卸载 ${formatAgent(agent)} 的全部卡片`}
                       aria-label={`卸载 ${formatAgent(agent)} 的全部卡片`}
                       onClick={() => clearAgentAssignments(agent)}
-                      style={{ marginLeft: "auto", width: "28px", height: "28px", borderRadius: "8px", cursor: "pointer" }}
+                      style={{ marginLeft: selectedMemoryCardId ? "0" : "auto", width: "28px", height: "28px", borderRadius: "8px", cursor: "pointer" }}
                     >
                       {clearAgentBusy ? <Loader2 className="spin" size={12} /> : <Trash2 size={12} />}
                     </button>
                   </h3>
                   {equipped.length === 0 ? (
                     <p className="empty" style={{ textAlign: "center", padding: "24px 0", color: "var(--color-text-dim)", margin: 0 }}>
-                      暂无分配 Memory Card，可从左边拖入或点击绑定。
+                      {selectedMemoryCard ? "点击上方“装入已选”即可挂载到此智能体。" : "暂无分配 Memory Card，先从左边点选一张项目卡片。"}
                     </p>
                   ) : (
                     <div style={{ display: "grid", gap: "6px" }}>
@@ -326,8 +356,4 @@ function normalizeMemoryCardText(value: string): string {
 
 function isProjectSource(memory_card: MemoryCardRecord, projectPath: string): boolean {
   return memory_card.scope === "project" || memory_card.source_project === projectPath || memory_card.id.startsWith("project:");
-}
-
-function sourceScopeLabel(memory_card: MemoryCardRecord): string {
-  return memory_card.scope === "global" || memory_card.id.startsWith("global:") ? "全局" : "项目";
 }

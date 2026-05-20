@@ -14,6 +14,7 @@ use crate::extract::memory_gate::{self, MemoryGateDisposition};
 use crate::feedback;
 use crate::fsutil;
 use crate::memory_card::{self, MemoryCardRecord, MemoryCardUpdate};
+use crate::provider::{self, ProviderJsonSchema, ProviderRequest};
 use crate::textutil;
 
 mod action;
@@ -491,6 +492,7 @@ pub fn approve_candidate_to_memory_card(project_root: &Path, id: &str) -> Result
             candidate.status
         ));
     }
+    let matured = mature_candidate_for_memory_card(&root, &candidate, &approvable_kind);
     if let Some(target_id) = candidate
         .extraction
         .suggested_action
@@ -510,12 +512,16 @@ pub fn approve_candidate_to_memory_card(project_root: &Path, id: &str) -> Result
             let updated = memory_card::update_memory_card_from_review(
                 &root,
                 &target_id,
-                existing_memory_card.title.clone(),
-                candidate.body.clone(),
-                candidate.brief.clone(),
-                candidate.tags.clone(),
-                candidate.language.clone(),
-                approvable_kind.clone(),
+                if matured.title.trim().is_empty() {
+                    existing_memory_card.title.clone()
+                } else {
+                    matured.title.clone()
+                },
+                matured.body.clone(),
+                matured.brief.clone(),
+                matured.tags.clone(),
+                matured.language.clone(),
+                matured.kind.clone(),
                 existing_memory_card.scope.clone(),
             )?;
             candidate.status = CandidateStatus::Promoted;
@@ -553,19 +559,19 @@ pub fn approve_candidate_to_memory_card(project_root: &Path, id: &str) -> Result
         }
         if memory_card::review_update_matches_existing(
             &existing_memory_card,
-            &candidate.title,
-            &candidate.body,
+            &matured.title,
+            &matured.body,
         ) {
             let updated = memory_card::update_memory_card_from_review(
                 &root,
                 &candidate.id,
-                candidate.title.clone(),
-                candidate.body.clone(),
-                candidate.brief.clone(),
-                candidate.tags.clone(),
-                candidate.language.clone(),
-                approvable_kind.clone(),
-                candidate.scope.clone(),
+                matured.title.clone(),
+                matured.body.clone(),
+                matured.brief.clone(),
+                matured.tags.clone(),
+                matured.language.clone(),
+                matured.kind.clone(),
+                matured.scope.clone(),
             )?;
             candidate.status = CandidateStatus::Promoted;
             candidate.updated_at = Utc::now().to_rfc3339();
@@ -589,10 +595,10 @@ pub fn approve_candidate_to_memory_card(project_root: &Path, id: &str) -> Result
     memory_card::add_memory_card_with_provenance(
         &root,
         &candidate.id,
-        &candidate.title,
-        &candidate.body,
-        &approvable_kind,
-        &candidate.scope,
+        &matured.title,
+        &matured.body,
+        &matured.kind,
+        &matured.scope,
         candidate.targets.clone(),
         Some(candidate.extraction.clone()),
         Some(candidate.id.clone()),
@@ -602,9 +608,9 @@ pub fn approve_candidate_to_memory_card(project_root: &Path, id: &str) -> Result
         &root,
         &candidate.id,
         MemoryCardUpdate {
-            brief: Some(candidate.brief.clone()),
-            tags: Some(candidate.tags.clone()),
-            language: Some(candidate.language.clone()),
+            brief: Some(matured.brief.clone()),
+            tags: Some(matured.tags.clone()),
+            language: Some(matured.language.clone()),
             ..MemoryCardUpdate::default()
         },
     )?;
@@ -620,6 +626,339 @@ pub fn approve_candidate_to_memory_card(project_root: &Path, id: &str) -> Result
         None,
     )?;
     Ok(memory_card)
+}
+
+#[derive(Debug, Clone)]
+struct MatureMemoryCardText {
+    title: String,
+    body: String,
+    brief: String,
+    kind: String,
+    scope: String,
+    tags: Vec<String>,
+    language: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct MatureMemoryCardResponse {
+    title: String,
+    body: String,
+    brief: String,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    scope: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+fn mature_candidate_for_memory_card(
+    project_root: &Path,
+    candidate: &CandidateRecord,
+    approvable_kind: &str,
+) -> MatureMemoryCardText {
+    mature_candidate_with_provider(project_root, candidate, approvable_kind)
+        .unwrap_or_else(|| mature_candidate_deterministic(candidate, approvable_kind))
+}
+
+fn mature_candidate_with_provider(
+    project_root: &Path,
+    candidate: &CandidateRecord,
+    approvable_kind: &str,
+) -> Option<MatureMemoryCardText> {
+    let provider_path = provider::provider_config_path(project_root).ok()?;
+    if !provider_path.exists() {
+        return None;
+    }
+    let cfg = provider::load_or_default_provider_config(project_root).ok()?;
+    let request = ProviderRequest {
+        system_prompt: r#"你是 Agent Memory Card 的最终改写审核器。
+
+目标：把候选口语片段改写成可长期复用的 Memory Card，而不是复述聊天原文。
+
+输出要求：
+- title 是短规范名，不要保留“/goal”“用户说”“这条候选”等聊天痕迹。
+- body 必须采用 When / Do / Boundary 三段结构；中文内容可写成“触发 / 动作 / 边界”。
+- Do 必须是未来 agent 可执行的行为规则。
+- Boundary 必须写清适用范围、人工确认点或不要越界的内容。
+- brief 用“用于...”概括这张卡的用途，不要复读 title/body。
+- 合并重复或相似语义时，保留更成熟、更可执行的表述。
+- 不要编造证据中没有的工具、路径、指标或团队规则。
+- 只返回 JSON。"#
+            .to_string(),
+        user_prompt: serde_json::json!({
+            "candidate": {
+                "id": candidate.id,
+                "title": candidate.title,
+                "kind": candidate.kind,
+                "normalized_kind": approvable_kind,
+                "scope": candidate.scope,
+                "body": candidate.body,
+                "brief": candidate.brief,
+                "tags": candidate.tags,
+                "evidence": candidate.evidence,
+                "reason": candidate.reason,
+            }
+        })
+        .to_string(),
+        json_schema: Some(ProviderJsonSchema {
+            name: "MatureMemoryCardReview".to_string(),
+            strict: true,
+            schema: serde_json::json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "title": { "type": "string" },
+                    "body": { "type": "string" },
+                    "brief": { "type": "string" },
+                    "kind": { "type": ["string", "null"], "enum": ["preference", "constraint", "procedure", "convention", "correction", "anti-pattern", "rule", "template", "workflow", null] },
+                    "scope": { "type": ["string", "null"], "enum": ["project", "global", "agent", "directory", "agent-specific", null] },
+                    "tags": { "type": "array", "items": { "type": "string" } }
+                },
+                "required": ["title", "body", "brief", "kind", "scope", "tags"]
+            }),
+        }),
+    };
+    let output =
+        provider::call_provider_for_role(&cfg, provider::ProviderRole::Refine, &request, 2048)
+            .ok()?;
+    let parsed: MatureMemoryCardResponse = serde_json::from_str(output.trim()).ok()?;
+    let body = parsed.body.trim().to_string();
+    let title = parsed.title.trim().to_string();
+    let brief = parsed.brief.trim().to_string();
+    if title.chars().count() < 4 || body.chars().count() < 32 || brief.chars().count() < 8 {
+        return None;
+    }
+    if body.contains("/goal") || body.contains("这条候选建议沉淀") {
+        return None;
+    }
+    let kind = parsed
+        .kind
+        .as_deref()
+        .map(normalize_approvable_candidate_kind)
+        .unwrap_or_else(|| approvable_kind.to_string());
+    let scope = parsed
+        .scope
+        .filter(|scope| is_valid_candidate_scope(scope))
+        .unwrap_or_else(|| candidate.scope.clone());
+    let tags = mature_tags(parsed.tags, candidate, &kind);
+    Some(MatureMemoryCardText {
+        title,
+        body,
+        brief,
+        kind,
+        scope,
+        tags,
+        language: infer_language(&candidate.title, &candidate.body),
+    })
+}
+
+fn mature_candidate_deterministic(
+    candidate: &CandidateRecord,
+    approvable_kind: &str,
+) -> MatureMemoryCardText {
+    let language = infer_language(&candidate.title, &candidate.body);
+    let title = mature_title(&candidate.title, &candidate.body);
+    let body = if is_structured_memory_body(&candidate.body) {
+        candidate.body.trim().to_string()
+    } else if language == "zh" {
+        render_structured_zh_body(candidate)
+    } else {
+        render_structured_en_body(candidate)
+    };
+    let brief = if is_mature_existing_brief(&candidate.brief) {
+        candidate.brief.trim().to_string()
+    } else {
+        mature_brief(&title, &body, &language)
+    };
+    MatureMemoryCardText {
+        title,
+        body,
+        brief,
+        kind: approvable_kind.to_string(),
+        scope: if is_valid_candidate_scope(&candidate.scope) {
+            candidate.scope.clone()
+        } else {
+            "project".to_string()
+        },
+        tags: mature_tags(candidate.tags.clone(), candidate, approvable_kind),
+        language,
+    }
+}
+
+fn is_structured_memory_body(body: &str) -> bool {
+    let lower = body.to_lowercase();
+    (lower.contains("when") && lower.contains("do") && lower.contains("boundary"))
+        || (body.contains("触发") && body.contains("动作") && body.contains("边界"))
+}
+
+fn render_structured_zh_body(candidate: &CandidateRecord) -> String {
+    let source = clean_chatty_text(&candidate.body);
+    let (trigger, action, boundary) = split_rule_parts(&source);
+    format!(
+        "触发：{}\n\n动作：{}\n\n边界：{}",
+        trigger, action, boundary
+    )
+}
+
+fn render_structured_en_body(candidate: &CandidateRecord) -> String {
+    let source = clean_chatty_text(&candidate.body);
+    let (trigger, action, boundary) = split_rule_parts(&source);
+    format!(
+        "When: {}\n\nDo: {}\n\nBoundary: {}",
+        trigger, action, boundary
+    )
+}
+
+fn split_rule_parts(source: &str) -> (String, String, String) {
+    let normalized = source
+        .trim()
+        .trim_matches(['“', '”', '"', '\'', '。', '.'])
+        .to_string();
+    let boundary_markers = [
+        "；边界是",
+        "；目标是",
+        "；目的是",
+        "；原因是",
+        "; boundary is",
+        "; goal is",
+    ];
+    let mut core = normalized.as_str();
+    let mut boundary =
+        "仅在该规则与当前项目的长期工作方式一致、且证据充分时应用；涉及高影响取舍时保留人工确认。"
+            .to_string();
+    for marker in boundary_markers {
+        if let Some((head, tail)) = normalized.split_once(marker) {
+            core = head;
+            boundary = tail.trim().trim_end_matches(['。', '.']).to_string();
+            break;
+        }
+    }
+    let (trigger, action) = core
+        .split_once('，')
+        .or_else(|| core.split_once(','))
+        .map(|(when, what)| (when.trim(), what.trim()))
+        .unwrap_or(("处理相关任务时", core.trim()));
+    (
+        ensure_when_clause(trigger),
+        ensure_action_clause(action),
+        boundary,
+    )
+}
+
+fn ensure_when_clause(value: &str) -> String {
+    let trimmed = value.trim().trim_end_matches('时');
+    if trimmed.is_empty() {
+        return "处理相关任务时".to_string();
+    }
+    if trimmed.starts_with("当") || trimmed.starts_with("在") {
+        format!("{trimmed}时")
+    } else if trimmed.to_lowercase().starts_with("when ") {
+        trimmed.to_string()
+    } else {
+        format!("当{trimmed}时")
+    }
+}
+
+fn ensure_action_clause(value: &str) -> String {
+    let trimmed = value.trim().trim_end_matches(['。', '.', ';', '；']);
+    if trimmed.is_empty() {
+        "先提炼可执行规则，再进行实现或同步".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn clean_chatty_text(value: &str) -> String {
+    value
+        .replace("/goal", "")
+        .replace("不要问我了，", "")
+        .replace("这条候选建议沉淀了", "")
+        .replace(['“', '”'], "")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn mature_title(title: &str, body: &str) -> String {
+    let cleaned = clean_chatty_text(title);
+    let source = if cleaned.trim().is_empty() {
+        clean_chatty_text(body)
+    } else {
+        cleaned
+    };
+    let title = source
+        .split(['：', ':', '；', ';', '。', '.', '，', ','])
+        .next()
+        .unwrap_or(source.as_str())
+        .trim()
+        .trim_start_matches("当")
+        .trim_start_matches("在")
+        .trim_end_matches("时")
+        .to_string();
+    title.chars().take(30).collect::<String>()
+}
+
+fn mature_brief(title: &str, body: &str, language: &str) -> String {
+    let summary = body
+        .lines()
+        .find(|line| line.contains("动作") || line.to_lowercase().starts_with("do:"))
+        .unwrap_or(body)
+        .replace("动作：", "")
+        .replace("Do:", "")
+        .trim()
+        .chars()
+        .take(54)
+        .collect::<String>()
+        .trim()
+        .trim_end_matches(['。', '.', ';', '；'])
+        .to_string();
+    if language == "zh" {
+        format!("用于在“{title}”场景下执行一致、可审阅的处理方式：{summary}。")
+    } else {
+        format!("Use this for consistent, reviewable handling of {title}: {summary}.")
+    }
+}
+
+fn is_mature_existing_brief(brief: &str) -> bool {
+    let trimmed = brief.trim();
+    !trimmed.is_empty()
+        && trimmed.chars().count() >= 8
+        && !trimmed.contains("这条候选建议沉淀")
+        && !trimmed.contains("以后遇到类似任务，可以复用")
+        && !trimmed.contains("/goal")
+}
+
+fn mature_tags(
+    mut tags: Vec<String>,
+    candidate: &CandidateRecord,
+    approvable_kind: &str,
+) -> Vec<String> {
+    tags.retain(|tag| !tag.trim().is_empty());
+    if tags.is_empty() {
+        tags = infer_candidate_tags(
+            &format!(
+                "{}\n{}\n{}",
+                candidate.title, candidate.body, approvable_kind
+            )
+            .to_lowercase(),
+            approvable_kind,
+        );
+    }
+    if !tags.iter().any(|tag| tag == approvable_kind) {
+        tags.push(approvable_kind.to_string());
+    }
+    tags.sort();
+    tags.dedup();
+    tags.truncate(8);
+    tags
+}
+
+fn is_valid_candidate_scope(scope: &str) -> bool {
+    matches!(
+        scope,
+        "project" | "global" | "agent" | "directory" | "agent-specific"
+    )
 }
 
 fn normalize_approvable_candidate_kind(kind: &str) -> String {

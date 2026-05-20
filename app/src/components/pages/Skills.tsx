@@ -1,5 +1,5 @@
 import React from "react";
-import { CheckCircle2, Link2, RefreshCw } from "lucide-react";
+import { CheckCircle2, Link2, RefreshCw, X } from "lucide-react";
 import { ActionButton, EmptyState } from "../common";
 import {
   type MemoryCardRecord,
@@ -22,6 +22,7 @@ export function Skills({
   const [activeSkillId, setActiveSkillId] = React.useState("");
   const [searchQuery, setSearchQuery] = React.useState("");
   const [selectedKind, setSelectedKind] = React.useState("all");
+  const [selectedScope, setSelectedScope] = React.useState<"project" | "global">("project");
   const [locallyAttachedCards, setLocallyAttachedCards] = React.useState<Record<string, string[]>>({});
 
   const visibleSkills = React.useMemo(() => {
@@ -43,15 +44,16 @@ export function Skills({
 
   const kinds = React.useMemo(() => {
     const list = new Set<string>();
-    for (const s of visibleSkills) {
+    for (const s of visibleSkills.filter((skill) => skillScope(skill) === selectedScope)) {
       if (s.source_kind) list.add(s.source_kind);
     }
     return ["all", ...Array.from(list)];
-  }, [visibleSkills]);
+  }, [selectedScope, visibleSkills]);
 
   const filteredSkills = React.useMemo(() => {
     const query = searchQuery.toLowerCase();
     return visibleSkills.filter((skill) => {
+      if (skillScope(skill) !== selectedScope) return false;
       const nameMatch = skill.name?.toLowerCase().includes(query);
       const descMatch = skill.description?.toLowerCase().includes(query);
       const cardMatch = [...skill.linked_memory_cards, ...skill.recommended_memory_cards].some((card) =>
@@ -60,12 +62,16 @@ export function Skills({
       const kindMatch = selectedKind === "all" || skill.source_kind === selectedKind;
       return (nameMatch || descMatch || cardMatch) && kindMatch;
     });
-  }, [visibleSkills, searchQuery, selectedKind]);
+  }, [visibleSkills, searchQuery, selectedKind, selectedScope]);
+
+  const projectSkillCount = React.useMemo(() => visibleSkills.filter((skill) => skillScope(skill) === "project").length, [visibleSkills]);
+  const globalSkillCount = visibleSkills.length - projectSkillCount;
 
   const activeSkill = React.useMemo(
     () => filteredSkills.find((skill) => skill.id === activeSkillId) ?? filteredSkills[0] ?? null,
     [activeSkillId, filteredSkills],
   );
+  const activeSkillIsProject = activeSkill ? skillScope(activeSkill) === "project" : false;
 
   if (skills.length === 0) {
     return (
@@ -96,7 +102,7 @@ export function Skills({
         <div className="skills-toolbar-copy">
           <h2 style={{ margin: 0, fontSize: "20px", fontWeight: "bold" }}>项目技能字典</h2>
           <p style={{ margin: "4px 0 0 0", color: "var(--color-text-secondary)", fontSize: "13px" }}>
-            查阅当前注册生效的工具集契约规范，这是智能体在当前项目被授予的专属拓展本领。
+            先看项目级 Skills，再查全局来源；Memory Card 只融合到当前项目可治理的 Skill。
           </p>
           {skillLibrary ? (
             <p className="skills-source-line">
@@ -105,6 +111,32 @@ export function Skills({
           ) : null}
         </div>
         <div className="skills-filter-row">
+          <div className="skill-scope-tabs" role="tablist" aria-label="Skill 来源范围">
+            <button
+              className={selectedScope === "project" ? "active" : ""}
+              type="button"
+              role="tab"
+              aria-selected={selectedScope === "project"}
+              onClick={() => {
+                setSelectedScope("project");
+                setSelectedKind("all");
+              }}
+            >
+              项目级 {projectSkillCount}
+            </button>
+            <button
+              className={selectedScope === "global" ? "active" : ""}
+              type="button"
+              role="tab"
+              aria-selected={selectedScope === "global"}
+              onClick={() => {
+                setSelectedScope("global");
+                setSelectedKind("all");
+              }}
+            >
+              全局 {globalSkillCount}
+            </button>
+          </div>
           <ActionButton
             variant="secondary"
             icon={RefreshCw}
@@ -155,7 +187,7 @@ export function Skills({
         {/* 左半边：技能目录选择区 */}
         <section className="skill-list" aria-label="Skill 列表" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           <div style={{ fontSize: "11px", fontWeight: "bold", textTransform: "uppercase", color: "var(--color-text-dim)", marginBottom: "4px" }}>
-            已注册的核心技能 ({filteredSkills.length})
+            {selectedScope === "project" ? "项目级 Skills" : "全局 Skills"} ({filteredSkills.length})
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "600px", overflowY: "auto" }}>
             {filteredSkills.map((skill) => (
@@ -176,7 +208,7 @@ export function Skills({
               >
                 <span style={{ fontWeight: activeSkill?.id === skill.id ? "700" : "600", fontSize: "13px", display: "block" }}>{skill.name}</span>
                 <small style={{ marginTop: "4px", display: "block", color: "var(--color-text-dim)", fontSize: "11px" }}>
-                  类型: {skill.source_kind} | 核心工具集成: {skill.mirror_targets?.length ? `${skill.mirror_targets.length} 处` : "内置"}
+                  {skillScopeLabel(skill)} · {sourceKindLabel(skill.source_kind)} · {skill.mirror_targets?.length ? `${skill.mirror_targets.length} 个镜像目标` : "未镜像"}
                 </small>
               </button>
             ))}
@@ -211,6 +243,12 @@ export function Skills({
 
             <div className="skill-meta-grid" style={{ display: "grid", gap: "16px" }}>
               <div style={{ padding: "12px", borderRadius: "10px", background: "var(--color-canvas)", border: "1px solid var(--color-border)" }}>
+                <span style={{ fontSize: "11px", color: "var(--color-text-dim)" }}>来源层级</span>
+                <strong style={{ fontSize: "12px", color: "var(--color-text-primary)", display: "block", marginTop: "4px" }}>
+                  {skillScopeLabel(activeSkill)} / {sourceKindLabel(activeSkill.source_kind)}
+                </strong>
+              </div>
+              <div style={{ padding: "12px", borderRadius: "10px", background: "var(--color-canvas)", border: "1px solid var(--color-border)" }}>
                 <span style={{ fontSize: "11px", color: "var(--color-text-dim)" }}>技能映射路径</span>
                 <strong
                   title={activeSkill.source_path}
@@ -242,6 +280,7 @@ export function Skills({
               skillId={activeSkill.id}
               linkedCards={activeSkill.linked_memory_cards}
               recommendedCards={activeSkill.recommended_memory_cards}
+              allowAttach={activeSkillIsProject}
               disabled={disabled}
               actionState={actionState}
               dispatchAction={dispatchAction}
@@ -276,7 +315,9 @@ export function Skills({
               <span>
                 {activeSkill.warnings.length > 0
                   ? activeSkill.warnings.slice(0, 2).join("；")
-                  : "该技能契约处于稳定运行状态，可按上方建议逐步补强上下文。"}
+                  : activeSkillIsProject
+                    ? "该项目级 Skill 可按上方建议逐步补强上下文。"
+                    : "该全局 Skill 仅作字典查阅；需要补强时请先在项目中声明对应 Skill。"}
               </span>
             </div>
           </section>
@@ -294,6 +335,7 @@ function SkillOptimizationPanel({
   skillId,
   linkedCards,
   recommendedCards,
+  allowAttach,
   disabled,
   actionState,
   dispatchAction,
@@ -302,6 +344,7 @@ function SkillOptimizationPanel({
   skillId: string;
   linkedCards: MemoryCardRecord[];
   recommendedCards: MemoryCardRecord[];
+  allowAttach: boolean;
   disabled: boolean;
   actionState: string;
   dispatchAction: ProjectAction;
@@ -309,6 +352,7 @@ function SkillOptimizationPanel({
 }) {
   const visibleLinked = linkedCards.slice(0, 3);
   const visibleRecommended = recommendedCards.slice(0, 4);
+  const [activeCardId, setActiveCardId] = React.useState<string | null>(null);
 
   return (
     <div
@@ -344,7 +388,9 @@ function SkillOptimizationPanel({
         <div>
           <strong style={{ fontSize: "12px" }}>可采纳的优化建议</strong>
           <p style={{ margin: "4px 0 0", color: "var(--color-text-dim)", fontSize: "11.5px", lineHeight: 1.5 }}>
-            来自已批准的 Memory Card，优先展示适合作为 Skill 流程补充的条目。
+            {allowAttach
+              ? "来自已批准的 Memory Card，先选择优化方式，再纳入当前项目 Skill。"
+              : "全局 Skill 暂不直接写入项目补充；这里仅显示潜在匹配项。"}
           </p>
         </div>
         {visibleRecommended.length === 0 ? (
@@ -355,6 +401,8 @@ function SkillOptimizationPanel({
           <div style={{ display: "grid", gap: "8px" }}>
             {visibleRecommended.map((card) => {
               const key = `补强-${skillId}|${card.id}`;
+              const fusionKey = `融合-${skillId}|${card.id}`;
+              const choosing = activeCardId === card.id;
               return (
                 <div
                   key={card.id}
@@ -368,38 +416,65 @@ function SkillOptimizationPanel({
                   }}
                 >
                   <MemoryCardMini card={card} tone="recommended" />
-                  <ActionButton
-                    variant="secondary"
-                    icon={Link2}
-                    label="纳入此 Skill"
-                    busyLabel="正在纳入"
-                    busy={actionState === key}
-                    disabled={disabled}
-                    onClick={async () => {
-                      await dispatchAction(key, "已纳入 Skill 上下文", "attach_memory_card_to_skill", {
-                        skillId,
-                        memoryCardId: card.id,
-                        fusionMode: "manual",
-                      });
-                      onAttached(card.id);
-                    }}
-                  />
-                  <ActionButton
-                    variant="primary"
-                    icon={Link2}
-                    label="自动融合"
-                    busyLabel="融合中"
-                    busy={actionState === `融合-${skillId}|${card.id}`}
-                    disabled={disabled}
-                    onClick={async () => {
-                      await dispatchAction(`融合-${skillId}|${card.id}`, "已自动融合进 Skill 上下文", "attach_memory_card_to_skill", {
-                        skillId,
-                        memoryCardId: card.id,
-                        fusionMode: "auto",
-                      });
-                      onAttached(card.id);
-                    }}
-                  />
+                  {allowAttach ? (
+                    choosing ? (
+                      <div className="skill-fusion-actions">
+                        <ActionButton
+                          variant="secondary"
+                          icon={Link2}
+                          label="直接纳入"
+                          busyLabel="正在纳入"
+                          busy={actionState === key}
+                          disabled={disabled}
+                          onClick={async () => {
+                            await dispatchAction(key, "已纳入 Skill 上下文", "attach_memory_card_to_skill", {
+                              skillId,
+                              memoryCardId: card.id,
+                              fusionMode: "manual",
+                            });
+                            onAttached(card.id);
+                            setActiveCardId(null);
+                          }}
+                        />
+                        <ActionButton
+                          variant="primary"
+                          icon={Link2}
+                          label="LLM 融合"
+                          busyLabel="融合中"
+                          busy={actionState === fusionKey}
+                          disabled={disabled}
+                          onClick={async () => {
+                            await dispatchAction(fusionKey, "已自动融合进 Skill 上下文", "attach_memory_card_to_skill", {
+                              skillId,
+                              memoryCardId: card.id,
+                              fusionMode: "auto",
+                            });
+                            onAttached(card.id);
+                            setActiveCardId(null);
+                          }}
+                        />
+                        <button
+                          type="button"
+                          className="ghost-action"
+                          disabled={disabled || actionState === key || actionState === fusionKey}
+                          onClick={() => setActiveCardId(null)}
+                        >
+                          <X size={14} />
+                          取消
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="secondary-action"
+                        disabled={disabled}
+                        onClick={() => setActiveCardId(card.id)}
+                      >
+                        <Link2 size={14} />
+                        选择优化方式
+                      </button>
+                    )
+                  ) : null}
                 </div>
               );
             })}
@@ -408,6 +483,29 @@ function SkillOptimizationPanel({
       </section>
     </div>
   );
+}
+
+function skillScope(skill: { id: string; source_kind: string; source_path: string }): "project" | "global" {
+  return skill.source_kind === "project" || skill.id.startsWith("project:") ? "project" : "global";
+}
+
+function skillScopeLabel(skill: { id: string; source_kind: string; source_path: string }) {
+  return skillScope(skill) === "project" ? "项目级 Skill" : "全局 Skill";
+}
+
+function sourceKindLabel(sourceKind: string) {
+  const labels: Record<string, string> = {
+    project: "项目目录",
+    home: "用户目录",
+    referenced: "全局引用",
+    "codex-home": "Codex 用户目录",
+    "codex-superpower": "Codex Superpower",
+    superpowers: "Codex Superpower",
+    "codex-plugin": "Codex 插件",
+    plugin: "Codex 插件",
+    "claude-home": "Claude Code 用户目录",
+  };
+  return labels[sourceKind] ?? sourceKind;
 }
 
 function formatSourceCounts(sourceCounts: Record<string, number>) {

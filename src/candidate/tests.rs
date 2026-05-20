@@ -140,6 +140,26 @@ fn approving_candidate_creates_memory_card_and_preserves_metadata() {
 }
 
 #[test]
+fn approving_chatty_candidate_matures_body_before_persisting() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut candidate = new_candidate("project:rough-goal", 0.91, Some("local"));
+    candidate.title = "/goal 全自动执行，不要问我了，自主搜索下载".to_string();
+    candidate.body = "/goal 全自动执行，不要问我了，自主搜索下载好用的工具，自己决策和实现，最后给我成品就行了。".to_string();
+    candidate.brief = Some("这条候选建议沉淀了“/goal 全自动执行，不要问我了”：/goal 全自动执行，不要问我了，自主搜索下载好用的工具".to_string());
+    candidate.kind = "constraint".to_string();
+    add_candidate(temp.path(), candidate).expect("candidate");
+
+    let memory_card =
+        approve_candidate_to_memory_card(temp.path(), "project:rough-goal").expect("memory_card");
+
+    assert!(memory_card.body.contains("触发："));
+    assert!(memory_card.body.contains("动作："));
+    assert!(memory_card.body.contains("边界："));
+    assert!(!memory_card.body.contains("/goal"));
+    assert!(!memory_card.brief.contains("这条候选建议沉淀"));
+}
+
+#[test]
 fn approving_merge_candidate_updates_existing_memory_card() {
     let temp = tempfile::tempdir().expect("tempdir");
     memory_card::add_memory_card(

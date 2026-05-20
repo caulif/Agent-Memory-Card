@@ -538,8 +538,9 @@ fn fuse_memory_card_for_skill_with_provider(
 
 规则：
 - 输出必须能直接写入 AGENT_KERNEL_MEMORY_CARDS.md。
-- 用 When / Do / Boundary 或中文等价结构组织。
+- 参考成熟 SKILL.md 的风格，用 Use when / Instructions / Boundaries 组织；中文内容可写成“适用场景 / 操作指令 / 边界”。
 - 保留 Memory Card 的真实意图，但只写与该 Skill 使用场景相关的部分。
+- 把口语请求改写为可执行的流程或约束，不要保留聊天原话。
 - 不要编造工具、路径、API 或用户没有确认的规则。
 - 如果原 Memory Card 与 Skill 无关，写成“仅在相关任务中参考”的弱补充边界。
 - 只返回 JSON。"#
@@ -593,12 +594,12 @@ fn fuse_memory_card_for_skill_deterministic(
 ) -> String {
     if memory_card.language == "zh" {
         format!(
-            "When / 触发：使用 `{}` 处理与 `{}` 相关的任务时。\n\nDo / 动作：参考 Memory Card「{}」：{}\n\nBoundary / 边界：仅在该规则与当前 Skill 的职责相符时应用；若证据不足，先保留人工审阅边界。",
+            "适用场景：当 `{}` 被用于处理 `{}` 相关任务时。\n\n操作指令：将 Memory Card「{}」转化为该 Skill 的补充约束：{}\n\n边界：仅在该规则与当前 Skill 的职责相符时应用；若证据不足或会改变用户意图，先保留人工审阅边界。",
             skill.name, memory_card.kind, memory_card.title, memory_card.body
         )
     } else {
         format!(
-            "When: Use `{}` for work related to `{}`.\n\nDo: Apply Memory Card \"{}\": {}\n\nBoundary: Apply only when it fits this Skill's responsibility; keep human review when evidence is weak.",
+            "Use when: `{}` is invoked for work related to `{}`.\n\nInstructions: Apply Memory Card \"{}\" as a Skill supplement: {}\n\nBoundaries: Apply only when it fits this Skill's responsibility; keep human review when evidence is weak or the supplement would change user intent.",
             skill.name, memory_card.kind, memory_card.title, memory_card.body
         )
     }

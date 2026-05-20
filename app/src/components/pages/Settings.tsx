@@ -1,6 +1,6 @@
 import React from "react";
 import { AlertTriangle, Check, CloudCog, Loader2, Monitor, Moon, RefreshCw, Save, Sun, TestTube2 } from "lucide-react";
-import { Panel, StatusList } from "../common";
+import { Panel } from "../common";
 import { getCustomProviderConfig, getSetupChecklist, planKernelCommand, saveCustomProviderConfig, testProviderStatus } from "../../tauri-client";
 import {
   buildKernelPlanForInvoke,
@@ -47,6 +47,7 @@ export function Settings({
   const [providerMessage, setProviderMessage] = React.useState("");
   const [setupChecklist, setSetupChecklist] = React.useState<SetupChecklistReport | null>(null);
   const [providerStatus, setProviderStatus] = React.useState<ProviderStatusReport | null>(null);
+  const [showDiagnostics, setShowDiagnostics] = React.useState(false);
   const providerDisabledReason = !projectPath
     ? "请先在左上角选择一个项目；Provider 配置会保存到该项目。"
     : !providerConfig
@@ -160,20 +161,12 @@ export function Settings({
 
   return (
     <div className="stack">
-      <Panel title="运行环境" subtitle="所有读取和生成都在本机完成。" icon={CloudCog}>
-        <StatusList
-          items={[`主目录：${state?.home ?? "读取中"}`, `当前项目：${projectPath || snapshot?.project_path || "未选择"}`, `默认整理引擎：${synthesisEngine === "llm" ? "LLM" : formatAgent(synthesisEngine)}`]}
-          empty="暂无环境信息。"
-        />
-        <div className="setup-checklist">
-          {(setupChecklist?.items ?? fallbackChecklist(projectPath, previewMode)).map((item) => (
-            <ChecklistRow key={item.label} item={item} />
-          ))}
-        </div>
-      </Panel>
-
-      <Panel title="第三方 Provider" subtitle="用于提炼、抽象、评审和精修建议的 OpenAI-compatible API。" icon={CloudCog}>
+      <Panel title="提炼引擎" subtitle="用于把候选内容改写成成熟 Memory Card，并在 Skill 融合时做最终精修。" icon={CloudCog}>
         <div className="settings-form">
+          <div className="settings-summary-line">
+            <span>当前项目：{projectPath || snapshot?.project_path || "未选择"}</span>
+            <strong>默认引擎：{synthesisEngine === "llm" ? "LLM Provider" : formatAgent(synthesisEngine)}</strong>
+          </div>
           <label className="toggle-row">
             <input
               type="checkbox"
@@ -247,9 +240,13 @@ export function Settings({
               {providerTesting ? <Loader2 className="spin" size={15} /> : <TestTube2 size={15} />}
               {providerTesting ? "测试中" : "测试 Provider"}
             </button>
+            <button className="ghost-action" type="button" onClick={() => setShowDiagnostics((current) => !current)}>
+              <RefreshCw size={15} />
+              {showDiagnostics ? "收起诊断" : "高级诊断"}
+            </button>
             {providerMessage ? <span>{providerMessage}</span> : null}
           </div>
-          {providerStatus ? (
+          {providerStatus && (showDiagnostics || providerStatus.status !== "pass") ? (
             <div className={`provider-status ${providerStatus.status}`}>
               <div className="provider-status-head">
                 <strong>{providerStatus.provider}</strong>
@@ -265,6 +262,19 @@ export function Settings({
                   {providerStatus.next_actions.map((action) => <p key={action}>{action}</p>)}
                 </div>
               ) : null}
+            </div>
+          ) : null}
+          {showDiagnostics ? (
+            <div className="settings-diagnostics">
+              <div className="settings-diagnostic-meta">
+                <span>主目录：{state?.home ?? "读取中"}</span>
+                <span>扫描根：{(state?.scan_roots ?? []).length} 个</span>
+              </div>
+              <div className="setup-checklist compact">
+                {(setupChecklist?.items ?? fallbackChecklist(projectPath, previewMode)).map((item) => (
+                  <ChecklistRow key={item.label} item={item} />
+                ))}
+              </div>
             </div>
           ) : null}
         </div>
@@ -287,12 +297,6 @@ export function Settings({
         </div>
       </Panel>
 
-      <Panel title="扫描来源" subtitle="除了常用目录，还会读取 Claude Code / Codex 的本地历史索引来发现项目。" icon={RefreshCw}>
-        <StatusList
-          items={[...(state?.scan_roots ?? []), "~/.claude/history.jsonl", "~/.claude/projects", "~/.codex/history.jsonl", "~/.codex/sessions"]}
-          empty="暂无扫描目录。"
-        />
-      </Panel>
     </div>
   );
 }

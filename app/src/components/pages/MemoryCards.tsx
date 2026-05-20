@@ -207,7 +207,7 @@ export function MemoryCards({
                   <div className="section-label" style={{ marginBottom: "12px", fontWeight: "bold", fontSize: "12px", letterSpacing: "0.05em", color: "var(--color-text-dim)", textTransform: "uppercase" }}>
                     约束规范 / Constraints ({groupedCards.constraints.length})
                   </div>
-                  <div style={{ display: "grid", gap: "16px" }}>
+                  <div className="memory-card-section-grid">
                     {groupedCards.constraints.map((card) => (
                       <CardItem
                         key={card.id}
@@ -233,7 +233,7 @@ export function MemoryCards({
                   <div className="section-label" style={{ marginBottom: "12px", fontWeight: "bold", fontSize: "12px", letterSpacing: "0.05em", color: "var(--color-text-dim)", textTransform: "uppercase" }}>
                     流程规程 / Procedures ({groupedCards.procedures.length})
                   </div>
-                  <div style={{ display: "grid", gap: "16px" }}>
+                  <div className="memory-card-section-grid">
                     {groupedCards.procedures.map((card) => (
                       <CardItem
                         key={card.id}
@@ -259,7 +259,7 @@ export function MemoryCards({
                   <div className="section-label" style={{ marginBottom: "12px", fontWeight: "bold", fontSize: "12px", letterSpacing: "0.05em", color: "var(--color-text-dim)", textTransform: "uppercase" }}>
                     偏好习惯 / Preferences ({groupedCards.preferences.length})
                   </div>
-                  <div style={{ display: "grid", gap: "16px" }}>
+                  <div className="memory-card-section-grid">
                     {groupedCards.preferences.map((card) => (
                       <CardItem
                         key={card.id}
@@ -285,7 +285,7 @@ export function MemoryCards({
                   <div className="section-label" style={{ marginBottom: "12px", fontWeight: "bold", fontSize: "12px", letterSpacing: "0.05em", color: "var(--color-text-dim)", textTransform: "uppercase" }}>
                     其他条目 / Others ({groupedCards.others.length})
                   </div>
-                  <div style={{ display: "grid", gap: "16px" }}>
+                  <div className="memory-card-section-grid">
                     {groupedCards.others.map((card) => (
                       <CardItem
                         key={card.id}
@@ -337,30 +337,33 @@ function CardItem({
 }) {
   return (
     <React.Fragment>
-      <article className="record compact" style={{ padding: "20px", borderRadius: "16px" }}>
-        <div className="record-main">
+      <article className="memory-card-reader">
+        <div className="memory-card-reader-head">
           <span className="tag" style={{ borderRadius: "8px", fontSize: "10.5px" }}>
             {translateKind(card.kind)} · {translateScope(card.scope)}
           </span>
-          {card.brief ? <p className="draft-brief">{card.brief}</p> : null}
-          <h3 style={{ fontSize: "15px", fontWeight: "700" }}>{card.title}</h3>
-          <p style={{ marginTop: "10px", lineHeight: "1.6" }}>{card.body}</p>
+          {looksRoughMemoryCard(card) ? <span className="memory-card-quality-mark">待精修</span> : null}
+        </div>
+        <div className="record-main">
+          <h3>{card.title}</h3>
+          {card.brief && !looksChattyBrief(card.brief) ? <p className="memory-card-purpose">{card.brief}</p> : null}
+          <p className="memory-card-body">{card.body}</p>
           {card.tags && card.tags.length > 0 ? (
             <div className="tag-row">
-              {card.tags.map((tag) => (
+              {card.tags.slice(0, 8).map((tag) => (
                 <span key={tag} style={{ borderRadius: "4px", fontSize: "10px" }}>#{tag}</span>
               ))}
             </div>
           ) : null}
         </div>
-        <div className="record-actions" style={{ marginTop: "12px", borderTop: "1px dashed var(--color-border)", paddingTop: "12px", display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+        <div className="record-actions memory-card-actions">
           <button
             className="secondary-action"
             disabled={disabled || deleting}
             onClick={() => startEdit(card)}
           >
             <Pencil size={13} />
-            编辑细则与标签
+            编辑
           </button>
           <button
             className="danger-action"
@@ -368,7 +371,7 @@ function CardItem({
             onClick={() => deleteMemoryCard(card)}
           >
             {deleting ? <Loader2 className="spin" size={13} /> : <Trash2 size={13} />}
-            从规则中退役解构
+            退役
           </button>
         </div>
       </article>
@@ -428,4 +431,20 @@ function normalizeMemoryCardText(value: string): string {
 
 function isProjectMemoryCard(memoryCard: MemoryCardRecord, projectPath: string): boolean {
   return memoryCard.scope === "project" || memoryCard.source_project === projectPath || memoryCard.id.startsWith("project:");
+}
+
+function looksChattyBrief(brief: string): boolean {
+  return brief.includes("这条候选建议沉淀") || brief.includes("以后遇到类似任务，可以复用");
+}
+
+function looksRoughMemoryCard(card: MemoryCardRecord): boolean {
+  const text = `${card.title}\n${card.body}\n${card.brief ?? ""}`;
+  return text.includes("/goal") || looksChattyBrief(card.brief ?? "") || !looksStructuredBody(card.body);
+}
+
+function looksStructuredBody(body: string): boolean {
+  const lower = body.toLowerCase();
+  return (lower.includes("when") && lower.includes("do") && lower.includes("boundary"))
+    || (body.includes("触发") && body.includes("动作") && body.includes("边界"))
+    || /[当在].{2,}时[，,].{4,}[；;]/.test(body);
 }

@@ -115,6 +115,7 @@ export function Drafts({
               {visibleCandidates.map((candidate) => {
                 const isActive = selectedCandidateId === candidate.id;
                 const isWeak = candidate.confidence != null && candidate.confidence < 0.85;
+                const preview = matureCandidatePreview(candidate);
                 return (
                   <article
                     key={candidate.id}
@@ -126,7 +127,7 @@ export function Drafts({
                         aria-pressed={isActive}
                         onClick={() => setSelectedCandidateId(candidate.id === selectedCandidateId ? null : candidate.id)}
                       >
-                        <strong>{candidate.title}</strong>
+                        <strong>{preview.title}</strong>
                       </button>
                       <div className="candidate-queue-head-right">
                         {candidate.confidence != null ? (
@@ -140,7 +141,7 @@ export function Drafts({
                       className="candidate-open-copy"
                       onClick={() => setSelectedCandidateId(candidate.id === selectedCandidateId ? null : candidate.id)}
                     >
-                      {candidate.brief ?? candidate.body.slice(0, 80)}
+                      {preview.brief}
                     </button>
                   </article>
                 );
@@ -207,9 +208,7 @@ function CandidateDetail({
 }) {
   const confidence = candidate.confidence ? ` · 置信度 ${Math.round(candidate.confidence * 100)}%` : "";
   const candidateTags = candidate.tags ?? [];
-  const candidateBrief =
-    candidate.brief?.trim() ||
-    `这条建议沉淀了"${candidate.title}"，批准后会直接进入 Memory Card。`;
+  const preview = matureCandidatePreview(candidate);
 
   return (
     <div className="candidate-detail">
@@ -228,13 +227,13 @@ function CandidateDetail({
         boxShadow: "var(--shadow-sm)",
         marginBottom: "20px"
       }}>
-        <h3 style={{ margin: "0 0 12px 0", fontSize: "16px", fontWeight: 700 }}>{candidate.title}</h3>
-        {candidateBrief && (
+        <h3 style={{ margin: "0 0 12px 0", fontSize: "16px", fontWeight: 700 }}>{preview.title}</h3>
+        {preview.brief && (
           <p className="draft-brief" style={{ margin: "0 0 12px 0", fontStyle: "italic", color: "var(--color-text-secondary)" }}>
-            {candidateBrief}
+            {preview.brief}
           </p>
         )}
-        <p style={{ margin: 0, fontSize: "13.5px", lineHeight: "1.6", color: "var(--color-text-primary)" }}>{candidate.body}</p>
+        <p style={{ margin: 0, fontSize: "13.5px", lineHeight: "1.6", color: "var(--color-text-primary)", whiteSpace: "pre-wrap" }}>{preview.body}</p>
       </div>
 
       {/* ===== 实证历史与可追溯上下文 ===== */}
@@ -313,4 +312,81 @@ function CandidateDetail({
       </div>
     </div>
   );
+}
+
+function matureCandidatePreview(candidate: CandidateRecord) {
+  const language = inferCandidateLanguage(candidate);
+  const title = cleanCandidateTitle(candidate.title, candidate.body);
+  const body = looksStructuredCandidateBody(candidate.body)
+    ? candidate.body.trim()
+    : renderCandidatePreviewBody(candidate, language);
+  const actionLine = body
+    .split("\n")
+    .find((line) => line.includes("动作") || line.toLowerCase().startsWith("do:"))
+    ?.replace("动作：", "")
+    .replace("Do:", "")
+    .trim();
+  return {
+    title,
+    body,
+    brief: language === "zh"
+      ? `用于把“${title}”转成可执行、可审阅的长期规则。${actionLine ? `重点：${actionLine}` : ""}`
+      : `Use this as an executable, reviewable long-term rule for ${title}.`,
+  };
+}
+
+function renderCandidatePreviewBody(candidate: CandidateRecord, language: "zh" | "en") {
+  const source = cleanChattyText(candidate.body);
+  const [trigger, rest] = source
+    .split(/，|,/, 2)
+    .map((part) => part.trim());
+  const action = rest || source;
+  if (language === "zh") {
+    return [
+      `触发：${ensureZhWhen(trigger || candidate.title)}`,
+      `动作：${stripSentenceEnd(action)}`,
+      "边界：仅在该建议与真实历史证据一致、且适合成为长期项目规则时吸收入库；一次性任务应忽略。",
+    ].join("\n\n");
+  }
+  return [
+    `When: ${trigger || candidate.title}`,
+    `Do: ${stripSentenceEnd(action)}`,
+    "Boundary: Approve only when the evidence supports a durable project rule; ignore one-off task chatter.",
+  ].join("\n\n");
+}
+
+function ensureZhWhen(value: string) {
+  const trimmed = stripSentenceEnd(cleanChattyText(value)).replace(/^当/, "").replace(/^在/, "").replace(/时$/, "");
+  return trimmed ? `当${trimmed}时` : "当处理相关项目任务时";
+}
+
+function stripSentenceEnd(value: string) {
+  return value.trim().trimEnd().replace(/[。.;；]+$/, "");
+}
+
+function cleanCandidateTitle(title: string, body: string) {
+  const source = cleanChattyText(title || body)
+    .split(/[：:；;。，,]/)[0]
+    ?.trim() || "项目规则";
+  return source.replace(/^\/goal\s*/, "").replace(/^当/, "").replace(/^在/, "").replace(/时$/, "").slice(0, 36);
+}
+
+function cleanChattyText(value: string) {
+  return value
+    .replace(/\/goal/g, "")
+    .replace(/这条候选建议沉淀了/g, "")
+    .replace(/[“”"]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function inferCandidateLanguage(candidate: CandidateRecord): "zh" | "en" {
+  const text = `${candidate.title}\n${candidate.body}\n${candidate.brief ?? ""}`;
+  return /[\u4e00-\u9fff]/.test(text) ? "zh" : "en";
+}
+
+function looksStructuredCandidateBody(body: string) {
+  const lower = body.toLowerCase();
+  return (lower.includes("when") && lower.includes("do") && lower.includes("boundary"))
+    || (body.includes("触发") && body.includes("动作") && body.includes("边界"));
 }

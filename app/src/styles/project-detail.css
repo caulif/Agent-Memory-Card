@@ -1623,7 +1623,78 @@
   line-height: 1.5;
 }
 
+/* ===== Memory Card Library reader layout ===== */
+.memory-card-section-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr));
+  gap: 14px;
+}
+
+.memory-card-reader {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.memory-card-reader-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.memory-card-reader h3 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.4;
+  font-weight: 750;
+}
+
+.memory-card-purpose {
+  margin: 8px 0 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.memory-card-body {
+  margin: 10px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.memory-card-quality-mark {
+  padding: 3px 7px;
+  border-radius: 7px;
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+  font-size: 10px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.memory-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--color-border);
+}
+
 /* ===== Memory Card Loadout 列布局 (Agents 页面) ===== */
+.agents-loadout-shell {
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+}
+
 .loadout-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1827,6 +1898,14 @@
   cursor: grab;
 }
 
+.pool-item.selected {
+  border-style: solid;
+  border-color: var(--color-text-primary);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  box-shadow: 0 0 0 2px rgba(35, 32, 28, 0.08);
+}
+
 .pool-item .pool-check {
   font-size: 13px;
 }
@@ -1851,6 +1930,39 @@
 .pool-item[aria-disabled="true"],
 .equipped-item:disabled {
   cursor: default;
+}
+
+.loadout-selection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-canvas);
+  min-width: 0;
+}
+
+.loadout-selection strong {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+}
+
+.loadout-selection span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.secondary-action.compact {
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 11px;
 }
 
 .target-scope-row {
@@ -2358,6 +2470,38 @@
   min-width: min(100%, 260px);
 }
 
+.skill-scope-tabs {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-canvas);
+}
+
+.skill-scope-tabs button {
+  min-height: 30px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.skill-scope-tabs button.active {
+  color: #fff;
+  background: var(--color-text-primary);
+}
+
+.skill-fusion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .skills-summary-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2524,6 +2668,10 @@
 /* ===== 响应式 ===== */
 @media (max-width: 1180px) {
   .drafts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .agents-loadout-shell {
     grid-template-columns: 1fr;
   }
 

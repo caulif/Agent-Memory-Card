@@ -133,3 +133,25 @@
     *   `cargo test --test golden_set_regression --quiet` -> PASS, 3 passed.
     *   `agent-kernel import --project . --scan-home` -> indexed 57 Skills, including 6 plugin and 28 superpowers entries.
     *   Playwright preview trial -> no console errors, no desktop/mobile horizontal overflow; Drafts engine options and Skills scan/manual/auto-fuse controls visible.
+
+---
+
+## 9. 2026-05-20 口语候选成熟化与项目级 Skill 装填修正
+*   **Trigger**: 用户截图反馈已吸纳 Memory Card 仍像口语摘录，MemoryCards 布局看不完整，Skills 未区分项目级/全局，融合动作缺少取消，Agents 拖动不可用，Settings 信息冗余。
+*   **Production Changes**:
+    *   `candidate.rs`: 候选批准前新增成熟 Memory Card 审核改写关卡；存在 Provider 配置时调用 refine LLM 输出成熟 `title/body/brief/tags`，无 Provider 时用确定性 `触发 / 动作 / 边界` 兜底，避免口语候选直接落库。
+    *   `Drafts.tsx`: Review Inbox 展示成熟卡片拟案，用户审核时看到的是可执行规则而不是原始聊天摘录。
+    *   `MemoryCards.tsx`: Library 卡片改为两列自适应读本布局，隐藏聊天式 brief，正文完整换行展示，并标记需要精修的旧卡。
+    *   `Skills.tsx`: 增加项目级 / 全局 Skills 分层；Memory Card 只融合到项目级 Skill；推荐项先选择优化方式，再显示直接纳入 / LLM 融合 / 取消。
+    *   `Agents.tsx`: Loadout 只面向项目级 Memory Card；新增点选卡片再装入智能体的鼠标路径，拖拽仅作为辅助；修复移动端两栏被内联宽度顶住的问题。
+    *   `Settings.tsx`: 收束为提炼引擎与外观主题，运行环境、扫描根和 checklist 默认折叠到高级诊断。
+    *   `app_service.rs`: 自动 Skill 融合提示词与兜底输出改为更接近 SKILL.md 的 Use when / Instructions / Boundaries 风格。
+*   **Verification**:
+    *   `bun run --cwd app verify-ui` -> PASS
+    *   `bun run --cwd app build` -> PASS
+    *   `bun test --cwd app ./src/utils/kernel-plan.test.ts` -> PASS
+    *   `cargo fmt --check` -> PASS
+    *   `cargo clippy -- -D warnings` -> PASS
+    *   `cargo test --manifest-path Cargo.toml --lib` -> PASS, 304 passed.
+    *   `cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture` -> PASS, 45 passed.
+    *   Playwright preview trial -> no console errors; Drafts 成熟拟案、MemoryCards 读本布局、Skills 项目/全局分层与取消路径、Agents 点选装填、Settings 高级诊断折叠均可见；桌面 5 页与移动 Agents 均无横向溢出。
