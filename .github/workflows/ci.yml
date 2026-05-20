@@ -4,9 +4,14 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   windows:
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
@@ -21,18 +26,32 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy -- -D warnings
       - run: cargo build --release
+        timeout-minutes: 15
+      - run: cargo test --manifest-path Cargo.toml --lib
+        timeout-minutes: 10
       - run: cargo test --test eval_golden_report -- --nocapture
+        timeout-minutes: 10
+      - run: cargo test --test extract_quality_v2 --quiet
+        timeout-minutes: 10
+      - run: cargo test --test golden_set_regression --quiet
+        timeout-minutes: 10
       - run: cargo build --manifest-path src-tauri/Cargo.toml --release
+        timeout-minutes: 20
       - run: cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture
+        timeout-minutes: 15
+      - run: bun run --cwd app verify-ui
+      - run: bun test --cwd app ./src/utils/review-workbench.test.ts ./src/utils/kernel-plan.test.ts
       - run: bun run --cwd app build
       - name: Smoke CLI binary
         shell: pwsh
+        timeout-minutes: 2
         run: |
           $cli = "target/release/agent-kernel.exe"
           if (!(Test-Path $cli)) { throw "Missing CLI binary: $cli" }
           & $cli --version
       - name: Smoke desktop frontend bundle
         shell: pwsh
+        timeout-minutes: 2
         run: |
           if (!(Test-Path "app/dist/index.html")) { throw "Missing frontend bundle app/dist/index.html" }
           $assets = Get-ChildItem "app/dist/assets" -File -ErrorAction Stop

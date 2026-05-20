@@ -230,3 +230,17 @@
     *   `bun run --cwd app verify-ui` -> PASS.
     *   `bun test --cwd app ./src/utils/review-workbench.test.ts ./src/utils/kernel-plan.test.ts` -> PASS, 28 passed.
     *   `bun run --cwd app build` -> PASS.
+
+---
+
+## 12. 2026-05-21 CI 与用户路径质量守门补强
+*   **Trigger**: PR #35 最新 head 的两条 Windows CI run 因 `push` 与 `pull_request` 双触发并行，且重型 Tauri 阶段无显式 timeout，长期停留在 `in_progress`，导致 PR 状态无法稳定收口。
+*   **Reference Check**:
+    *   GitHub Actions 官方 workflow syntax 支持 `concurrency.cancel-in-progress`，可取消同组旧 run。
+    *   GitHub Actions 官方 workflow syntax 支持 job/step 级 `timeout-minutes`，可防止长时间 pending。
+    *   Anthropic agent guidance 再次确认：确定性、可评估的质量门应优先用 workflow；开放式探索才交给 agent。
+*   **Production Changes**:
+    *   `.github/workflows/ci.yml`: 增加 workflow concurrency group，按分支/PR head 自动取消旧 run。
+    *   `.github/workflows/ci.yml`: 为 Windows job、release build、Tauri build/test、CLI smoke 等步骤设置明确 timeout。
+    *   `.github/workflows/ci.yml`: 将本轮核心质量门纳入 CI：Rust lib tests、`extract_quality_v2`、`golden_set_regression`、`verify-ui`、前端 utility tests 与 app build。
+*   **Goal**: CI 不再无限悬挂，并且能覆盖 Memory Card synthesis 这条生产力主线，而不只是编译 smoke。
