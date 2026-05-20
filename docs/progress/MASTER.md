@@ -170,7 +170,7 @@
     *   [x] Phase 1: 元数据契约。
     *   [x] Phase 2: 价值导向 synthesis。
     *   [x] Phase 3: Drafts / Skills review UX。
-    *   [ ] Phase 4: 验证、提交、推送与 issue 更新。
+    *   [x] Phase 4: 验证、提交、推送与 issue 更新。
 *   **Implementation Notes**:
     *   `ExtractionMetadata` 新增 `card_function / value_claim / value_delta / target_context / synthesis_trace`，保持旧 YAML 默认兼容。
     *   候选批准前成熟化改为 value-directed prompt；确定性 fallback 也会生成 Value Delta 与 trace。
@@ -189,3 +189,8 @@
     *   `bun test --cwd app ./src/utils/review-workbench.test.ts ./src/utils/kernel-plan.test.ts` -> PASS, 28 passed.
     *   `bun run --cwd app build` -> PASS.
     *   Playwright smoke on `http://127.0.0.1:1420` -> no console errors, no horizontal overflow; Skill-targeted Before / After visible.
+    *   PR #35 Windows CI for commit `a2bab81` -> PASS, 2/2 jobs.
+*   **Agent Runtime Constraint Update**:
+    *   `docs/analysis/memory-card-synthesis-agent-design.md` now records `earendil-works/pi` as the mature runtime reference for future agent work.
+    *   `docs/plan/memory-card-synthesis-implementation-plan.md` now requires an explicit build-or-adapt decision before implementing a full synthesis agent runtime.
+    *   Future runtime work should embed/wrap `@earendil-works/pi-agent-core` where practical, or port its stateful session, context transform, typed read-only tools, hooks, event stream, stop-condition, trace, and progressive Skill-loading contracts.
