@@ -1,7 +1,7 @@
 # Memory Card Synthesis Agent Design
 
 Date: 2026-05-20
-Status: discussion draft
+Status: production design, implemented in slices
 
 ## Goal
 
@@ -410,6 +410,22 @@ Suggested modules:
   - built-in writing guide used at runtime.
 
 The existing approval and fusion paths should remain the write boundary. The writer agent proposes; workflows validate; the user approves.
+
+## Production Runtime Slice: 2026-05-20
+
+The first production runtime foundation is implemented in `src/synthesis_agent.rs`.
+
+This slice ports the pi-style shape into Rust instead of embedding the TypeScript package directly. That keeps Memory Card persistence, approval, and project config ownership in the Rust core while preserving the mature runtime boundaries:
+
+- `SynthesisReview` is the session result: candidate ID, session ID, context pack, proposal, events, and stop reason.
+- `SynthesisEvent` is the reviewable event stream: observation search, Memory Card comparison, Skill search, writing guide load, duplicate check, and Skill comparison.
+- Tools are read-only and typed. They can read observations, project/global Memory Cards, Skill metadata, and the built-in writing guide; they do not mutate files or project config.
+- Project Skills are valid attach/fusion targets. Global/referenced Skills are used only as comparison context.
+- The runtime emits `ValueDelta`, `TargetContext`, `card_function`, and compact trace entries that the existing Review Inbox can display.
+- Candidate approval now consumes the runtime proposal. If the runtime finds a merge target, approval updates the existing Memory Card instead of adding clutter.
+- Provider refinement receives the `synthesis_context`; deterministic fallback uses the same review when no provider is available.
+
+The slice deliberately does not add a full provider tool-call loop yet. The next replacement point is clear: swap the deterministic tool planner for a pi-style provider loop while keeping the same `SynthesisReview` output contract and read-only tool boundary.
 
 ## Testing Strategy
 

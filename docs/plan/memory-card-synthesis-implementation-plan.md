@@ -104,3 +104,40 @@ Acceptance:
 - Keep the write boundary unchanged: candidate approval writes Memory Cards only after user action.
 - Prefer additive metadata over schema-breaking changes.
 - Preserve current PR #35 and push additional commits to the same branch.
+
+## Phase 5: Tool-Backed Runtime Foundation
+
+Tracking: GitHub issue #39
+
+Goal: move beyond prompt-only maturation by adding a typed read-only synthesis runtime foundation.
+
+Implemented scope:
+
+- Add `src/synthesis_agent.rs` with `SynthesisReview`, `SynthesisContextPack`, typed tool events, proposal, value delta, target context, and stop reason.
+- Implement read-only local tools:
+  - observation search
+  - project/global Memory Card comparison
+  - project/global Skill metadata comparison
+  - built-in writing guide read
+  - duplicate target classification
+  - project Skill gap classification
+- Integrate `SynthesisReview` into candidate maturation:
+  - provider prompt receives `synthesis_context`
+  - deterministic fallback uses runtime value metadata
+  - runtime merge recommendations can become approval-time `merge_into_existing`
+  - compact trace is appended to existing synthesis trace
+- Preserve human approval as the only write boundary.
+
+Acceptance:
+
+- Runtime does not write files.
+- Project Skills can be targeted; global Skills are reference-only.
+- Near-duplicate Memory Cards recommend merge.
+- Skill-targeted feedback recommends the matching project Skill.
+- Existing provider and local fallback paths remain compatible.
+
+Deferred but now bounded:
+
+- Provider-driven tool-call loop using the same `SynthesisReview` contract.
+- Web search/read tools with citations and privacy-safe abstract queries.
+- Embedding-backed observation search if lexical search misses real history patterns.

@@ -20,4 +20,5 @@ pub mod provider;
 pub mod review;
 pub mod rule_test;
 pub mod scanner;
+pub mod synthesis_agent;
 pub mod textutil;

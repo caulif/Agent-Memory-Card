@@ -194,3 +194,32 @@
     *   `docs/analysis/memory-card-synthesis-agent-design.md` now records `earendil-works/pi` as the mature runtime reference for future agent work.
     *   `docs/plan/memory-card-synthesis-implementation-plan.md` now requires an explicit build-or-adapt decision before implementing a full synthesis agent runtime.
     *   Future runtime work should embed/wrap `@earendil-works/pi-agent-core` where practical, or port its stateful session, context transform, typed read-only tools, hooks, event stream, stop-condition, trace, and progressive Skill-loading contracts.
+
+---
+
+## 11. 2026-05-20 Tool-backed Memory Card Synthesis Runtime Foundation
+*   **Issue**: GitHub #39 tracks the continuation from metadata-only synthesis to a production runtime foundation.
+*   **Goal**: 让 Memory Card synthesis 在批准前先具备全局视野：读取相关 observations、既有 Memory Cards、项目/全局 Skills 和 writing guide，输出可审阅 trace、stop reason、Value Delta 与目标上下文。
+*   **Production Changes**:
+    *   `src/synthesis_agent.rs`: 新增 Rust core synthesis runtime foundation，包含 `SynthesisReview`、typed read-only tool events、context pack、proposal、stop reason 和 compact trace。
+    *   `src/candidate.rs`: 候选成熟化前运行 synthesis review；Provider prompt 接收 `synthesis_context`；无 Provider 时 deterministic fallback 也使用同一份 value metadata。
+    *   `src/candidate.rs`: 若 runtime 识别近重复项目 Memory Card，批准时自动走 `merge_into_existing`，避免生成重复卡。
+    *   `src/lib.rs`: 暴露 `synthesis_agent` 模块供后续 Tauri/CLI/UI read model 复用。
+*   **Implemented Tools**:
+    *   `search_observations`
+    *   `search_memory_cards`
+    *   `search_skills`
+    *   `read_writing_guide`
+    *   `find_memory_duplicates`
+    *   `compare_with_skill`
+*   **Boundaries**:
+    *   runtime 只读，不写入文件、不改 project config。
+    *   项目级 Skills 可作为目标；全局 Skills 仅作参考。
+    *   真正 provider tool-call loop、Web search/read 和 embedding search 暂未混入核心写路径，后续复用同一 `SynthesisReview` 合约替换 planner。
+*   **Verification So Far**:
+    *   `cargo test --manifest-path Cargo.toml synthesis_agent --lib` -> PASS, 3 passed.
+    *   `cargo test --manifest-path Cargo.toml --lib` -> PASS, 309 passed.
+    *   `cargo fmt --check` -> PASS.
+    *   `cargo clippy -- -D warnings` -> PASS.
+    *   `bun run --cwd app verify-ui` -> PASS.
+    *   `bun test --cwd app ./src/utils/review-workbench.test.ts ./src/utils/kernel-plan.test.ts` -> PASS, 28 passed.

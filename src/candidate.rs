@@ -15,6 +15,7 @@ use crate::feedback;
 use crate::fsutil;
 use crate::memory_card::{self, MemoryCardRecord, MemoryCardUpdate};
 use crate::provider::{self, ProviderJsonSchema, ProviderRequest};
+use crate::synthesis_agent::{self, SynthesisReview};
 use crate::textutil;
 
 mod action;
@@ -533,8 +534,7 @@ pub fn approve_candidate_to_memory_card(project_root: &Path, id: &str) -> Result
     let matured = mature_candidate_for_memory_card(&root, &candidate, &approvable_kind);
     let matured_extraction =
         extraction_with_synthesis_metadata(candidate.extraction.clone(), &matured);
-    if let Some(target_id) = candidate
-        .extraction
+    if let Some(target_id) = matured_extraction
         .suggested_action
         .as_ref()
         .filter(|action| action.action == "merge_into_existing")
@@ -720,14 +720,19 @@ fn mature_candidate_for_memory_card(
     candidate: &CandidateRecord,
     approvable_kind: &str,
 ) -> MatureMemoryCardText {
-    mature_candidate_with_provider(project_root, candidate, approvable_kind)
-        .unwrap_or_else(|| mature_candidate_deterministic(candidate, approvable_kind))
+    let synthesis =
+        synthesis_agent::run_memory_card_synthesis(project_root, candidate, approvable_kind).ok();
+    mature_candidate_with_provider(project_root, candidate, approvable_kind, synthesis.as_ref())
+        .unwrap_or_else(|| {
+            mature_candidate_deterministic(candidate, approvable_kind, synthesis.as_ref())
+        })
 }
 
 fn mature_candidate_with_provider(
     project_root: &Path,
     candidate: &CandidateRecord,
     approvable_kind: &str,
+    synthesis: Option<&SynthesisReview>,
 ) -> Option<MatureMemoryCardText> {
     let provider_path = provider::provider_config_path(project_root).ok()?;
     if !provider_path.exists() {
@@ -766,7 +771,8 @@ fn mature_candidate_with_provider(
                 "tags": candidate.tags,
                 "evidence": candidate.evidence,
                 "reason": candidate.reason,
-            }
+            },
+            "synthesis_context": synthesis,
         })
         .to_string(),
         json_schema: Some(ProviderJsonSchema {
@@ -833,14 +839,27 @@ fn mature_candidate_with_provider(
         .filter(|scope| is_valid_candidate_scope(scope))
         .unwrap_or_else(|| candidate.scope.clone());
     let tags = mature_tags(parsed.tags, candidate, &kind);
-    let card_function =
-        normalize_card_function(parsed.card_function.as_deref(), candidate, approvable_kind);
-    let value_delta = normalize_value_delta(parsed.value_delta, candidate, &body, &card_function);
+    let card_function = normalize_card_function(
+        parsed.card_function.as_deref(),
+        candidate,
+        approvable_kind,
+        synthesis,
+    );
+    let value_delta = normalize_value_delta(
+        parsed.value_delta,
+        candidate,
+        &body,
+        &card_function,
+        synthesis,
+    );
     let value_claim = parsed
         .value_claim
         .filter(|claim| claim.trim().chars().count() >= 8)
-        .unwrap_or_else(|| synthesize_value_claim(candidate, &value_delta, &card_function));
-    let target_context = normalize_target_context(parsed.target_context, candidate, &card_function);
+        .unwrap_or_else(|| {
+            synthesize_value_claim(candidate, &value_delta, &card_function, synthesis)
+        });
+    let target_context =
+        normalize_target_context(parsed.target_context, candidate, &card_function, synthesis);
     Some(MatureMemoryCardText {
         title,
         body,
@@ -853,13 +872,14 @@ fn mature_candidate_with_provider(
         value_claim,
         value_delta,
         target_context,
-        synthesis_trace: synthesis_trace_for_candidate(candidate, true),
+        synthesis_trace: synthesis_trace_for_candidate(candidate, true, synthesis),
     })
 }
 
 fn mature_candidate_deterministic(
     candidate: &CandidateRecord,
     approvable_kind: &str,
+    synthesis: Option<&SynthesisReview>,
 ) -> MatureMemoryCardText {
     let language = infer_language(&candidate.title, &candidate.body);
     let title = mature_title(&candidate.title, &candidate.body);
@@ -875,10 +895,10 @@ fn mature_candidate_deterministic(
     } else {
         mature_brief(&title, &body, &language)
     };
-    let card_function = normalize_card_function(None, candidate, approvable_kind);
-    let value_delta = normalize_value_delta(None, candidate, &body, &card_function);
-    let value_claim = synthesize_value_claim(candidate, &value_delta, &card_function);
-    let target_context = normalize_target_context(None, candidate, &card_function);
+    let card_function = normalize_card_function(None, candidate, approvable_kind, synthesis);
+    let value_delta = normalize_value_delta(None, candidate, &body, &card_function, synthesis);
+    let value_claim = synthesize_value_claim(candidate, &value_delta, &card_function, synthesis);
+    let target_context = normalize_target_context(None, candidate, &card_function, synthesis);
     MatureMemoryCardText {
         title,
         body,
@@ -895,7 +915,7 @@ fn mature_candidate_deterministic(
         value_claim,
         value_delta,
         target_context,
-        synthesis_trace: synthesis_trace_for_candidate(candidate, false),
+        synthesis_trace: synthesis_trace_for_candidate(candidate, false, synthesis),
     }
 }
 
@@ -910,6 +930,20 @@ fn extraction_with_synthesis_metadata(
     extraction.synthesis_trace = matured.synthesis_trace.clone();
     if let Some(action) = extraction.suggested_action.as_mut() {
         action.rationale = Some(matured.value_claim.clone());
+    } else if matured.card_function == "merge"
+        && matured.target_context.target_type == "memory_card"
+        && matured.target_context.target_id.is_some()
+    {
+        extraction.suggested_action = Some(ExtractionAction {
+            action: "merge_into_existing".to_string(),
+            route: "memory_card".to_string(),
+            target_record: matured.target_context.target_id.clone(),
+            compile_enabled: None,
+            record_id: matured.target_context.target_id.clone(),
+            similarity: None,
+            reason: Some(matured.target_context.why_this_target.clone()),
+            rationale: Some(matured.value_claim.clone()),
+        });
     }
     extraction
 }
@@ -918,12 +952,21 @@ fn normalize_card_function(
     provider_value: Option<&str>,
     candidate: &CandidateRecord,
     approvable_kind: &str,
+    synthesis: Option<&SynthesisReview>,
 ) -> String {
     let normalized = provider_value
         .map(str::trim)
         .filter(|value| matches!(*value, "library" | "skill_targeted" | "workflow" | "merge"));
     if let Some(value) = normalized {
         return value.to_string();
+    }
+    if let Some(review) = synthesis
+        && matches!(
+            review.proposal.card_function.as_str(),
+            "library" | "skill_targeted" | "workflow" | "merge"
+        )
+    {
+        return review.proposal.card_function.clone();
     }
     if candidate
         .extraction
@@ -969,11 +1012,17 @@ fn normalize_value_delta(
     candidate: &CandidateRecord,
     body: &str,
     card_function: &str,
+    synthesis: Option<&SynthesisReview>,
 ) -> ValueDelta {
     if let Some(delta) = provider_value
         && valid_value_delta(&delta)
     {
         return delta;
+    }
+    if let Some(review) = synthesis
+        && valid_value_delta(&review.proposal.value_delta)
+    {
+        return review.proposal.value_delta.clone();
     }
     let existing_behavior = match card_function {
         "skill_targeted" => {
@@ -1013,7 +1062,13 @@ fn synthesize_value_claim(
     candidate: &CandidateRecord,
     value_delta: &ValueDelta,
     card_function: &str,
+    synthesis: Option<&SynthesisReview>,
 ) -> String {
+    if let Some(review) = synthesis
+        && review.proposal.value_claim.trim().chars().count() >= 8
+    {
+        return review.proposal.value_claim.clone();
+    }
     let target = match card_function {
         "skill_targeted" => "目标 Skill",
         "workflow" => "项目工作流",
@@ -1035,12 +1090,24 @@ fn normalize_target_context(
     provider_value: Option<TargetContext>,
     candidate: &CandidateRecord,
     card_function: &str,
+    synthesis: Option<&SynthesisReview>,
 ) -> TargetContext {
     if let Some(context) = provider_value
         && !context.target_type.trim().is_empty()
         && !context.why_this_target.trim().is_empty()
     {
         return context;
+    }
+    if let Some(review) = synthesis
+        && !review.proposal.target_context.target_type.trim().is_empty()
+        && !review
+            .proposal
+            .target_context
+            .why_this_target
+            .trim()
+            .is_empty()
+    {
+        return review.proposal.target_context.clone();
     }
     let target_type = match card_function {
         "skill_targeted" => "project_skill",
@@ -1078,6 +1145,7 @@ fn normalize_target_context(
 fn synthesis_trace_for_candidate(
     candidate: &CandidateRecord,
     provider_used: bool,
+    synthesis: Option<&SynthesisReview>,
 ) -> Vec<SynthesisTraceEntry> {
     let mut trace = vec![
         SynthesisTraceEntry {
@@ -1109,6 +1177,9 @@ fn synthesis_trace_for_candidate(
                 .to_string()
         },
     });
+    if let Some(review) = synthesis {
+        trace.extend(synthesis_agent::review_to_trace(review));
+    }
     trace
 }
 
