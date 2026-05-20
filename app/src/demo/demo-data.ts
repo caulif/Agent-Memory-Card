@@ -53,7 +53,7 @@ export function createDemoProjectSnapshot(projectPath: string): ProjectSnapshot 
         brief: "前端需在无原生运行时自动降级为演示模式",
         kind: "rule",
         scope: "project",
-        body: "当桌面运行时不可用时，前端进入演示模式，继续展示项目、草稿、技能片段和装填槽位。",
+        body: "当桌面运行时不可用时，前端进入演示模式，继续展示项目、草稿、Memory Card 和装填槽位。",
         targets: ["codex", "claude-code"],
         evidence: "来自当前预览会话的静态示例。",
         confidence: 0.91,
@@ -106,6 +106,26 @@ export function createDemoProjectSnapshot(projectPath: string): ProjectSnapshot 
         body: "检测到没有 Tauri 运行时后，加载静态项目快照，让页面可以继续导航和展示。",
         tags: ["ui-design", "preview"],
         language: "zh-CN",
+        activation: "skill",
+        extraction: {
+          card_function: "skill_targeted",
+          value_claim: "补强预览 Skill 的验收边界，让用户能先看到功能闭环是否真的可用。",
+          value_delta: {
+            existing_behavior: "预览 Skill 已能展示静态数据。",
+            missing_part: "缺少对真实用户路径和验收边界的说明。",
+            new_behavior: "下次使用预览 Skill 时先确认关键路径、证据展示和动作按钮是否完整。",
+            why_not_duplicate: "它不是重复描述预览模式，而是补上验收与使用边界。",
+          },
+          target_context: {
+            target_type: "project_skill",
+            target_id: "project:obsidian-markdown",
+            why_this_target: "该 Skill 负责项目预览与文档路径，最需要这张 Memory Card 的验收边界。",
+          },
+          synthesis_trace: [
+            { step: "value_delta", summary: "Compared demo preview behavior against the Skill target." },
+            { step: "rewrite", summary: "Rendered as a Skill-targeted Memory Card." },
+          ],
+        },
       },
       {
         id: "safe-actions",
@@ -188,8 +208,8 @@ export function createDemoProjectSnapshot(projectPath: string): ProjectSnapshot 
     build_preview: {
       actions: [
         "将演示草稿同步到 Codex 预览目标",
-        "更新 Claude Code 目标的技能片段索引",
-        "生成本地技能片段状态预览",
+        "更新 Claude Code 目标的 Memory Card 索引",
+        "生成本地 Memory Card 状态预览",
       ],
       warnings: ["当前为演示数据；真实文件读取和写入需要通过 bun run app:dev 启动 Tauri。"],
     },
@@ -240,6 +260,27 @@ export function createDemoProjectCandidateInbox(projectPath: string): ProjectCan
       reason: draft.reason ?? "演示候选来自本地高价值过滤。",
       matched_template: draft.matched_template,
       source_observations: [`demo-observation-${index + 1}`],
+      extraction: draft.extraction ?? {
+        card_function: index === 0 ? "skill_targeted" : "library",
+        value_claim: index === 0
+          ? "补强目标 Skill 的预览验收边界，避免用户只能看到静态卡片却不知道是否可用。"
+          : "让预览模式中的安全动作保持清晰边界。",
+        value_delta: {
+          existing_behavior: index === 0 ? "现有预览流程能加载静态数据。" : "现有演示模式会拦截写操作。",
+          missing_part: index === 0 ? "缺少一眼可见的验收标准和未来行为改进。" : "缺少对用户动作反馈边界的明确说明。",
+          new_behavior: index === 0 ? "审阅时展示 Value Delta，先判断卡片是否真的改善 Skill 或工作流。" : "用户点击危险动作时只看到安全反馈，不误以为真实写入已发生。",
+          why_not_duplicate: "该候选必须说明新增价值；若已被已有 Memory Card 覆盖，应合并或忽略。",
+        },
+        target_context: {
+          target_type: index === 0 ? "project_skill" : "workflow",
+          target_id: index === 0 ? "project:obsidian-markdown" : null,
+          why_this_target: index === 0 ? "这是一个 Skill-targeted Memory Card 示例。" : "这是一个普通工作流 Memory Card 示例。",
+        },
+        synthesis_trace: [
+          { step: "filter", summary: "Demo candidate kept for review." },
+          { step: "value_delta", summary: "Demo metadata shows the value-directed synthesis contract." },
+        ],
+      },
       status: "candidate",
     })),
   };

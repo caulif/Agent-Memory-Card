@@ -347,6 +347,29 @@ export type ExtractionMetadata = {
   classification?: KnowledgeClassification | null;
   tags?: string[];
   suggested_action?: ExtractionAction | null;
+  card_function?: "library" | "skill_targeted" | "workflow" | "merge" | string | null;
+  value_claim?: string | null;
+  value_delta?: ValueDelta | null;
+  target_context?: TargetContext | null;
+  synthesis_trace?: SynthesisTraceEntry[];
+};
+
+export type ValueDelta = {
+  existing_behavior?: string;
+  missing_part?: string;
+  new_behavior?: string;
+  why_not_duplicate?: string;
+};
+
+export type TargetContext = {
+  target_type?: string;
+  target_id?: string | null;
+  why_this_target?: string;
+};
+
+export type SynthesisTraceEntry = {
+  step: string;
+  summary: string;
 };
 
 export type EvidenceBundle = {

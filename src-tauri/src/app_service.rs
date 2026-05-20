@@ -457,7 +457,7 @@ pub fn load_project_skill_library(project_root: &Path) -> anyhow::Result<Project
                     }) {
                         linked.title = entry.title.clone();
                         linked.body = entry.body.clone();
-                        linked.brief = format!("Skill supplement ({})：{}", entry.mode, entry.body);
+                        linked.brief = format!("Mounted Memory Card ({})：{}", entry.mode, entry.body);
                     }
                     linked
                 })
@@ -512,7 +512,7 @@ fn attach_memory_card_to_skill_with_fusion(
         .unwrap_or_else(|| fuse_memory_card_for_skill_deterministic(skill, &memory_card));
     let entry = config::SkillSupplementEntry {
         memory_card: memory_card_id.to_string(),
-        title: format!("{} · Skill supplement", memory_card.title),
+        title: format!("{} · Skill-targeted Memory Card", memory_card.title),
         body,
         mode: "auto-fused".to_string(),
         updated_at: Utc::now().to_rfc3339(),
@@ -532,14 +532,15 @@ fn fuse_memory_card_for_skill_with_provider(
 ) -> Option<String> {
     let cfg = provider::load_or_default_provider_config(project_root).ok()?;
     let request = provider::ProviderRequest {
-        system_prompt: r#"你是 Agent Skill supplement 编辑器。
+        system_prompt: r#"你是 Skill-targeted Memory Card 编辑器。
 
-目标：把一条 Memory Card 转写成当前 Skill 的补充说明，而不是简单拼接。
+目标：把一条 Memory Card 转写成当前 Skill 可使用的上下文，而不是引入第二个产品概念或简单拼接。
 
 规则：
 - 输出必须能直接写入 AGENT_KERNEL_MEMORY_CARDS.md。
 - 参考成熟 SKILL.md 的风格，用 Use when / Instructions / Boundaries 组织；中文内容可写成“适用场景 / 操作指令 / 边界”。
 - 保留 Memory Card 的真实意图，但只写与该 Skill 使用场景相关的部分。
+- 说明这张 Memory Card 让该 Skill 下次多做对什么，避免重复已有 Skill 文本。
 - 把口语请求改写为可执行的流程或约束，不要保留聊天原话。
 - 不要编造工具、路径、API 或用户没有确认的规则。
 - 如果原 Memory Card 与 Skill 无关，写成“仅在相关任务中参考”的弱补充边界。
@@ -594,12 +595,12 @@ fn fuse_memory_card_for_skill_deterministic(
 ) -> String {
     if memory_card.language == "zh" {
         format!(
-            "适用场景：当 `{}` 被用于处理 `{}` 相关任务时。\n\n操作指令：将 Memory Card「{}」转化为该 Skill 的补充约束：{}\n\n边界：仅在该规则与当前 Skill 的职责相符时应用；若证据不足或会改变用户意图，先保留人工审阅边界。",
+            "适用场景：当 `{}` 被用于处理 `{}` 相关任务时。\n\n操作指令：挂载 Memory Card「{}」作为该 Skill 的定向上下文：{}\n\n边界：仅在该规则与当前 Skill 的职责相符时应用；若证据不足、与已有 Skill 文本重复，或会改变用户意图，先保留人工审阅边界。",
             skill.name, memory_card.kind, memory_card.title, memory_card.body
         )
     } else {
         format!(
-            "Use when: `{}` is invoked for work related to `{}`.\n\nInstructions: Apply Memory Card \"{}\" as a Skill supplement: {}\n\nBoundaries: Apply only when it fits this Skill's responsibility; keep human review when evidence is weak or the supplement would change user intent.",
+            "Use when: `{}` is invoked for work related to `{}`.\n\nInstructions: Mount Memory Card \"{}\" as targeted Skill context: {}\n\nBoundaries: Apply only when it fits this Skill's responsibility; keep human review when evidence is weak, duplicates existing Skill text, or would change user intent.",
             skill.name, memory_card.kind, memory_card.title, memory_card.body
         )
     }

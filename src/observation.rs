@@ -481,6 +481,11 @@ fn synthesize_observations_to_drafts_with_engine_and_limit(
                 layer_trace: Vec::new(),
                 rejected_at: None,
                 evidence_bundle: None,
+                card_function: None,
+                value_claim: None,
+                value_delta: None,
+                target_context: None,
+                synthesis_trace: Vec::new(),
             };
             let result = candidate::add_candidate(
                 project_root,
@@ -729,6 +734,11 @@ fn synthesize_with_agent_engine(
             layer_trace: Vec::new(),
             rejected_at: None,
             evidence_bundle: None,
+            card_function: None,
+            value_claim: None,
+            value_delta: None,
+            target_context: None,
+            synthesis_trace: Vec::new(),
         };
         let evidence_text = if source_observation_ids.is_empty() {
             format!("{source}: synthesized by {engine}")

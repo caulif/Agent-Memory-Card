@@ -806,6 +806,11 @@ pub(super) fn extraction_metadata_for_chunk(
         layer_trace: Vec::new(),
         rejected_at: None,
         evidence_bundle: None,
+        card_function: None,
+        value_claim: None,
+        value_delta: None,
+        target_context: None,
+        synthesis_trace: Vec::new(),
     }
 }
 

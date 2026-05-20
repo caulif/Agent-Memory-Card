@@ -6,6 +6,8 @@ use chrono::Utc;
 
 use crate::fsutil;
 
+use crate::candidate::ExtractionMetadata;
+
 use super::{
     MemoryCardRecord, MemoryCardUpdate, activation, infer_activation, memory_card_path,
     normalize_tags, validate_memory_card_fields,
@@ -79,6 +81,27 @@ pub fn review_update_matches_existing(
 ) -> bool {
     existing.title.trim() == incoming_title.trim()
         || crate::textutil::jaccard_similarity(&existing.body, incoming_body) >= 0.45
+}
+
+pub fn update_memory_card_extraction(
+    project_root: &Path,
+    id: &str,
+    extraction: Option<ExtractionMetadata>,
+) -> Result<MemoryCardRecord> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    let path = memory_card_path(&root, id)?;
+    if !path.exists() {
+        return Err(anyhow!("Memory Card `{id}` does not exist"));
+    }
+
+    let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+    let mut record: MemoryCardRecord = serde_yaml::from_str(&text)
+        .with_context(|| format!("parse Memory Card {}", path.display()))?;
+    record.extraction = extraction;
+    record.updated_at = Utc::now().to_rfc3339();
+    fs::write(&path, serde_yaml::to_string(&record)?)
+        .with_context(|| format!("write {}", path.display()))?;
+    Ok(record)
 }
 
 #[allow(clippy::too_many_arguments)]

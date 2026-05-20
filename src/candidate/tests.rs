@@ -160,6 +160,50 @@ fn approving_chatty_candidate_matures_body_before_persisting() {
 }
 
 #[test]
+fn approving_candidate_persists_value_directed_synthesis_metadata() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut candidate = new_candidate("project:skill-quality-gap", 0.94, Some("high-value-prompt"));
+    candidate.title = "Skills need targeted improvements".to_string();
+    candidate.body = "When a Memory Card can improve a project Skill, show the existing Skill gap and the future behavior change before approval.".to_string();
+    candidate.kind = "procedure".to_string();
+    candidate.tags = vec!["skill".to_string(), "review".to_string()];
+    candidate.extraction.suggested_action =
+        Some(ExtractionAction::new_candidate_for_route("workflow_skill"));
+    add_candidate(temp.path(), candidate).expect("candidate");
+
+    let memory_card = approve_candidate_to_memory_card(temp.path(), "project:skill-quality-gap")
+        .expect("memory_card");
+
+    let extraction = memory_card.extraction.expect("synthesis metadata");
+    assert_eq!(extraction.card_function.as_deref(), Some("skill_targeted"));
+    assert!(
+        extraction
+            .value_claim
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Skill")
+    );
+    let delta = extraction.value_delta.expect("value delta");
+    assert!(!delta.existing_behavior.trim().is_empty());
+    assert!(!delta.missing_part.trim().is_empty());
+    assert!(!delta.new_behavior.trim().is_empty());
+    assert!(!delta.why_not_duplicate.trim().is_empty());
+    assert_eq!(
+        extraction
+            .target_context
+            .as_ref()
+            .map(|target| target.target_type.as_str()),
+        Some("project_skill")
+    );
+    assert!(
+        extraction
+            .synthesis_trace
+            .iter()
+            .any(|entry| entry.step == "value_delta")
+    );
+}
+
+#[test]
 fn approving_merge_candidate_updates_existing_memory_card() {
     let temp = tempfile::tempdir().expect("tempdir");
     memory_card::add_memory_card(
@@ -194,6 +238,20 @@ fn approving_merge_candidate_updates_existing_memory_card() {
 
     assert_eq!(updated.id, "project:frontend-flow");
     assert!(updated.body.contains("focused UI tests"));
+    assert_eq!(
+        updated
+            .extraction
+            .as_ref()
+            .and_then(|metadata| metadata.card_function.as_deref()),
+        Some("merge")
+    );
+    assert!(
+        updated
+            .extraction
+            .as_ref()
+            .and_then(|metadata| metadata.value_delta.as_ref())
+            .is_some_and(|delta| delta.why_not_duplicate.contains("合并"))
+    );
     assert_eq!(cards.len(), 1);
     assert!(visible.is_empty());
 }

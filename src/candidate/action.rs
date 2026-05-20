@@ -71,7 +71,7 @@ fn rationale_for_route(route: &str) -> String {
             "Keep this Memory Card as a workflow Skill draft for a SKILL.md target.".to_string()
         }
         "skill_supplement" => {
-            "Attach this Memory Card as supplemental guidance to an existing Skill.".to_string()
+            "Mount this Memory Card as targeted context for an existing Skill.".to_string()
         }
         "review_only" => {
             "Keep this Memory Card in review/library only; do not compile by default.".to_string()

@@ -67,6 +67,44 @@ pub struct ExtractionMetadata {
     /// 统一证据契约：让 Candidate / Draft / MemoryCard 使用同一种来源、quote 与可信度结构。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence_bundle: Option<EvidenceBundle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card_function: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_claim: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_delta: Option<ValueDelta>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_context: Option<TargetContext>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub synthesis_trace: Vec<SynthesisTraceEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ValueDelta {
+    #[serde(default)]
+    pub existing_behavior: String,
+    #[serde(default)]
+    pub missing_part: String,
+    #[serde(default)]
+    pub new_behavior: String,
+    #[serde(default)]
+    pub why_not_duplicate: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct TargetContext {
+    #[serde(default)]
+    pub target_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_id: Option<String>,
+    #[serde(default)]
+    pub why_this_target: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct SynthesisTraceEntry {
+    pub step: String,
+    pub summary: String,
 }
 
 /// 单层执行记录：层名 + 耗时 + 关键计数（如 cluster_size、kept_ratio）。
@@ -493,6 +531,8 @@ pub fn approve_candidate_to_memory_card(project_root: &Path, id: &str) -> Result
         ));
     }
     let matured = mature_candidate_for_memory_card(&root, &candidate, &approvable_kind);
+    let matured_extraction =
+        extraction_with_synthesis_metadata(candidate.extraction.clone(), &matured);
     if let Some(target_id) = candidate
         .extraction
         .suggested_action
@@ -509,7 +549,7 @@ pub fn approve_candidate_to_memory_card(project_root: &Path, id: &str) -> Result
             .into_iter()
             .find(|memory_card| memory_card.id == target_id)
         {
-            let updated = memory_card::update_memory_card_from_review(
+            memory_card::update_memory_card_from_review(
                 &root,
                 &target_id,
                 if matured.title.trim().is_empty() {
@@ -523,6 +563,11 @@ pub fn approve_candidate_to_memory_card(project_root: &Path, id: &str) -> Result
                 matured.language.clone(),
                 matured.kind.clone(),
                 existing_memory_card.scope.clone(),
+            )?;
+            let updated = memory_card::update_memory_card_extraction(
+                &root,
+                &target_id,
+                Some(matured_extraction.clone()),
             )?;
             candidate.status = CandidateStatus::Promoted;
             candidate.updated_at = Utc::now().to_rfc3339();
@@ -562,7 +607,7 @@ pub fn approve_candidate_to_memory_card(project_root: &Path, id: &str) -> Result
             &matured.title,
             &matured.body,
         ) {
-            let updated = memory_card::update_memory_card_from_review(
+            memory_card::update_memory_card_from_review(
                 &root,
                 &candidate.id,
                 matured.title.clone(),
@@ -572,6 +617,11 @@ pub fn approve_candidate_to_memory_card(project_root: &Path, id: &str) -> Result
                 matured.language.clone(),
                 matured.kind.clone(),
                 matured.scope.clone(),
+            )?;
+            let updated = memory_card::update_memory_card_extraction(
+                &root,
+                &candidate.id,
+                Some(matured_extraction.clone()),
             )?;
             candidate.status = CandidateStatus::Promoted;
             candidate.updated_at = Utc::now().to_rfc3339();
@@ -600,7 +650,7 @@ pub fn approve_candidate_to_memory_card(project_root: &Path, id: &str) -> Result
         &matured.kind,
         &matured.scope,
         candidate.targets.clone(),
-        Some(candidate.extraction.clone()),
+        Some(matured_extraction),
         Some(candidate.id.clone()),
         Some(candidate.evidence.clone()),
     )?;
@@ -637,6 +687,11 @@ struct MatureMemoryCardText {
     scope: String,
     tags: Vec<String>,
     language: String,
+    card_function: String,
+    value_claim: String,
+    value_delta: ValueDelta,
+    target_context: TargetContext,
+    synthesis_trace: Vec<SynthesisTraceEntry>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -650,6 +705,14 @@ struct MatureMemoryCardResponse {
     scope: Option<String>,
     #[serde(default)]
     tags: Vec<String>,
+    #[serde(default)]
+    card_function: Option<String>,
+    #[serde(default)]
+    value_claim: Option<String>,
+    #[serde(default)]
+    value_delta: Option<ValueDelta>,
+    #[serde(default)]
+    target_context: Option<TargetContext>,
 }
 
 fn mature_candidate_for_memory_card(
@@ -677,11 +740,16 @@ fn mature_candidate_with_provider(
 目标：把候选口语片段改写成可长期复用的 Memory Card，而不是复述聊天原文。
 
 输出要求：
+- 先判断这张 Memory Card 能让现有 workflow 或项目级 Skill 下次做得更好；没有增量价值时，在 value_delta 中说明已覆盖或边界。
 - title 是短规范名，不要保留“/goal”“用户说”“这条候选”等聊天痕迹。
 - body 必须采用 When / Do / Boundary 三段结构；中文内容可写成“触发 / 动作 / 边界”。
 - Do 必须是未来 agent 可执行的行为规则。
 - Boundary 必须写清适用范围、人工确认点或不要越界的内容。
 - brief 用“用于...”概括这张卡的用途，不要复读 title/body。
+- card_function 只能是 library、skill_targeted、workflow、merge 之一；如果候选激活 skill 或目标是 Skill，优先 skill_targeted。
+- value_claim 用一句话说明它要防止的未来失败、补上的 Skill/workflow 缺口或带来的行为改进。
+- value_delta 必须说明 existing_behavior、missing_part、new_behavior、why_not_duplicate。
+- target_context 说明目标是 project_skill、workflow、memory_card 或 global_reference，以及为什么放在这里。
 - 合并重复或相似语义时，保留更成熟、更可执行的表述。
 - 不要编造证据中没有的工具、路径、指标或团队规则。
 - 只返回 JSON。"#
@@ -713,9 +781,32 @@ fn mature_candidate_with_provider(
                     "brief": { "type": "string" },
                     "kind": { "type": ["string", "null"], "enum": ["preference", "constraint", "procedure", "convention", "correction", "anti-pattern", "rule", "template", "workflow", null] },
                     "scope": { "type": ["string", "null"], "enum": ["project", "global", "agent", "directory", "agent-specific", null] },
-                    "tags": { "type": "array", "items": { "type": "string" } }
+                    "tags": { "type": "array", "items": { "type": "string" } },
+                    "card_function": { "type": ["string", "null"], "enum": ["library", "skill_targeted", "workflow", "merge", null] },
+                    "value_claim": { "type": ["string", "null"] },
+                    "value_delta": {
+                        "type": ["object", "null"],
+                        "additionalProperties": false,
+                        "properties": {
+                            "existing_behavior": { "type": "string" },
+                            "missing_part": { "type": "string" },
+                            "new_behavior": { "type": "string" },
+                            "why_not_duplicate": { "type": "string" }
+                        },
+                        "required": ["existing_behavior", "missing_part", "new_behavior", "why_not_duplicate"]
+                    },
+                    "target_context": {
+                        "type": ["object", "null"],
+                        "additionalProperties": false,
+                        "properties": {
+                            "target_type": { "type": "string", "enum": ["project_skill", "workflow", "memory_card", "global_reference"] },
+                            "target_id": { "type": ["string", "null"] },
+                            "why_this_target": { "type": "string" }
+                        },
+                        "required": ["target_type", "target_id", "why_this_target"]
+                    }
                 },
-                "required": ["title", "body", "brief", "kind", "scope", "tags"]
+                "required": ["title", "body", "brief", "kind", "scope", "tags", "card_function", "value_claim", "value_delta", "target_context"]
             }),
         }),
     };
@@ -742,6 +833,14 @@ fn mature_candidate_with_provider(
         .filter(|scope| is_valid_candidate_scope(scope))
         .unwrap_or_else(|| candidate.scope.clone());
     let tags = mature_tags(parsed.tags, candidate, &kind);
+    let card_function =
+        normalize_card_function(parsed.card_function.as_deref(), candidate, approvable_kind);
+    let value_delta = normalize_value_delta(parsed.value_delta, candidate, &body, &card_function);
+    let value_claim = parsed
+        .value_claim
+        .filter(|claim| claim.trim().chars().count() >= 8)
+        .unwrap_or_else(|| synthesize_value_claim(candidate, &value_delta, &card_function));
+    let target_context = normalize_target_context(parsed.target_context, candidate, &card_function);
     Some(MatureMemoryCardText {
         title,
         body,
@@ -750,6 +849,11 @@ fn mature_candidate_with_provider(
         scope,
         tags,
         language: infer_language(&candidate.title, &candidate.body),
+        card_function,
+        value_claim,
+        value_delta,
+        target_context,
+        synthesis_trace: synthesis_trace_for_candidate(candidate, true),
     })
 }
 
@@ -771,6 +875,10 @@ fn mature_candidate_deterministic(
     } else {
         mature_brief(&title, &body, &language)
     };
+    let card_function = normalize_card_function(None, candidate, approvable_kind);
+    let value_delta = normalize_value_delta(None, candidate, &body, &card_function);
+    let value_claim = synthesize_value_claim(candidate, &value_delta, &card_function);
+    let target_context = normalize_target_context(None, candidate, &card_function);
     MatureMemoryCardText {
         title,
         body,
@@ -783,7 +891,260 @@ fn mature_candidate_deterministic(
         },
         tags: mature_tags(candidate.tags.clone(), candidate, approvable_kind),
         language,
+        card_function,
+        value_claim,
+        value_delta,
+        target_context,
+        synthesis_trace: synthesis_trace_for_candidate(candidate, false),
     }
+}
+
+fn extraction_with_synthesis_metadata(
+    mut extraction: ExtractionMetadata,
+    matured: &MatureMemoryCardText,
+) -> ExtractionMetadata {
+    extraction.card_function = Some(matured.card_function.clone());
+    extraction.value_claim = Some(matured.value_claim.clone());
+    extraction.value_delta = Some(matured.value_delta.clone());
+    extraction.target_context = Some(matured.target_context.clone());
+    extraction.synthesis_trace = matured.synthesis_trace.clone();
+    if let Some(action) = extraction.suggested_action.as_mut() {
+        action.rationale = Some(matured.value_claim.clone());
+    }
+    extraction
+}
+
+fn normalize_card_function(
+    provider_value: Option<&str>,
+    candidate: &CandidateRecord,
+    approvable_kind: &str,
+) -> String {
+    let normalized = provider_value
+        .map(str::trim)
+        .filter(|value| matches!(*value, "library" | "skill_targeted" | "workflow" | "merge"));
+    if let Some(value) = normalized {
+        return value.to_string();
+    }
+    if candidate
+        .extraction
+        .suggested_action
+        .as_ref()
+        .is_some_and(|action| action.action == "merge_into_existing")
+    {
+        return "merge".to_string();
+    }
+    let text = format!(
+        "{} {} {} {}",
+        candidate.title,
+        candidate.body,
+        candidate.tags.join(" "),
+        approvable_kind
+    )
+    .to_lowercase();
+    if candidate
+        .extraction
+        .classification
+        .as_ref()
+        .is_some_and(|classification| classification.activation == "skill")
+        || candidate
+            .targets
+            .iter()
+            .any(|target| target.contains("skill"))
+        || text.contains("skill")
+        || text.contains("技能")
+    {
+        "skill_targeted".to_string()
+    } else if matches!(approvable_kind, "workflow" | "procedure" | "template")
+        || text.contains("workflow")
+        || text.contains("工作流")
+    {
+        "workflow".to_string()
+    } else {
+        "library".to_string()
+    }
+}
+
+fn normalize_value_delta(
+    provider_value: Option<ValueDelta>,
+    candidate: &CandidateRecord,
+    body: &str,
+    card_function: &str,
+) -> ValueDelta {
+    if let Some(delta) = provider_value
+        && valid_value_delta(&delta)
+    {
+        return delta;
+    }
+    let existing_behavior = match card_function {
+        "skill_targeted" => {
+            "现有 Skill 或流程已有基础职责，但缺少这条历史反馈中的具体触发、边界或验收要求。"
+        }
+        "merge" => "已有相近 Memory Card 覆盖同一主题，需要更新为更成熟、更可执行的表达。",
+        "workflow" => "现有项目工作流可被执行，但历史反馈显示仍需要更明确的操作约束。",
+        _ => "现有项目规则库尚未稳定表达这条可复用偏好或约束。",
+    };
+    let missing_part = extract_missing_part(candidate, body);
+    let new_behavior = extract_new_behavior(body);
+    let why_not_duplicate = if card_function == "merge" {
+        "该建议被标记为合并更新，价值在于改写或补强既有 Memory Card，而不是新增重复卡。"
+    } else {
+        "该卡必须提供比现有规则更具体的触发、动作或边界；若审阅时发现已完全覆盖，应选择合并或忽略。"
+    };
+    ValueDelta {
+        existing_behavior: existing_behavior.to_string(),
+        missing_part,
+        new_behavior,
+        why_not_duplicate: why_not_duplicate.to_string(),
+    }
+}
+
+fn valid_value_delta(delta: &ValueDelta) -> bool {
+    [
+        &delta.existing_behavior,
+        &delta.missing_part,
+        &delta.new_behavior,
+        &delta.why_not_duplicate,
+    ]
+    .iter()
+    .all(|value| value.trim().chars().count() >= 8)
+}
+
+fn synthesize_value_claim(
+    candidate: &CandidateRecord,
+    value_delta: &ValueDelta,
+    card_function: &str,
+) -> String {
+    let target = match card_function {
+        "skill_targeted" => "目标 Skill",
+        "workflow" => "项目工作流",
+        "merge" => "既有 Memory Card",
+        _ => "项目规则库",
+    };
+    let missing = value_delta
+        .missing_part
+        .trim()
+        .trim_end_matches(['。', '.', ';', '；']);
+    if infer_language(&candidate.title, &candidate.body) == "zh" {
+        format!("补强{target}中“{missing}”这一缺口，避免下次重复出现同类执行偏差。")
+    } else {
+        format!("Improves {target} by adding the missing behavior: {missing}.")
+    }
+}
+
+fn normalize_target_context(
+    provider_value: Option<TargetContext>,
+    candidate: &CandidateRecord,
+    card_function: &str,
+) -> TargetContext {
+    if let Some(context) = provider_value
+        && !context.target_type.trim().is_empty()
+        && !context.why_this_target.trim().is_empty()
+    {
+        return context;
+    }
+    let target_type = match card_function {
+        "skill_targeted" => "project_skill",
+        "merge" => "memory_card",
+        "workflow" => "workflow",
+        _ => "workflow",
+    };
+    let target_id = if card_function == "merge" {
+        candidate
+            .extraction
+            .suggested_action
+            .as_ref()
+            .and_then(|action| {
+                action
+                    .target_record
+                    .clone()
+                    .or_else(|| action.record_id.clone())
+            })
+    } else {
+        candidate.targets.first().cloned()
+    };
+    let why_this_target = match card_function {
+        "skill_targeted" => "这张 Memory Card 的价值在于补强项目级 Skill 的触发、指令或边界。",
+        "merge" => "该候选与既有 Memory Card 主题重叠，应作为合并更新审阅。",
+        "workflow" => "该候选描述的是重复项目工作流中的可执行改进。",
+        _ => "该候选适合作为项目规则库中的独立 Memory Card 审阅。",
+    };
+    TargetContext {
+        target_type: target_type.to_string(),
+        target_id,
+        why_this_target: why_this_target.to_string(),
+    }
+}
+
+fn synthesis_trace_for_candidate(
+    candidate: &CandidateRecord,
+    provider_used: bool,
+) -> Vec<SynthesisTraceEntry> {
+    let mut trace = vec![
+        SynthesisTraceEntry {
+            step: "filter".to_string(),
+            summary: "Kept because the candidate passed durable-memory review and reached the user Review Inbox.".to_string(),
+        },
+        SynthesisTraceEntry {
+            step: "value_delta".to_string(),
+            summary: "Compared against the candidate route and merge hints to require a concrete future behavior delta.".to_string(),
+        },
+    ];
+    if candidate
+        .extraction
+        .suggested_action
+        .as_ref()
+        .is_some_and(|action| action.action == "merge_into_existing")
+    {
+        trace.push(SynthesisTraceEntry {
+            step: "duplicate_check".to_string(),
+            summary: "Existing Memory Card overlap found; approval should update the existing card instead of adding clutter.".to_string(),
+        });
+    }
+    trace.push(SynthesisTraceEntry {
+        step: "rewrite".to_string(),
+        summary: if provider_used {
+            "Provider rewrite produced a value-directed Memory Card proposal.".to_string()
+        } else {
+            "Deterministic fallback rendered a structured Memory Card proposal with value metadata."
+                .to_string()
+        },
+    });
+    trace
+}
+
+fn extract_missing_part(candidate: &CandidateRecord, body: &str) -> String {
+    if let Some(action) = candidate.extraction.suggested_action.as_ref()
+        && action.action == "merge_into_existing"
+    {
+        return "既有卡片需要吸收新的触发、动作或边界表达".to_string();
+    }
+    body.lines()
+        .find(|line| line.contains("边界") || line.to_lowercase().starts_with("boundary"))
+        .map(|line| {
+            line.replace("边界：", "")
+                .replace("Boundary:", "")
+                .trim()
+                .chars()
+                .take(80)
+                .collect::<String>()
+        })
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "缺少可复用的触发、动作和边界说明".to_string())
+}
+
+fn extract_new_behavior(body: &str) -> String {
+    body.lines()
+        .find(|line| line.contains("动作") || line.to_lowercase().starts_with("do:"))
+        .map(|line| {
+            line.replace("动作：", "")
+                .replace("Do:", "")
+                .trim()
+                .chars()
+                .take(96)
+                .collect::<String>()
+        })
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "下次遇到同类任务时先按卡片规则执行，并保留人工审阅边界。".to_string())
 }
 
 fn is_structured_memory_body(body: &str) -> bool {

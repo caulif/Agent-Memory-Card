@@ -518,6 +518,9 @@ function formatSourceCounts(sourceCounts: Record<string, number>) {
 }
 
 function MemoryCardMini({ card, tone }: { card: MemoryCardRecord; tone: "linked" | "recommended" }) {
+  const delta = card.extraction?.value_delta;
+  const valueClaim = card.extraction?.value_claim;
+  const isSkillTargeted = card.extraction?.card_function === "skill_targeted" || card.activation === "skill";
   return (
     <article
       style={{
@@ -534,6 +537,38 @@ function MemoryCardMini({ card, tone }: { card: MemoryCardRecord; tone: "linked"
       <p style={{ margin: "6px 0 0", color: "var(--color-text-secondary)", fontSize: "11.5px", lineHeight: 1.5 }}>
         {card.brief || card.body.slice(0, 96)}
       </p>
+      {(valueClaim || delta?.missing_part || delta?.new_behavior) && (
+        <div
+          style={{
+            marginTop: "8px",
+            paddingTop: "8px",
+            borderTop: "1px solid var(--color-border)",
+            display: "grid",
+            gap: "5px",
+          }}
+        >
+          {isSkillTargeted && (
+            <span className="tag-quiet" style={{ width: "fit-content" }}>
+              Skill-targeted Memory Card
+            </span>
+          )}
+          {valueClaim && (
+            <p style={{ margin: 0, color: "var(--color-text-primary)", fontSize: "11.5px", lineHeight: 1.45 }}>
+              <strong>改进目标：</strong>{valueClaim}
+            </p>
+          )}
+          {delta?.missing_part && (
+            <p style={{ margin: 0, color: "var(--color-text-secondary)", fontSize: "11px", lineHeight: 1.45 }}>
+              <strong>Before：</strong>{delta.existing_behavior || "当前 Skill 已有基础能力"}；缺口：{delta.missing_part}
+            </p>
+          )}
+          {delta?.new_behavior && (
+            <p style={{ margin: 0, color: "var(--color-text-secondary)", fontSize: "11px", lineHeight: 1.45 }}>
+              <strong>After：</strong>{delta.new_behavior}
+            </p>
+          )}
+        </div>
+      )}
     </article>
   );
 }

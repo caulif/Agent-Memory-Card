@@ -30,7 +30,7 @@ type RecordEditorProps = {
   onCancel: () => void;
 };
 
-/** 通用记录编辑器：支持草稿和技能片段的字段编辑，含审查和保存流程 */
+/** 通用记录编辑器：支持草稿和 Memory Card 的字段编辑，含审查和保存流程 */
 export function RecordEditor({ recordType, initialForm, extraction, previewMode, projectPath, recordId, onSaved, onCancel }: RecordEditorProps) {
   const [form, setForm] = React.useState<EditFormData>(initialForm);
   const [planResult, setPlanResult] = React.useState<PlanReviewResult | null>(null);
@@ -100,7 +100,7 @@ export function RecordEditor({ recordType, initialForm, extraction, previewMode,
     }
   }
 
-  /** 保存变更：草稿调用 update_draft，技能片段调用 update_memory_card */
+  /** 保存变更：草稿调用 update_draft，Memory Card 调用 update_memory_card */
   async function handleSave() {
     setSaving(true);
     setMessage("");
@@ -149,7 +149,7 @@ export function RecordEditor({ recordType, initialForm, extraction, previewMode,
     }
   }
 
-  const recordLabel = recordType === "draft" ? "草稿" : recordType === "candidate" ? "候选" : "技能片段";
+  const recordLabel = recordType === "draft" ? "草稿" : recordType === "candidate" ? "候选" : "Memory Card";
 
   return (
     <article className="edit-panel">

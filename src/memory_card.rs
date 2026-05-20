@@ -16,7 +16,8 @@ mod merge;
 mod target_matrix;
 
 pub use edit::{
-    review_update_matches_existing, update_memory_card, update_memory_card_from_review,
+    review_update_matches_existing, update_memory_card, update_memory_card_extraction,
+    update_memory_card_from_review,
 };
 pub use global::{install_global_memory_card_to_project, promote_memory_card_to_global};
 pub use merge::merge_memory_cards;

@@ -155,3 +155,37 @@
     *   `cargo test --manifest-path Cargo.toml --lib` -> PASS, 304 passed.
     *   `cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture` -> PASS, 45 passed.
     *   Playwright preview trial -> no console errors; Drafts 成熟拟案、MemoryCards 读本布局、Skills 项目/全局分层与取消路径、Agents 点选装填、Settings 高级诊断折叠均可见；桌面 5 页与移动 Agents 均无横向溢出。
+
+---
+
+## 10. 2026-05-20 价值导向 Memory Card Synthesis 实施记录
+*   **Issue**: GitHub #38 tracks the implementation.
+*   **Spec**:
+    *   `docs/analysis/memory-card-synthesis-agent-design.md`
+    *   `docs/plan/memory-card-synthesis-implementation-plan.md`
+*   **Goal**: 按 “No Card Is A Success / Value Delta / Skill-targeted Memory Card” 设计，把候选成熟化从聊天摘要升级为能说明目标、缺口和未来行为改进的 Memory Card synthesis。
+*   **Current Status**:
+    *   [x] 设计文档完成并收束产品概念为 Memory Card。
+    *   [x] GitHub issue #38 创建。
+    *   [x] Phase 1: 元数据契约。
+    *   [x] Phase 2: 价值导向 synthesis。
+    *   [x] Phase 3: Drafts / Skills review UX。
+    *   [ ] Phase 4: 验证、提交、推送与 issue 更新。
+*   **Implementation Notes**:
+    *   `ExtractionMetadata` 新增 `card_function / value_claim / value_delta / target_context / synthesis_trace`，保持旧 YAML 默认兼容。
+    *   候选批准前成熟化改为 value-directed prompt；确定性 fallback 也会生成 Value Delta 与 trace。
+    *   Merge 候选批准后会把新 synthesis metadata 写回既有 Memory Card，避免重复新增。
+    *   Drafts 显示 Value Delta、目标上下文和 compact trace；Skills 的 Memory Card mini preview 显示 Skill-targeted Before / After。
+    *   参照 `earendil-works/pi` 的 agent-core 思路，当前先落状态/trace/stop-reason 兼容契约，后续 runtime 不手搓裸 loop。
+*   **Verification So Far**:
+    *   `cargo test --manifest-path Cargo.toml candidate::tests --lib` -> PASS, 9 passed.
+    *   `cargo test --manifest-path Cargo.toml --lib` -> PASS, 306 passed.
+    *   `cargo fmt --check` -> PASS.
+    *   `cargo clippy -- -D warnings` -> PASS.
+    *   `cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture` -> PASS, 45 passed.
+    *   `cargo test --test extract_quality_v2 --quiet` -> PASS, 21 passed / 1 ignored.
+    *   `cargo test --test golden_set_regression --quiet` -> PASS, 3 passed.
+    *   `bun run --cwd app verify-ui` -> PASS.
+    *   `bun test --cwd app ./src/utils/review-workbench.test.ts ./src/utils/kernel-plan.test.ts` -> PASS, 28 passed.
+    *   `bun run --cwd app build` -> PASS.
+    *   Playwright smoke on `http://127.0.0.1:1420` -> no console errors, no horizontal overflow; Skill-targeted Before / After visible.

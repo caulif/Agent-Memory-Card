@@ -236,6 +236,8 @@ function CandidateDetail({
         <p style={{ margin: 0, fontSize: "13.5px", lineHeight: "1.6", color: "var(--color-text-primary)", whiteSpace: "pre-wrap" }}>{preview.body}</p>
       </div>
 
+      <ValueSynthesisPanel candidate={candidate} />
+
       {/* ===== 实证历史与可追溯上下文 ===== */}
       <div className="plain-evidence-section" style={{
         marginTop: "20px",
@@ -312,6 +314,105 @@ function CandidateDetail({
       </div>
     </div>
   );
+}
+
+function ValueSynthesisPanel({ candidate }: { candidate: CandidateRecord }) {
+  const extraction = candidate.extraction;
+  const delta = extraction?.value_delta;
+  const trace = extraction?.synthesis_trace ?? [];
+  const hasValue =
+    Boolean(extraction?.value_claim) ||
+    Boolean(delta?.existing_behavior) ||
+    Boolean(delta?.missing_part) ||
+    Boolean(delta?.new_behavior) ||
+    Boolean(delta?.why_not_duplicate);
+  if (!hasValue) return null;
+  const cardFunction = memoryCardFunctionLabel(extraction?.card_function);
+  return (
+    <section
+      style={{
+        border: "1px solid var(--color-border)",
+        borderRadius: "var(--radius-md)",
+        padding: "14px 16px",
+        background: "var(--color-surface)",
+        marginBottom: "18px",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "center", marginBottom: "10px" }}>
+        <h4 style={{ margin: 0, fontSize: "12px", fontWeight: 800, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          Value Delta
+        </h4>
+        <span className="tag-quiet">{cardFunction}</span>
+      </div>
+      {extraction?.value_claim && (
+        <p style={{ margin: "0 0 12px", fontSize: "13px", lineHeight: 1.55, color: "var(--color-text-primary)" }}>
+          <strong>价值主张：</strong>{extraction.value_claim}
+        </p>
+      )}
+      {delta && (
+        <div style={{ display: "grid", gap: "8px" }}>
+          <ValueDeltaRow label="已有能力" value={delta.existing_behavior} />
+          <ValueDeltaRow label="缺口" value={delta.missing_part} />
+          <ValueDeltaRow label="新行为" value={delta.new_behavior} />
+          <ValueDeltaRow label="非重复理由" value={delta.why_not_duplicate} />
+        </div>
+      )}
+      {extraction?.target_context?.why_this_target && (
+        <p style={{ margin: "12px 0 0", fontSize: "12px", lineHeight: 1.5, color: "var(--color-text-secondary)" }}>
+          <strong>目标：</strong>{targetContextLabel(extraction.target_context.target_type)}
+          {extraction.target_context.target_id ? ` · ${extraction.target_context.target_id}` : ""} — {extraction.target_context.why_this_target}
+        </p>
+      )}
+      {trace.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "12px" }}>
+          {trace.map((entry) => (
+            <span key={`${entry.step}-${entry.summary}`} className="tag-quiet" title={entry.summary}>
+              {traceStepLabel(entry.step)}
+            </span>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ValueDeltaRow({ label, value }: { label: string; value?: string }) {
+  if (!value) return null;
+  return (
+    <p style={{ margin: 0, fontSize: "12.5px", lineHeight: 1.5, color: "var(--color-text-secondary)" }}>
+      <strong>{label}：</strong>{value}
+    </p>
+  );
+}
+
+function memoryCardFunctionLabel(value?: string | null) {
+  const labels: Record<string, string> = {
+    library: "Library Memory Card",
+    skill_targeted: "Skill-targeted Memory Card",
+    workflow: "Workflow Memory Card",
+    merge: "Merge Memory Card",
+  };
+  return value ? labels[value] ?? value : "Memory Card";
+}
+
+function targetContextLabel(value?: string) {
+  const labels: Record<string, string> = {
+    project_skill: "项目级 Skill",
+    workflow: "项目工作流",
+    memory_card: "既有 Memory Card",
+    global_reference: "全局参考",
+  };
+  return value ? labels[value] ?? value : "未指定";
+}
+
+function traceStepLabel(value: string) {
+  const labels: Record<string, string> = {
+    filter: "已过滤",
+    value_delta: "已比较价值差异",
+    duplicate_check: "已查重",
+    rewrite: "已转写",
+  };
+  return labels[value] ?? value;
 }
 
 function matureCandidatePreview(candidate: CandidateRecord) {
