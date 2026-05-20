@@ -203,7 +203,9 @@
 *   **Production Changes**:
     *   `src/synthesis_agent.rs`: 新增 Rust core synthesis runtime foundation，包含 `SynthesisReview`、typed read-only tool events、context pack、proposal、stop reason 和 compact trace。
     *   `src/candidate.rs`: 候选成熟化前运行 synthesis review；Provider prompt 接收 `synthesis_context`；无 Provider 时 deterministic fallback 也使用同一份 value metadata。
-    *   `src/candidate.rs`: 若 runtime 识别近重复项目 Memory Card，批准时自动走 `merge_into_existing`，避免生成重复卡。
+    *   `src/candidate.rs` / `src-tauri/src/app_service.rs`: Review Inbox 读取候选时即做只读 synthesis preview enrichment，让用户批准前就能看到成熟 Memory Card 预览、Value Delta、目标上下文和 trace。
+    *   `src/synthesis_agent.rs` / `Drafts.tsx`: runtime 显式区分 `already_covered / merge_card / skill_targeted_card / workflow_card / needs_human`；已覆盖候选在 UI 中走“No Card Is A Success”归档路径，而不是诱导新增重复卡。
+    *   `src/candidate.rs`: 若 runtime 识别近重复项目 Memory Card，批准时自动走 `merge_into_existing`；若识别已充分覆盖，则保留为 review-only 归档建议。
     *   `src/lib.rs`: 暴露 `synthesis_agent` 模块供后续 Tauri/CLI/UI read model 复用。
 *   **Implemented Tools**:
     *   `search_observations`
@@ -217,9 +219,14 @@
     *   项目级 Skills 可作为目标；全局 Skills 仅作参考。
     *   真正 provider tool-call loop、Web search/read 和 embedding search 暂未混入核心写路径，后续复用同一 `SynthesisReview` 合约替换 planner。
 *   **Verification So Far**:
-    *   `cargo test --manifest-path Cargo.toml synthesis_agent --lib` -> PASS, 3 passed.
-    *   `cargo test --manifest-path Cargo.toml --lib` -> PASS, 309 passed.
+    *   `cargo test --manifest-path Cargo.toml synthesis_agent --lib` -> PASS, 4 passed.
+    *   `cargo test --manifest-path Cargo.toml candidate::tests::visible_candidate_inbox --lib` -> PASS, 2 passed.
+    *   `cargo test --manifest-path Cargo.toml --lib` -> PASS, 312 passed.
+    *   `cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture` -> PASS, 45 passed.
+    *   `cargo test --test extract_quality_v2 --quiet` -> PASS, 21 passed / 1 ignored.
+    *   `cargo test --test golden_set_regression --quiet` -> PASS, 3 passed.
     *   `cargo fmt --check` -> PASS.
-    *   `cargo clippy -- -D warnings` -> PASS.
+    *   `cargo clippy -- -D warnings` -> PASS. Local run emitted rustc incremental-cache corruption warnings; they were non-lint warnings and did not fail clippy.
     *   `bun run --cwd app verify-ui` -> PASS.
     *   `bun test --cwd app ./src/utils/review-workbench.test.ts ./src/utils/kernel-plan.test.ts` -> PASS, 28 passed.
+    *   `bun run --cwd app build` -> PASS.

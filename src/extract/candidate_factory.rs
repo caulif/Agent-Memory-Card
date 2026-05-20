@@ -811,6 +811,8 @@ pub(super) fn extraction_metadata_for_chunk(
         value_delta: None,
         target_context: None,
         synthesis_trace: Vec::new(),
+        synthesis_action: None,
+        synthesis_stop_reason: None,
     }
 }
 

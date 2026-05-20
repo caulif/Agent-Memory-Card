@@ -145,7 +145,7 @@ pub fn load_project_candidate_inbox(project_root: &Path) -> anyhow::Result<Proje
     let root = fsutil::normalize_project_root(project_root)?;
     Ok(ProjectCandidateInbox {
         project_path: fsutil::path_to_slash(&root),
-        candidates: candidate::list_visible_candidates(&root)?,
+        candidates: candidate::list_visible_candidates_with_synthesis_preview(&root)?,
     })
 }
 

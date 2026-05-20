@@ -204,6 +204,81 @@ fn approving_candidate_persists_value_directed_synthesis_metadata() {
 }
 
 #[test]
+fn visible_candidate_inbox_includes_synthesis_preview_before_approval() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    crate::observation::import_observation_text(
+        temp.path(),
+        &temp.path().join("session.jsonl"),
+        "codex-session",
+        Some("codex"),
+        "用户要求 Memory Card 审阅前就展示价值增量、目标上下文和可审阅 trace。",
+    )
+    .expect("observation");
+    let mut candidate = new_candidate("project:review-before-approval", 0.91, Some("review"));
+    candidate.title = "Review Value Before Approval".to_string();
+    candidate.body =
+        "Memory Card review should show value delta and trace before approval.".to_string();
+    candidate.kind = "procedure".to_string();
+    add_candidate(temp.path(), candidate).expect("candidate");
+
+    let visible =
+        list_visible_candidates_with_synthesis_preview(temp.path()).expect("visible candidates");
+    let extraction = &visible[0].extraction;
+
+    assert!(extraction.value_claim.is_some());
+    assert!(extraction.value_delta.is_some());
+    assert!(extraction.target_context.is_some());
+    assert!(
+        extraction
+            .synthesis_trace
+            .iter()
+            .any(|entry| entry.step == "search_observations")
+    );
+}
+
+#[test]
+fn visible_candidate_inbox_matures_existing_value_metadata_preview() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut candidate = new_candidate("project:chatty-existing-metadata", 0.91, Some("review"));
+    candidate.title = "用户说以后别只看编译".to_string();
+    candidate.body = "以后完成 UI 修改以后不要只告诉我编译通过，还要自己试用一下。".to_string();
+    candidate.extraction.card_function = Some("workflow".to_string());
+    candidate.extraction.value_claim = Some("用于要求 UI 修改后完成真实试用。".to_string());
+    candidate.extraction.value_delta = Some(ValueDelta {
+        existing_behavior: "已有流程会运行编译检查。".to_string(),
+        missing_part: "缺少真实用户路径试用。".to_string(),
+        new_behavior: "完成 UI 修改后按用户路径试用并记录问题。".to_string(),
+        why_not_duplicate: "该卡补上验收边界，不重复编译规则。".to_string(),
+    });
+    candidate.extraction.target_context = Some(TargetContext {
+        target_type: "workflow".to_string(),
+        target_id: None,
+        why_this_target: "这是 UI 验收工作流边界。".to_string(),
+    });
+    candidate.extraction.synthesis_trace = vec![SynthesisTraceEntry {
+        step: "value_delta".to_string(),
+        summary: "existing metadata".to_string(),
+    }];
+    add_candidate(temp.path(), candidate).expect("candidate");
+
+    let visible =
+        list_visible_candidates_with_synthesis_preview(temp.path()).expect("visible candidates");
+    let candidate = &visible[0];
+
+    assert!(candidate.body.contains("触发"));
+    assert!(candidate.body.contains("动作"));
+    assert!(candidate.body.contains("边界"));
+    assert_eq!(
+        candidate.extraction.synthesis_action.as_deref(),
+        Some("workflow_card")
+    );
+    assert_eq!(
+        candidate.extraction.synthesis_stop_reason.as_deref(),
+        Some("workflow_gap_found")
+    );
+}
+
+#[test]
 fn approving_merge_candidate_updates_existing_memory_card() {
     let temp = tempfile::tempdir().expect("tempdir");
     memory_card::add_memory_card(

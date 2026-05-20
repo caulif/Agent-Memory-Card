@@ -486,6 +486,8 @@ fn synthesize_observations_to_drafts_with_engine_and_limit(
                 value_delta: None,
                 target_context: None,
                 synthesis_trace: Vec::new(),
+                synthesis_action: None,
+                synthesis_stop_reason: None,
             };
             let result = candidate::add_candidate(
                 project_root,
@@ -739,6 +741,8 @@ fn synthesize_with_agent_engine(
             value_delta: None,
             target_context: None,
             synthesis_trace: Vec::new(),
+            synthesis_action: None,
+            synthesis_stop_reason: None,
         };
         let evidence_text = if source_observation_ids.is_empty() {
             format!("{source}: synthesized by {engine}")

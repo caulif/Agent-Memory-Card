@@ -209,6 +209,17 @@ pub fn run_memory_card_synthesis(
             item_ids: vec![target.clone()],
         });
     }
+    if proposal.action == "already_covered" {
+        if let Some(target) = proposal.target_context.target_id.as_ref() {
+            events.push(SynthesisEvent {
+                tool: SynthesisToolName::FindMemoryDuplicates,
+                summary: format!(
+                    "Recommended no new card because Memory Card `{target}` already covers the candidate."
+                ),
+                item_ids: vec![target.clone()],
+            });
+        }
+    }
     if let Some(target) = proposal.target_skill_id.as_ref() {
         events.push(SynthesisEvent {
             tool: SynthesisToolName::CompareWithSkill,
@@ -261,6 +272,12 @@ fn propose(
     memory_matches: &[MemoryCardMatch],
     skill_matches: &[SkillMatch],
 ) -> SynthesisProposal {
+    let covered_match = memory_matches
+        .iter()
+        .find(|matched| {
+            matched.scope == "project" && matched.duplicate && !mentions_update_intent(candidate)
+        })
+        .cloned();
     let duplicate_match = candidate
         .extraction
         .suggested_action
@@ -283,7 +300,9 @@ fn propose(
         .find(|skill| skill.project_level)
         .cloned();
 
-    let inferred_function = if duplicate_match.is_some() {
+    let inferred_function = if covered_match.is_some() {
+        "library"
+    } else if duplicate_match.is_some() {
         "merge"
     } else if project_skill.is_some() || mentions_skill(candidate) {
         "skill_targeted"
@@ -292,32 +311,65 @@ fn propose(
     } else {
         "library"
     };
-    let target_type = match inferred_function {
-        "merge" => "memory_card",
-        "skill_targeted" => "project_skill",
-        "workflow" => "workflow",
-        _ => "workflow",
+    let target_type = if covered_match.is_some() {
+        "memory_card"
+    } else {
+        match inferred_function {
+            "merge" => "memory_card",
+            "skill_targeted" => "project_skill",
+            "workflow" => "workflow",
+            _ => "workflow",
+        }
     };
-    let target_id = duplicate_match
-        .clone()
-        .or_else(|| project_skill.as_ref().map(|skill| skill.id.clone()));
-    let value_delta = value_delta_for(
-        candidate,
-        inferred_function,
-        duplicate_match.as_deref(),
-        project_skill.as_ref(),
-    );
+    let target_id = covered_match
+        .as_ref()
+        .map(|matched| matched.id.clone())
+        .or_else(|| {
+            duplicate_match
+                .clone()
+                .or_else(|| project_skill.as_ref().map(|skill| skill.id.clone()))
+        });
+    let value_delta = if let Some(matched) = covered_match.as_ref() {
+        ValueDelta {
+            existing_behavior: format!(
+                "既有 Memory Card `{}` 已覆盖同一触发和行为边界。",
+                matched.id
+            ),
+            missing_part: "未发现比既有卡片更具体的新触发、动作或边界。".to_string(),
+            new_behavior:
+                "将该候选标记为已覆盖，保持规则库精简；只有出现新的边界时才改为合并更新。"
+                    .to_string(),
+            why_not_duplicate: format!(
+                "继续新增会与「{}」形成重复卡片，降低未来 Skill/agent 选择上下文的清晰度。",
+                matched.title
+            ),
+        }
+    } else {
+        value_delta_for(
+            candidate,
+            inferred_function,
+            duplicate_match
+                .as_deref()
+                .or_else(|| covered_match.as_ref().map(|matched| matched.id.as_str())),
+            project_skill.as_ref(),
+        )
+    };
     let value_claim = value_claim_for(
         candidate,
         inferred_function,
         &value_delta,
         project_skill.as_ref(),
+        covered_match.as_ref(),
     );
-    let action = match inferred_function {
-        "merge" => "merge_card",
-        "skill_targeted" => "skill_targeted_card",
-        "workflow" => "workflow_card",
-        _ => "new_card",
+    let action = if covered_match.is_some() {
+        "already_covered"
+    } else {
+        match inferred_function {
+            "merge" => "merge_card",
+            "skill_targeted" => "skill_targeted_card",
+            "workflow" => "workflow_card",
+            _ => "new_card",
+        }
     };
     let confidence = confidence_for(candidate, memory_matches, skill_matches, inferred_function);
 
@@ -330,6 +382,7 @@ fn propose(
             target_type: target_type.to_string(),
             target_id,
             why_this_target: target_reason(
+                covered_match.as_ref(),
                 inferred_function,
                 duplicate_match.as_deref(),
                 project_skill.as_ref(),
@@ -514,7 +567,14 @@ fn value_claim_for(
     card_function: &str,
     value_delta: &ValueDelta,
     skill: Option<&SkillMatch>,
+    covered_match: Option<&MemoryCardMatch>,
 ) -> String {
+    if let Some(matched) = covered_match {
+        return format!(
+            "「{}」已由既有 Memory Card `{}` 覆盖，审阅成功路径是忽略候选而不是新增卡片。",
+            candidate.title, matched.id
+        );
+    }
     match (card_function, skill) {
         ("skill_targeted", Some(skill)) => format!(
             "补强项目级 Skill `{}`，让它下次能处理“{}”这一缺口。",
@@ -536,10 +596,17 @@ fn value_claim_for(
 }
 
 fn target_reason(
+    covered_match: Option<&MemoryCardMatch>,
     card_function: &str,
     duplicate_id: Option<&str>,
     skill: Option<&SkillMatch>,
 ) -> String {
+    if let Some(matched) = covered_match {
+        return format!(
+            "Memory Card `{}` 已充分覆盖该候选；保留候选会制造重复规则。",
+            matched.id
+        );
+    }
     match (card_function, duplicate_id, skill) {
         ("merge", Some(id), _) => {
             format!("Memory Card `{id}` 是最高相似的项目级既有规则，应优先合并。")
@@ -587,6 +654,9 @@ fn stop_reason_for(
 ) -> SynthesisStopReason {
     if proposal.confidence < 0.38 || observation_snippets.is_empty() {
         return SynthesisStopReason::NeedsHuman;
+    }
+    if proposal.action == "already_covered" {
+        return SynthesisStopReason::AlreadyCovered;
     }
     match proposal.card_function.as_str() {
         "merge" => SynthesisStopReason::MergeTargetFound,
@@ -658,6 +728,23 @@ fn mentions_skill(candidate: &CandidateRecord) -> bool {
     )
     .to_lowercase();
     text.contains("skill") || text.contains("技能")
+}
+
+fn mentions_update_intent(candidate: &CandidateRecord) -> bool {
+    let text = format!(
+        "{} {} {} {}",
+        candidate.title,
+        candidate.body,
+        candidate.brief,
+        candidate.tags.join(" ")
+    )
+    .to_lowercase();
+    [
+        "更新", "补充", "补强", "优化", "融合", "合并", "改写", "update", "add", "merge", "refine",
+        "improve",
+    ]
+    .iter()
+    .any(|marker| text.contains(marker))
 }
 
 fn writing_guide_summary() -> String {
@@ -785,8 +872,8 @@ mod tests {
         .expect("observation");
         let candidate = candidate(
             "memory-card-new",
-            "用真实试用验证 UX",
-            "页面重构后要按真实用户路径试用并记录问题，不要只看编译。",
+            "补充用真实试用验证 UX",
+            "补充既有规则：页面重构后要按真实用户路径试用并记录问题，不要只看编译。",
         );
 
         let review = run_memory_card_synthesis(root, &candidate, "procedure").expect("review");
@@ -797,6 +884,44 @@ mod tests {
             Some("memory-card-existing")
         );
         assert_eq!(review.stop_reason, SynthesisStopReason::MergeTargetFound);
+    }
+
+    #[test]
+    fn synthesis_marks_exact_existing_card_as_already_covered() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        memory_card::add_memory_card(
+            root,
+            "memory-card-existing",
+            "真实试用验证 UX",
+            "触发：完成页面重构后。\n\n动作：按真实用户路径试用并记录问题。\n\n边界：不要只凭编译通过判断完成。",
+            "procedure",
+            "project",
+            vec![],
+        )
+        .expect("memory card");
+        observation::import_observation_text(
+            root,
+            &root.join("session.jsonl"),
+            "codex-session",
+            Some("codex"),
+            "完成页面重构后，按真实用户路径试用并记录问题，不要只凭编译通过判断完成。",
+        )
+        .expect("observation");
+        let candidate = candidate(
+            "memory-card-covered",
+            "真实试用验证 UX",
+            "完成页面重构后，按真实用户路径试用并记录问题，不要只凭编译通过判断完成。",
+        );
+
+        let review = run_memory_card_synthesis(root, &candidate, "procedure").expect("review");
+
+        assert_eq!(review.proposal.action, "already_covered");
+        assert_eq!(
+            review.proposal.target_context.target_id.as_deref(),
+            Some("memory-card-existing")
+        );
+        assert_eq!(review.stop_reason, SynthesisStopReason::AlreadyCovered);
     }
 
     #[test]

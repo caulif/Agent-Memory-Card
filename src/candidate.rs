@@ -78,6 +78,10 @@ pub struct ExtractionMetadata {
     pub target_context: Option<TargetContext>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub synthesis_trace: Vec<SynthesisTraceEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub synthesis_action: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub synthesis_stop_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -375,6 +379,54 @@ pub fn list_visible_candidates(project_root: &Path) -> Result<Vec<CandidateRecor
         .into_iter()
         .filter(|candidate| candidate.status == CandidateStatus::Candidate)
         .collect())
+}
+
+pub fn list_visible_candidates_with_synthesis_preview(
+    project_root: &Path,
+) -> Result<Vec<CandidateRecord>> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    Ok(list_visible_candidates(&root)?
+        .into_iter()
+        .map(|candidate| enrich_candidate_with_synthesis_preview(&root, candidate))
+        .collect())
+}
+
+pub fn enrich_candidate_with_synthesis_preview(
+    project_root: &Path,
+    mut candidate: CandidateRecord,
+) -> CandidateRecord {
+    let approvable_kind = normalize_approvable_candidate_kind(&candidate.kind);
+    let has_review_metadata = candidate.extraction.value_delta.is_some()
+        && candidate.extraction.value_claim.is_some()
+        && !candidate.extraction.synthesis_trace.is_empty();
+    let review = if has_review_metadata {
+        None
+    } else {
+        synthesis_agent::run_memory_card_synthesis(project_root, &candidate, &approvable_kind).ok()
+    };
+    if let Some(review) = review.as_ref() {
+        apply_synthesis_review_to_extraction(&mut candidate.extraction, review);
+    } else if let Some(card_function) = candidate.extraction.card_function.as_deref() {
+        if candidate.extraction.synthesis_action.is_none() {
+            candidate.extraction.synthesis_action =
+                Some(action_from_card_function(card_function).to_string());
+        }
+        if candidate.extraction.synthesis_stop_reason.is_none() {
+            candidate.extraction.synthesis_stop_reason =
+                Some(stop_reason_from_card_function(card_function).to_string());
+        }
+    }
+    if !is_structured_memory_body(&candidate.body) || !is_mature_existing_brief(&candidate.brief) {
+        let preview = mature_candidate_deterministic(&candidate, &approvable_kind, review.as_ref());
+        candidate.title = preview.title;
+        candidate.body = preview.body;
+        candidate.brief = preview.brief;
+        candidate.kind = preview.kind;
+        candidate.scope = preview.scope;
+        candidate.tags = preview.tags;
+        candidate.language = preview.language;
+    }
+    candidate
 }
 
 pub fn gc_candidates(project_root: &Path) -> Result<CandidateGcReport> {
@@ -928,6 +980,14 @@ fn extraction_with_synthesis_metadata(
     extraction.value_delta = Some(matured.value_delta.clone());
     extraction.target_context = Some(matured.target_context.clone());
     extraction.synthesis_trace = matured.synthesis_trace.clone();
+    extraction.synthesis_action = extraction
+        .synthesis_action
+        .clone()
+        .or_else(|| Some(action_from_card_function(&matured.card_function).to_string()));
+    extraction.synthesis_stop_reason = extraction
+        .synthesis_stop_reason
+        .clone()
+        .or_else(|| Some(stop_reason_from_card_function(&matured.card_function).to_string()));
     if let Some(action) = extraction.suggested_action.as_mut() {
         action.rationale = Some(matured.value_claim.clone());
     } else if matured.card_function == "merge"
@@ -946,6 +1006,63 @@ fn extraction_with_synthesis_metadata(
         });
     }
     extraction
+}
+
+fn apply_synthesis_review_to_extraction(
+    extraction: &mut ExtractionMetadata,
+    review: &SynthesisReview,
+) {
+    extraction.card_function = Some(review.proposal.card_function.clone());
+    extraction.value_claim = Some(review.proposal.value_claim.clone());
+    extraction.value_delta = Some(review.proposal.value_delta.clone());
+    extraction.target_context = Some(review.proposal.target_context.clone());
+    extraction.synthesis_trace = synthesis_agent::review_to_trace(review);
+    extraction.synthesis_action = Some(review.proposal.action.clone());
+    extraction.synthesis_stop_reason = Some(review.stop_reason.as_str().to_string());
+    if review.proposal.card_function == "merge"
+        && review.proposal.merge_target_id.is_some()
+        && extraction.suggested_action.is_none()
+    {
+        extraction.suggested_action = Some(ExtractionAction {
+            action: "merge_into_existing".to_string(),
+            route: "memory_card".to_string(),
+            target_record: review.proposal.merge_target_id.clone(),
+            compile_enabled: None,
+            record_id: review.proposal.merge_target_id.clone(),
+            similarity: Some(review.proposal.confidence),
+            reason: Some(review.proposal.target_context.why_this_target.clone()),
+            rationale: Some(review.proposal.value_claim.clone()),
+        });
+    } else if review.proposal.action == "already_covered" && extraction.suggested_action.is_none() {
+        extraction.suggested_action = Some(ExtractionAction {
+            action: "already_covered".to_string(),
+            route: "memory_card".to_string(),
+            target_record: review.proposal.target_context.target_id.clone(),
+            compile_enabled: None,
+            record_id: review.proposal.target_context.target_id.clone(),
+            similarity: Some(review.proposal.confidence),
+            reason: Some(review.proposal.target_context.why_this_target.clone()),
+            rationale: Some(review.proposal.value_claim.clone()),
+        });
+    }
+}
+
+fn action_from_card_function(card_function: &str) -> &'static str {
+    match card_function {
+        "merge" => "merge_card",
+        "skill_targeted" => "skill_targeted_card",
+        "workflow" => "workflow_card",
+        _ => "new_card",
+    }
+}
+
+fn stop_reason_from_card_function(card_function: &str) -> &'static str {
+    match card_function {
+        "merge" => "merge_target_found",
+        "skill_targeted" => "skill_gap_found",
+        "workflow" => "workflow_gap_found",
+        _ => "new_card_grounded",
+    }
 }
 
 fn normalize_card_function(

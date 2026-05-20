@@ -218,6 +218,8 @@ function CandidateDetail({
         {confidence}
       </span>
 
+      <ReviewOutcomePanel candidate={candidate} />
+
       {/* ===== 建议卡片拟案内容 ===== */}
       <div className="proposed-card-content" style={{
         border: "1px solid var(--color-border-strong)",
@@ -300,19 +302,63 @@ function CandidateDetail({
           />
         </div>
         <div style={{ flex: 1 }}>
-          <ActionButton
-            icon={ArrowUp}
-            label="吸收入库 / Absorb Into Library"
-            busyLabel="入库中"
-            busy={pendingAction === `批准-${candidate.id}`}
-            disabled={disabled}
-            onClick={() =>
-              onAction(`批准-${candidate.id}`, "已批准为 Memory Card", "promote_candidate", { id: candidate.id })
-            }
-          />
+          {candidate.extraction?.synthesis_action === "already_covered" ? (
+            <ActionButton
+              icon={X}
+              label="标记已覆盖 / No New Card"
+              busyLabel="归档中"
+              busy={pendingAction === `已覆盖-${candidate.id}`}
+              disabled={disabled}
+              onClick={() =>
+                onAction(`已覆盖-${candidate.id}`, "已标记为既有规则覆盖", "hide_candidate", { id: candidate.id })
+              }
+            />
+          ) : (
+            <ActionButton
+              icon={ArrowUp}
+              label={
+                candidate.extraction?.suggested_action?.action === "merge_into_existing"
+                  ? "合并更新 / Merge Card"
+                  : "吸收入库 / Absorb Into Library"
+              }
+              busyLabel="入库中"
+              busy={pendingAction === `批准-${candidate.id}`}
+              disabled={disabled}
+              onClick={() =>
+                onAction(`批准-${candidate.id}`, "已批准为 Memory Card", "promote_candidate", { id: candidate.id })
+              }
+            />
+          )}
         </div>
       </div>
     </div>
+  );
+}
+
+function ReviewOutcomePanel({ candidate }: { candidate: CandidateRecord }) {
+  const extraction = candidate.extraction;
+  const action = extraction?.synthesis_action ?? extraction?.suggested_action?.action;
+  const stopReason = extraction?.synthesis_stop_reason;
+  if (!action && !stopReason) return null;
+  const copy = reviewOutcomeCopy(action, stopReason);
+  return (
+    <section
+      style={{
+        border: `1px solid ${copy.tone === "warning" ? "rgba(212, 162, 59, 0.32)" : "var(--color-border)"}`,
+        borderRadius: "var(--radius-md)",
+        padding: "12px 14px",
+        background: copy.tone === "warning" ? "var(--color-warning-bg)" : "var(--color-surface)",
+        marginBottom: "16px",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center" }}>
+        <strong style={{ fontSize: "13px", color: "var(--color-text-primary)" }}>{copy.title}</strong>
+        <span className="tag-quiet">{stopReasonLabel(stopReason)}</span>
+      </div>
+      <p style={{ margin: "8px 0 0", fontSize: "12.5px", lineHeight: 1.5, color: "var(--color-text-secondary)" }}>
+        {copy.body}
+      </p>
+    </section>
   );
 }
 
@@ -411,8 +457,63 @@ function traceStepLabel(value: string) {
     value_delta: "已比较价值差异",
     duplicate_check: "已查重",
     rewrite: "已转写",
+    search_observations: "已读历史",
+    search_memory_cards: "已查规则库",
+    search_skills: "已查 Skills",
+    read_writing_guide: "已读写作规范",
+    find_memory_duplicates: "已判重",
+    compare_with_skill: "已比对 Skill",
+    stop: "已停止",
   };
   return labels[value] ?? value;
+}
+
+function reviewOutcomeCopy(action?: string | null, stopReason?: string | null) {
+  if (action === "already_covered" || stopReason === "already_covered") {
+    return {
+      tone: "warning",
+      title: "No Card Is A Success",
+      body: "runtime 判断该候选已经被既有 Memory Card 覆盖。推荐归档候选，保持规则库和 Skill 上下文轻盈。",
+    };
+  }
+  if (action === "merge_card" || action === "merge_into_existing" || stopReason === "merge_target_found") {
+    return {
+      tone: "neutral",
+      title: "建议合并更新",
+      body: "这条反馈有价值，但更适合更新既有 Memory Card。批准后会走合并路径，不会新增重复卡片。",
+    };
+  }
+  if (action === "skill_targeted_card" || stopReason === "skill_gap_found") {
+    return {
+      tone: "neutral",
+      title: "项目级 Skill 补强",
+      body: "这张 Memory Card 的价值在于补上项目级 Skill 的触发、动作或边界，后续可在 Skills 页面挂载或融合。",
+    };
+  }
+  if (stopReason === "needs_human") {
+    return {
+      tone: "warning",
+      title: "需要人工判断",
+      body: "证据或目标上下文还不够稳定。请优先看 Value Delta 和真实引录，再决定忽略还是吸收入库。",
+    };
+  }
+  return {
+    tone: "neutral",
+    title: "可审阅 Memory Card",
+    body: "runtime 已完成历史、规则库、Skills 和写作规范的只读检查；请根据价值增量决定是否吸收。",
+  };
+}
+
+function stopReasonLabel(value?: string | null) {
+  const labels: Record<string, string> = {
+    already_covered: "已覆盖",
+    merge_target_found: "合并目标",
+    skill_gap_found: "Skill 缺口",
+    workflow_gap_found: "工作流缺口",
+    new_card_grounded: "可新增",
+    needs_human: "需人工判断",
+  };
+  return value ? labels[value] ?? value : "已审阅";
 }
 
 function matureCandidatePreview(candidate: CandidateRecord) {

@@ -352,6 +352,8 @@ export type ExtractionMetadata = {
   value_delta?: ValueDelta | null;
   target_context?: TargetContext | null;
   synthesis_trace?: SynthesisTraceEntry[];
+  synthesis_action?: string | null;
+  synthesis_stop_reason?: string | null;
 };
 
 export type ValueDelta = {
