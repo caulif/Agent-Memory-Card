@@ -113,6 +113,8 @@ if (!fs.existsSync(mainPath)) {
   hasFailure = true;
 } else {
   const mainContent = fs.readFileSync(mainPath, 'utf8');
+  const selectionPath = path.resolve(__dirname, '../src/hooks/useProjectSelection.ts');
+  const selectionContent = fs.existsSync(selectionPath) ? fs.readFileSync(selectionPath, 'utf8') : '';
 
   console.log('=== main.tsx Focus Layout Audit ===');
 
@@ -178,6 +180,19 @@ if (!fs.existsSync(mainPath)) {
     }
   } else {
     console.log('[WARN] main.tsx: Could not find <Agents /> component block.');
+  }
+
+  // f. 校验浏览器预览模式不通过下一轮 React state 才切换到 demo read models。
+  // 否则普通浏览器试用会短暂调用 Tauri invoke，显示“页面数据加载失败”。
+  const previewActivationIsExplicit =
+    mainContent.includes('options?.previewMode') &&
+    mainContent.includes('hydrateReadModelsFromDemo(projectPath, targetPage)') &&
+    selectionContent.includes('onProjectActivated(first, page, { previewMode: true })');
+  if (!previewActivationIsExplicit) {
+    console.log('[FAIL] preview mode: entering browser demo must synchronously hydrate demo read models without a Tauri invoke race.');
+    hasFailure = true;
+  } else {
+    console.log('[PASS] preview mode: demo read-model hydration avoids Tauri invoke race.');
   }
   console.log('');
 }
