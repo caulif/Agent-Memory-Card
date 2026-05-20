@@ -1,4 +1,4 @@
-﻿/* ===== 分配矩阵交互 ===== */
+﻿/* ===== 装填槽位交互 ===== */
 .matrix-cell.interactive {
   cursor: pointer;
   border: 1px solid var(--color-border);
@@ -2322,10 +2322,37 @@
   min-width: 0;
 }
 
-.skills-summary-strip,
-.skill-meta-grid {
+.skills-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.skills-toolbar-copy {
+  min-width: min(100%, 260px);
+  max-width: 640px;
+}
+
+.skills-filter-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  min-width: min(100%, 260px);
+}
+
+.skills-summary-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.skill-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -2355,10 +2382,14 @@
 
 .skills-grid {
   display: grid;
-  grid-template-columns: minmax(220px, 0.34fr) minmax(0, 1fr);
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
   gap: 14px;
   align-items: start;
   min-width: 0;
+}
+
+.skill-optimization-grid {
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
 }
 
 .skill-list {
@@ -2510,7 +2541,8 @@
 
   .skills-summary-strip,
   .skill-meta-grid,
-  .skills-grid {
+  .skills-grid,
+  .skill-optimization-grid {
     grid-template-columns: 1fr;
   }
 

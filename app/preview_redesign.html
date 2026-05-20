@@ -3,32 +3,32 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Agent Memory Kernel - 温暖呼吸美学重构</title>
+  <title>Agent Memory Kernel - 极简高保真原型</title>
   <style>
     :root {
-      /* Japandi 极致温润空气美学色彩系统 */
+      /* Japandi 温润素雅呼吸感配色 */
       --bg-base: #FAF8F5;            /* 温润燕麦泥白底 */
-      --bg-surface: #FFFFFF;         /* 白瓷卡片，纯净无暇 */
-      --bg-evidence: #F6F4F0;        /* 证据舱采用极柔和的古宣纸色 */
-      --text-main: #1C1917;          /* 暖砚黑，极其温和的字石色 */
+      --bg-surface: #FFFFFF;         /* 瓷白面板 */
+      --bg-active-card: #FAF8F5;     /* 激活状态卡片底色 */
+      --bg-evidence: #FCFAF7;        /* 古宣纸白（证据专色） */
+      --text-main: #1C1917;          /* 泥煤黑，字石色 */
       --text-muted: #57534E;         /* 暖烟灰 */
-      --text-dim: #8C857B;           /* 砂布灰 */
+      --text-dim: #999389;           /* 砂面灰 */
 
       --color-primary: #7C2D12;      /* 琥珀陶红 */
-      --color-secondary: #0F766E;    /* 寂静松绿 */
-      --color-emerald: #065F46;      /* 凝脂山葵 */
+      --color-teal: #0F766E;         /* 寂静松绿 */
+      --color-emerald: #15803D;      /* 凝脂山葵 */
       --color-amber: #B45309;        /* 晨晖金 */
 
-      --border-thin: rgba(120, 110, 95, 0.08); /* 带着暖意的超柔切边线 */
-      --border-dash: rgba(120, 110, 95, 0.15);
+      --border-thin: #E6E1DA;        /* 带着暖意的精细包边线 */
+      --border-dash: #DDD8CE;
 
       --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
       --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
 
-      /* 极舒适的大范围云雾微悬浮阴影，消除锐利边界产生的廉价俗气感 */
-      --shadow-air: 0 4px 30px -4px rgba(139, 126, 116, 0.08), 0 1px 2px rgba(139, 126, 116, 0.02);
-      --shadow-hover: 0 20px 50px -10px rgba(139, 126, 116, 0.15), 0 1px 3px rgba(139, 126, 116, 0.03);
-      --transition-cozy: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      --shadow-flat: 0 1px 2px rgba(139, 126, 116, 0.04);
+      --shadow-toast: 0 4px 20px -2px rgba(139, 126, 116, 0.08);
+      --transition-fast: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     * {
@@ -46,170 +46,140 @@
       overflow: hidden;
       height: 100vh;
       display: flex;
-      font-size: 13.5px;
-      letter-spacing: 0.01em;
+      font-size: 13px;
       -webkit-font-smoothing: antialiased;
     }
 
-    /* 空气微光遮罩，呈现温柔晨雾透射效果 */
-    body::before {
-      content: "";
-      position: absolute;
-      width: 600px;
-      height: 600px;
-      background: radial-gradient(circle, rgba(251, 146, 60, 0.03) 0%, rgba(255,255,255,0) 70%);
-      top: -200px;
-      left: -200px;
-      z-index: 0;
-      pointer-events: none;
-    }
-
     /* ==========================================
-       SIDEBAR CONTAINER - 极美空气悬浮侧栏
+       SIDEBAR CONTAINER - 左侧悬浮导航
        ========================================== */
-    .nebula-aside {
-      width: 250px;
-      background: rgba(255, 255, 255, 0.6);
+    .kernel-sidebar {
+      width: 220px;
+      background: rgba(255, 255, 255, 0.7);
       backdrop-filter: blur(20px);
       -webkit-backdrop-filter: blur(20px);
       border-right: 1px solid var(--border-thin);
-      padding: 36px 20px;
+      padding: 24px 16px;
       display: flex;
       flex-direction: column;
       height: 100%;
       z-index: 10;
     }
 
-    .brand-container {
+    .brand-area {
       display: flex;
       align-items: center;
-      gap: 12px;
-      margin-bottom: 40px;
-      padding-left: 6px;
+      gap: 10px;
+      margin-bottom: 32px;
+      padding-left: 8px;
     }
 
-    /* 精致扁平无边界的微标 */
-    .brand-pulsar {
-      width: 14px;
-      height: 14px;
-      background: #E0E2EC;
+    .brand-ring {
+      width: 12px;
+      height: 12px;
+      background: #EBEBEB;
       border: 3px solid var(--text-main);
       border-radius: 50%;
     }
 
-    .brand-text strong {
-      font-size: 15px;
+    .brand-info strong {
+      font-size: 14px;
       font-weight: 700;
       color: var(--text-main);
       display: block;
-      letter-spacing: -0.02em;
     }
 
-    .brand-text span {
+    .brand-info span {
       font-size: 9px;
       color: var(--text-dim);
       text-transform: uppercase;
-      letter-spacing: 0.12em;
-      margin-top: 2px;
+      margin-top: 1px;
       display: block;
       font-weight: 600;
     }
 
-    .nav-group {
+    .nav-list {
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 4px;
       flex: 1;
     }
 
-    .nav-btn {
+    .nav-item {
       background: transparent;
       border: none;
       color: var(--text-muted);
-      padding: 12px 14px;
+      padding: 10px 12px;
       text-align: left;
-      font-size: 13px;
+      font-size: 12.5px;
       font-weight: 500;
-      border-radius: 12px;
+      border-radius: 6px;
       cursor: pointer;
       display: flex;
       align-items: center;
-      gap: 12px;
-      transition: var(--transition-cozy);
+      gap: 10px;
+      transition: var(--transition-fast);
     }
 
-    .nav-btn svg {
-      width: 16px;
-      height: 16px;
-      stroke-width: 1.8px;
-      opacity: 0.7;
-      transition: var(--transition-cozy);
+    .nav-item svg {
+      width: 15px;
+      height: 15px;
+      stroke-width: 2px;
+      opacity: 0.65;
     }
 
-    .nav-btn:hover {
+    .nav-item:hover {
       color: var(--text-main);
       background: rgba(255, 255, 255, 0.8);
-      box-shadow: 0 4px 12px rgba(120, 110, 95, 0.03);
     }
 
-    .nav-btn:hover svg {
-      opacity: 1;
-    }
-
-    .nav-btn.active {
+    .nav-item.active {
       color: var(--text-main);
       background: #FFFFFF;
-      box-shadow: var(--shadow-air);
+      box-shadow: var(--shadow-flat);
       font-weight: 600;
+      border: 1px solid var(--border-thin);
     }
 
-    .nav-btn.active svg {
+    .nav-item.active svg {
       color: var(--color-primary);
       opacity: 1;
     }
 
-    .sidebar-footer {
+    .sidebar-bottom {
       border-top: 1px solid var(--border-thin);
-      padding-top: 24px;
+      padding-top: 16px;
     }
 
-    .project-pill {
+    .active-project-card {
       background: #FFFFFF;
       border: 1px solid var(--border-thin);
-      padding: 12px 14px;
-      border-radius: 12px;
+      padding: 10px 12px;
+      border-radius: 6px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      cursor: pointer;
-      box-shadow: var(--shadow-air);
-      transition: var(--transition-cozy);
+      box-shadow: var(--shadow-flat);
     }
 
-    .project-pill:hover {
-      transform: translateY(-1px);
-      box-shadow: var(--shadow-hover);
-    }
-
-    .project-info span {
+    .active-project-card span {
       font-size: 9px;
       color: var(--text-dim);
       text-transform: uppercase;
-      letter-spacing: 0.06em;
       display: block;
-      font-weight: 600;
+      font-weight: 700;
     }
 
-    .project-info strong {
-      font-size: 12px;
+    .active-project-card strong {
+      font-size: 11.5px;
       font-weight: 700;
       color: var(--text-main);
-      margin-top: 2px;
+      margin-top: 1px;
       display: block;
     }
 
     /* ==========================================
-       WORKSPACE SHELL - 亮色优雅主画布
+       WORKSPACE SHELL - 主工作空间
        ========================================== */
     .workspace-shell {
       flex: 1;
@@ -217,334 +187,288 @@
       flex-direction: column;
       height: 100%;
       position: relative;
+      background: #FAF8F5; /* 禅意燕麦色基调 */
     }
 
     /* Topbar Header */
-    .topbar-header {
-      height: 76px;
+    .workspace-header {
+      height: 64px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 48px;
-      background: transparent;
+      padding: 0 40px;
+      border-bottom: 1px solid var(--border-thin);
+      background: #FFFFFF;
     }
 
-    .topbar-title h1 {
-      font-size: 18px;
+    .workspace-title h1 {
+      font-size: 16px;
       font-weight: 700;
       color: var(--text-main);
-      letter-spacing: -0.02em;
     }
 
-    .topbar-controls {
+    .workspace-controls {
       display: flex;
       align-items: center;
-      gap: 16px;
+      gap: 12px;
     }
 
-    .engine-switcher {
-      display: flex;
-      background: rgba(120, 110, 95, 0.05);
-      padding: 3px;
-      border-radius: 10px;
-    }
-
-    .engine-opt {
-      background: transparent;
-      border: none;
-      color: var(--text-dim);
-      padding: 6px 14px;
-      font-size: 11px;
-      font-weight: 650;
-      border-radius: 8px;
-      cursor: pointer;
-      font-family: var(--font-mono);
-      transition: var(--transition-cozy);
-    }
-
-    .engine-opt.active {
-      background: var(--bg-surface);
-      color: var(--text-main);
-      box-shadow: 0 2px 8px rgba(120, 110, 95, 0.05);
-    }
-
-    .btn-circle {
-      width: 36px;
-      height: 36px;
-      border-radius: 12px;
-      background: var(--bg-surface);
-      border: 1px solid var(--border-thin);
-      color: var(--text-main);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      box-shadow: var(--shadow-air);
-      transition: var(--transition-cozy);
-    }
-
-    .btn-circle:hover {
-      background: rgba(255, 255, 255, 0.8);
-      transform: scale(1.02);
-    }
-
-    /* 运行状态：高质感的温润山葵绿标 */
-    .status-capsule {
-      background: rgba(6, 95, 70, 0.04);
-      border: 1px solid rgba(6, 95, 70, 0.08);
+    /* 精纯状态勋章 */
+    .meta-status-capsule {
+      background: rgba(21, 128, 61, 0.05);
+      border: 1px solid rgba(21, 128, 61, 0.12);
       color: var(--color-emerald);
-      padding: 6px 14px;
-      border-radius: 20px;
+      padding: 4px 10px;
+      border-radius: 6px;
       display: flex;
       align-items: center;
-      gap: 8px;
-      font-size: 11.5px;
-      font-weight: 650;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: var(--font-mono);
     }
 
-    .status-capsule::before {
+    .meta-status-capsule::before {
       content: "";
       width: 5px;
       height: 5px;
       background: var(--color-emerald);
       border-radius: 50%;
+      display: inline-block;
     }
 
-    /* Main Grid Area */
-    .main-workspace-content {
+    /* ==========================================
+       PANEL CONTENT & COMMON STYLES
+       ========================================== */
+    .workspace-body {
       flex: 1;
-      padding: 24px 48px 48px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .tab-pane {
+      display: none;
+      height: 100%;
+      width: 100%;
+    }
+
+    .tab-pane.active {
+      display: flex;
+    }
+
+    /* ==========================================
+       1. DRAFTS TAB - 提炼审阅箱 (两侧 triage)
+       ========================================== */
+    .triage-container {
+      display: flex;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* 左侧待审卡片栏 */
+    .triage-list-panel {
+      width: 320px;
+      border-right: 1px solid var(--border-thin);
+      background: #FFFFFF;
       overflow-y: auto;
       display: flex;
-      gap: 36px;
-    }
-
-    .pane-primary {
-      flex: 1;
-      min-width: 0;
-      display: flex;
       flex-direction: column;
-      gap: 28px;
     }
 
-    .pane-secondary {
-      width: 310px;
-      flex-shrink: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 28px;
-    }
-
-    /* Overview Banner Grid - 舒适极柔看板 */
-    .overview-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 16px;
-    }
-
-    .overview-card {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-thin);
-      padding: 24px;
-      border-radius: 16px;
-      box-shadow: var(--shadow-air);
-      position: relative;
-      transition: var(--transition-cozy);
-    }
-
-    .overview-card:hover {
-      transform: translateY(-2px);
-      box-shadow: var(--shadow-hover);
-    }
-
-    .overview-card span {
-      font-size: 10px;
-      color: var(--text-dim);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      display: block;
-      font-weight: 600;
-    }
-
-    .overview-card h3 {
-      font-size: 26px;
-      font-weight: 800;
-      color: var(--text-main);
-      margin-top: 8px;
-      letter-spacing: -0.04em;
-    }
-
-    .overview-card p {
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-top: 4px;
-    }
-
-    /* 审阅流瀑布标题栏 */
-    .section-title-bar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 2px;
-    }
-
-    .section-title-bar h2 {
-      font-size: 14px;
-      font-weight: 700;
-      color: var(--text-main);
-      letter-spacing: -0.01em;
-    }
-
-    .stream-container {
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-    }
-
-    /* Cloud Card - 丝滑空气感微圆弧卡片 */
-    .draft-card {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-thin);
-      border-radius: 20px;
-      overflow: hidden;
-      box-shadow: var(--shadow-air);
-      transition: var(--transition-cozy);
-    }
-
-    .draft-card:hover {
-      box-shadow: var(--shadow-hover);
-    }
-
-    .draft-card-header {
-      padding: 20px 24px;
+    .panel-subheader {
+      padding: 16px 20px;
       border-bottom: 1px solid var(--border-thin);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      background: rgba(120, 110, 95, 0.01);
-    }
-
-    /* 优雅清雅的标签形式 */
-    .meta-tag {
-      background: #FAF8F5;
-      color: var(--text-main);
-      padding: 4px 10px;
-      border-radius: 8px;
       font-size: 11px;
-      font-weight: 700;
-      font-family: var(--font-mono);
-      border: 1px solid var(--border-thin);
-    }
-
-    .synthesis-tag {
-      background: rgba(15, 118, 110, 0.05);
-      color: var(--color-secondary);
-      border-color: rgba(15, 118, 110, 0.1);
-      margin-left: 8px;
-    }
-
-    .draft-actions {
-      display: flex;
-      gap: 10px;
-    }
-
-    /* 优雅暖色实体按键 */
-    .panel-btn {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-thin);
+      text-transform: uppercase;
+      font-weight: 750;
       color: var(--text-muted);
-      padding: 8px 18px;
-      border-radius: 12px;
-      font-size: 12px;
-      font-weight: 650;
+      background: rgba(250, 248, 245, 0.5);
+    }
+
+    .triage-items {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .triage-card {
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--border-thin);
       cursor: pointer;
-      box-shadow: var(--shadow-air);
-      transition: var(--transition-cozy);
+      transition: var(--transition-fast);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      background: #FFFFFF;
     }
 
-    .panel-btn:hover {
-      background: rgba(120, 110, 95, 0.03);
+    .triage-card:hover {
+      background: rgba(250, 248, 245, 0.7);
+    }
+
+    .triage-card.active {
+      background: var(--bg-active-card);
+      position: relative;
+    }
+
+    .triage-card.active::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: var(--color-primary);
+    }
+
+    .triage-meta-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 10px;
+      font-family: var(--font-mono);
+      color: var(--text-dim);
+    }
+
+    .confidence-badge {
+      background: rgba(28, 25, 22, 0.04);
       color: var(--text-main);
-      transform: translateY(-0.5px);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 700;
     }
 
-    .panel-btn.accent {
-      background: var(--text-main); /* 纯石墨深碳色 */
-      border-color: var(--text-main);
-      color: #FFFFFF;
-      box-shadow: 0 4px 12px rgba(28, 25, 22, 0.15);
+    .confidence-badge.high {
+      background: rgba(21, 128, 61, 0.06);
+      color: var(--color-emerald);
     }
 
-    .panel-btn.accent:hover {
-      background: rgba(28, 25, 22, 0.9);
-      box-shadow: 0 6px 18px rgba(28, 25, 22, 0.25);
+    .triage-title {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--text-main);
+      line-height: 1.4;
     }
 
-    .draft-card-body {
-      padding: 24px;
-      display: grid;
-      grid-template-columns: 1fr 1fr;
+    .triage-excerpt {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* 右侧核心提炼详情栏 */
+    .triage-detail-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: #FAF8F5;
+      overflow-y: auto;
+      padding: 32px 40px;
+    }
+
+    .detail-container {
+      max-width: 720px;
+      margin: 0 auto;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
       gap: 24px;
     }
 
-    .body-col {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
+    .detail-card {
+      background: #FFFFFF;
+      border: 1px solid var(--border-thin);
+      border-radius: 6px;
+      box-shadow: var(--shadow-flat);
+      overflow: hidden;
     }
 
-    .body-col-title {
-      font-size: 10.5px;
-      color: var(--text-dim);
+    .detail-section-title {
+      padding: 12px 18px;
+      font-size: 10px;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
       font-weight: 700;
-      display: flex;
-      align-items: center;
-      gap: 6px;
+      color: var(--text-dim);
+      border-bottom: 1px solid var(--border-thin);
+      background: rgba(250, 248, 245, 0.4);
     }
 
-    .evidence-block {
+    /* 纸页风骨：宣纸色背景原始证据舱 */
+    .evidence-paper {
       background: var(--bg-evidence);
-      border-radius: 14px;
-      padding: 16px;
+      padding: 20px 24px;
       font-family: var(--font-mono);
       font-size: 11.5px;
-      line-height: 1.6;
+      line-height: 1.7;
       color: var(--text-muted);
-      max-height: 180px;
-      overflow-y: auto;
-      border: 1px dashed rgba(120, 110, 95, 0.05);
+      white-space: pre-wrap;
     }
 
-    /* 柔软的温暖荧光选句 */
-    .evidence-block mark {
-      background: rgba(251, 146, 60, 0.12);
+    .evidence-paper mark {
+      background: rgba(180, 83, 9, 0.08);
       color: var(--color-primary);
-      border-bottom: 1.5px solid rgba(251, 146, 60, 0.4);
-      padding: 0 2px;
+      border-bottom: 1.5px solid rgba(184, 115, 51, 0.4);
+      padding: 0 1px;
     }
 
-    .distilled-preview-card {
-      background: rgba(255, 255, 255, 0.5);
-      border: 1px dashed var(--border-dash);
-      border-radius: 14px;
-      padding: 18px;
+    /* 提纯拟定格式大卡片 */
+    .distilled-card-body {
+      padding: 24px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 16px;
     }
 
-    .distilled-meta {
-      font-size: 13px;
-      font-weight: 700;
+    .distilled-title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      border-bottom: 1px solid var(--border-thin);
+      padding-bottom: 12px;
+    }
+
+    .distilled-title-label {
+      font-size: 15px;
+      font-weight: 750;
       color: var(--text-main);
     }
 
-    .distilled-summary {
-      font-size: 12px;
-      color: var(--text-muted);
+    .distilled-type-badge {
+      font-size: 9.5px;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--color-teal);
+      border: 1px solid rgba(15, 118, 110, 0.18);
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(15, 118, 110, 0.03);
+    }
+
+    .distilled-markdown {
+      font-size: 12.5px;
       line-height: 1.6;
+      color: var(--text-muted);
+    }
+
+    .distilled-markdown p {
+      margin-bottom: 8px;
+    }
+
+    .distilled-meta-grid {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      row-gap: 8px;
+      column-gap: 16px;
+      font-size: 11.5px;
+      border-top: 1px solid var(--border-thin);
+      padding-top: 16px;
+    }
+
+    .distilled-meta-key {
+      color: var(--text-dim);
+      font-weight: 600;
     }
 
     .distilled-tags {
@@ -553,292 +477,762 @@
       gap: 6px;
     }
 
-    .tag-pill {
-      background: rgba(120, 110, 95, 0.05);
+    .distilled-tag {
+      background: rgba(28, 25, 22, 0.04);
       color: var(--text-muted);
-      padding: 3px 8px;
-      border-radius: 6px;
-      font-size: 9.5px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 10px;
       font-family: var(--font-mono);
     }
 
-    /* RIGHT PANEL - AGETNS VIEW (分配控制槽) */
-    .agent-matrix-grid {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 16px;
-    }
-
-    .agent-slot-card {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-thin);
-      border-radius: 20px;
-      padding: 20px;
-      box-shadow: var(--shadow-air);
-      transition: var(--transition-cozy);
-      position: relative;
-    }
-
-    .agent-slot-card::after {
-      content: "";
-      position: absolute;
-      top: 22px;
-      right: 22px;
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--color-secondary);
-    }
-
-    .agent-slot-card.warning::after {
-      background: var(--color-amber);
-    }
-
-    .agent-slot-card:hover {
-      box-shadow: var(--shadow-hover);
-    }
-
-    .agent-slot-header {
+    /* 显式操作控制 */
+    .detail-actions-area {
       display: flex;
       align-items: center;
+      justify-content: flex-end;
       gap: 12px;
-      margin-bottom: 16px;
+      margin-top: 8px;
     }
 
-    .agent-avatar {
-      width: 32px;
-      height: 32px;
-      border-radius: 10px;
-      background: rgba(120, 110, 95, 0.08);
+    .btn-solid-charcoal {
+      background: var(--text-main);
+      color: #FFFFFF;
+      border: none;
+      border-radius: 6px;
+      padding: 10px 20px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: var(--transition-fast);
+      box-shadow: 0 2px 8px rgba(28, 25, 22, 0.1);
+    }
+
+    .btn-solid-charcoal:hover {
+      background: #2D2B29;
+    }
+
+    .btn-outline-charcoal {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--border-thin);
+      border-radius: 6px;
+      padding: 10px 18px;
+      font-size: 12px;
+      font-weight: 650;
+      cursor: pointer;
+      transition: var(--transition-fast);
+    }
+
+    .btn-outline-charcoal:hover {
+      background: rgba(28, 25, 22, 0.03);
+      color: var(--text-main);
+    }
+
+    /* ==========================================
+       2. MEMORYCARDS TAB - 记忆库三栏归档页 (安静无打扰模式)
+       ========================================== */
+    .library-shell {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      height: 100%;
+      padding: 32px 40px;
+      overflow-y: auto;
+    }
+
+    .library-action-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      max-width: 1100px;
+      margin: 0 auto 24px;
+      width: 100%;
+    }
+
+    /* 禅意过滤搜索输入 */
+    .library-search-wrapper {
+      position: relative;
+      flex: 1;
+      max-width: 360px;
+    }
+
+    .library-search-input {
+      width: 100%;
+      background: #FFFFFF;
+      border: 1px solid var(--border-thin);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 12px;
+      font-family: inherit;
+      color: var(--text-main);
+      outline: none;
+      transition: var(--transition-fast);
+    }
+
+    .library-search-input:focus {
+      border-color: var(--text-muted);
+    }
+
+    /* 极静治理解锁按钮 */
+    .btn-governance-hub {
+      background: #FFFFFF;
+      border: 1px solid var(--border-thin);
+      padding: 8px 12px;
+      border-radius: 6px;
+      color: var(--text-muted);
+      cursor: pointer;
       display: flex;
       align-items: center;
-      justify-content: center;
-      font-weight: 700;
-      color: var(--text-muted);
-      font-size: 12px;
+      gap: 6px;
+      font-size: 11.5px;
+      font-weight: 650;
+      transition: var(--transition-fast);
     }
 
-    .agent-slot-header-text h4 {
-      font-size: 13.5px;
+    .btn-governance-hub:hover {
+      border-color: var(--text-main);
+      color: var(--text-main);
+    }
+
+    .btn-governance-hub svg {
+      width: 13px;
+      height: 13px;
+    }
+
+    /* 记忆库网格列表 */
+    .library-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      max-width: 1100px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .library-column {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .column-header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 8px;
+      border-bottom: 1.5px solid var(--text-main);
+      margin-bottom: 4px;
+    }
+
+    .column-name {
+      font-size: 12.5px;
       font-weight: 750;
       color: var(--text-main);
     }
 
-    .agent-slot-header-text span {
+    .column-count {
       font-size: 10px;
+      font-family: var(--font-mono);
+      color: var(--text-dim);
+      background: rgba(28, 25, 22, 0.05);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+
+    .card-item {
+      background: #FFFFFF;
+      border: 1px solid var(--border-thin);
+      padding: 16px;
+      border-radius: 6px;
+      box-shadow: var(--shadow-flat);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: var(--transition-fast);
+    }
+
+    .card-item:hover {
+      box-shadow: 0 4px 12px -2px rgba(139, 126, 116, 0.08);
+      transform: translateY(-0.5px);
+    }
+
+    .card-header-line {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+
+    .card-id {
+      font-size: 9.5px;
+      font-family: var(--font-mono);
       color: var(--text-dim);
     }
 
-    .loadout-chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
+    .card-body-text h4 {
+      font-size: 12px;
+      font-weight: 750;
+      color: var(--text-main);
+      margin-bottom: 4px;
     }
 
-    .loadout-chip {
-      background: rgba(120, 110, 95, 0.03);
-      border: 1px solid var(--border-thin);
-      padding: 6px 12px;
-      border-radius: 8px;
-      font-size: 11.5px;
+    .card-body-text p {
+      font-size: 11px;
       color: var(--text-muted);
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      transition: var(--transition-cozy);
+      line-height: 1.5;
     }
 
-    .loadout-chip:hover {
-      background: rgba(120, 110, 95, 0.06);
+    .card-footer-line {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-top: 1px solid rgba(28, 25, 22, 0.03);
+      padding-top: 8px;
+      margin-top: 4px;
+    }
+
+    .card-footer-time {
+      font-size: 9px;
+      font-family: var(--font-mono);
+      color: var(--text-dim);
+    }
+
+    /* 盖印样式侧收折叠板 (Governance Hub Overlay Drawer) */
+    .governance-overlay {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      right: -320px;
+      width: 320px;
+      background: #FFFFFF;
+      border-left: 1px solid var(--border-thin);
+      box-shadow: -4px 0 30px rgba(139, 126, 116, 0.08);
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .governance-overlay.open {
+      transform: translateX(-320px);
+    }
+
+    .governance-drawer-header {
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--border-thin);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(250, 248, 245, 0.4);
+    }
+
+    .governance-drawer-header h3 {
+      font-size: 13px;
+      font-weight: 750;
       color: var(--text-main);
     }
 
-    .loadout-chip svg {
-      width: 10px;
-      height: 10px;
-      color: var(--color-secondary);
-    }
-
-    .loadout-chip.add-btn {
-      color: var(--text-dim);
-      border-style: dashed;
+    .governance-drawer-close {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
       cursor: pointer;
+      font-size: 11px;
     }
 
-    .loadout-chip.add-btn:hover {
-      color: var(--color-primary);
-      border-color: var(--color-primary);
+    .governance-drawer-body {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      overflow-y: auto;
     }
 
-    /* RIGHT SIDEBAR - 质量控制监测塔 (INSPECTOR PANEL) */
-    .inspector-panel {
-      background: var(--bg-surface);
+    .gov-block {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .gov-meta-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+
+    .gov-meta-val {
+      font-size: 20px;
+      font-weight: 800;
+      color: var(--text-main);
+    }
+
+    .gov-rail-bar {
+      height: 3px;
+      background: rgba(28, 25, 22, 0.06);
+      border-radius: 2px;
+      position: relative;
+    }
+
+    .gov-rail-fill {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 93%;
+      background: var(--text-main);
+      border-radius: 2px;
+    }
+
+    .gov-conflict-toast {
+      padding: 12px;
+      background: rgba(180, 83, 9, 0.03);
+      border: 1px solid rgba(180, 83, 9, 0.08);
+      border-radius: 6px;
+      font-size: 11.5px;
+      line-height: 1.5;
+      color: #78350F;
+    }
+
+    .gov-conflict-toast strong {
+      color: #92400E;
+      font-weight: 700;
+    }
+
+    /* ==========================================
+       3. AGENTS TAB - 智能体装配区 (Loadout Slots)
+       ========================================== */
+    .loadout-container {
+      display: flex;
+      width: 100%;
+      height: 100%;
+      background: #FAF8F5;
+    }
+
+    /* 左侧芯片池 */
+    .loadout-pool-panel {
+      width: 320px;
+      background: #FFFFFF;
+      border-right: 1px solid var(--border-thin);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .loadout-pool-body {
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      overflow-y: auto;
+    }
+
+    .pool-instruction {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+    }
+
+    .pool-chip {
+      background: #FFFFFF;
       border: 1px solid var(--border-thin);
-      border-radius: 20px;
-      padding: 24px;
-      box-shadow: var(--shadow-air);
+      padding: 10px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      transition: var(--transition-fast);
+    }
+
+    .pool-chip:hover {
+      border-color: var(--text-main);
+      background: var(--bg-active-card);
+    }
+
+    .pool-chip-text {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    .pool-chip-action {
+      font-size: 9px;
+      color: var(--text-dim);
+      border: 1px dashed var(--border-dash);
+      padding: 1px 4px;
+      border-radius: 3px;
+    }
+
+    /* 右侧插槽核心区 */
+    .loadout-slots-panel {
+      flex: 1;
+      padding: 32px 40px;
+      overflow-y: auto;
       display: flex;
       flex-direction: column;
       gap: 20px;
     }
 
-    .inspector-header {
+    .loadout-slots-panel h2 {
+      font-size: 15px;
+      font-weight: 750;
+      color: var(--text-main);
+      margin-bottom: 4px;
+    }
+
+    .state-controller {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      max-width: 680px;
+    }
+
+    .agent-card-slot {
+      background: #FFFFFF;
+      border: 1px solid var(--border-thin);
+      border-radius: 6px;
+      padding: 20px;
+      box-shadow: var(--shadow-flat);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .agent-slot-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .agent-slot-avatar-row {
       display: flex;
       align-items: center;
       gap: 10px;
-      border-bottom: 1px solid var(--border-thin);
-      padding-bottom: 14px;
     }
 
-    .inspector-header h3 {
-      font-size: 13.5px;
-      font-weight: 700;
+    .agent-slot-avatar {
+      width: 24px;
+      height: 24px;
+      border-radius: 4px;
+      background: rgba(28, 25, 22, 0.05);
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 750;
+      font-size: 11px;
+    }
+
+    .agent-slot-id-label {
+      font-size: 13px;
+      font-weight: 750;
       color: var(--text-main);
     }
 
-    /* 禅意百分比：无垠地平线长轨道 */
-    .radial-impact-container {
+    .agent-slot-sync-indicator {
+      font-size: 9.5px;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--color-emerald);
       display: flex;
-      flex-direction: column;
-      gap: 18px;
-      padding: 10px 0;
+      align-items: center;
+      gap: 4px;
     }
 
-    .horizon-indicator-block {
+    .agent-slot-sync-indicator::before {
+      content: "";
+      width: 4px;
+      height: 4px;
+      background: var(--color-emerald);
+      border-radius: 50%;
+    }
+
+    /* 插槽容纳器 */
+    .slot-dock {
+      background: rgba(250, 248, 245, 0.6);
+      border: 1px dashed var(--border-dash);
+      border-radius: 6px;
+      padding: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      min-height: 46px;
+      align-items: center;
+    }
+
+    .docked-chip {
+      background: #FFFFFF;
+      border: 1px solid var(--border-thin);
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 11.5px;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 550;
+      box-shadow: 0 1px 2px rgba(139, 126, 116, 0.02);
+    }
+
+    .docked-chip svg {
+      width: 10px;
+      height: 10px;
+      stroke-width: 2.5px;
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: var(--transition-fast);
+    }
+
+    .docked-chip svg:hover {
+      color: var(--color-primary);
+    }
+
+    .dock-empty-tip {
+      font-size: 11px;
+      color: var(--text-dim);
+      padding-left: 4px;
+    }
+
+    /* ==========================================
+       4. SKILLS TAB - 本地工具说明目录 (Searchable Directory)
+       ========================================== */
+    .skills-triage {
+      display: flex;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* 左侧技能列表带筛选 */
+    .skills-filter-side {
+      width: 320px;
+      background: #FFFFFF;
+      border-right: 1px solid var(--border-thin);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .skills-search-box {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border-thin);
+      background: rgba(250, 248, 245, 0.4);
+    }
+
+    .skills-search-input {
+      width: 100%;
+      background: #FFFFFF;
+      border: 1px solid var(--border-thin);
+      border-radius: 6px;
+      padding: 7px 10px;
+      font-size: 11.5px;
+      outline: none;
+    }
+
+    .skills-filters-area {
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border-thin);
       display: flex;
       flex-direction: column;
       gap: 10px;
     }
 
-    .horizon-label {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-    }
-
-    .horizon-label strong {
-      font-size: 24px;
-      font-weight: 800;
-      color: var(--text-main);
-      letter-spacing: -0.04em;
-    }
-
-    .horizon-label span {
+    .filter-group-header {
       font-size: 9.5px;
+      font-weight: 750;
       color: var(--text-dim);
       text-transform: uppercase;
-      letter-spacing: 0.1em;
-      font-weight: 700;
     }
 
-    /* 极细禅意地平线轨 */
-    .horizon-rail {
-      height: 2px;
-      background: rgba(120, 110, 95, 0.1);
+    .filter-tags-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .filter-tag-btn {
+      background: rgba(28, 25, 22, 0.04);
+      border: none;
+      color: var(--text-muted);
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 10px;
+      cursor: pointer;
+      font-family: var(--font-mono);
+      transition: var(--transition-fast);
+    }
+
+    .filter-tag-btn.active {
+      background: var(--text-main);
+      color: #FFFFFF;
+    }
+
+    .skills-items-list {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .skill-list-card {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border-thin);
+      cursor: pointer;
+      transition: var(--transition-fast);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .skill-list-card:hover {
+      background: rgba(250, 248, 245, 0.7);
+    }
+
+    .skill-list-card.active {
+      background: var(--bg-active-card);
       position: relative;
     }
 
-    /* 指针玉小点 */
-    .horizon-dot {
+    .skill-list-card.active::before {
+      content: "";
       position: absolute;
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--text-main);
-      top: -3px;
-      left: 93%;
-      box-shadow: 0 0 0 3px #FFFFFF;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: var(--color-primary);
     }
 
-    .radial-impact-container p {
-      font-size: 11.5px;
-      color: var(--text-muted);
-      line-height: 1.6;
+    .skill-name-label {
+      font-size: 12px;
+      font-weight: 750;
+      color: var(--text-main);
     }
 
-    .quality-warning-item {
-      display: flex;
-      gap: 10px;
-      padding: 14px;
-      border-radius: 12px;
-      background: rgba(180, 83, 9, 0.03);
-      border: 1px solid rgba(180, 83, 9, 0.06);
-      color: #78350F;
-      font-size: 11.5px;
-      line-height: 1.5;
+    .skill-namespace {
+      font-size: 9px;
+      font-family: var(--font-mono);
+      color: var(--text-dim);
     }
 
-    .quality-warning-item strong {
-      color: #92400E;
+    /* 右侧技能详情参数展板 */
+    .skills-detail-side {
+      flex: 1;
+      background: #FAF8F5;
+      overflow-y: auto;
+      padding: 32px 40px;
     }
 
-    /* Tab Visibility Matrix */
-    .tab-content {
-      display: none;
-    }
-
-    .tab-content.active {
+    .skill-detail-container {
+      max-width: 720px;
+      margin: 0 auto;
+      width: 100%;
       display: flex;
       flex-direction: column;
-      gap: 24px;
+      gap: 20px;
     }
 
-    .flex-row-center-between {
+    .skill-desc-block {
+      font-size: 12.5px;
+      line-height: 1.6;
+      color: var(--text-muted);
+    }
+
+    .skill-code-json {
+      background: #FFFFFF;
+      border: 1px solid var(--border-thin);
+      border-radius: 6px;
+      padding: 20px;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      line-height: 1.5;
+      color: var(--text-main);
+      overflow-x: auto;
+      box-shadow: var(--shadow-flat);
+    }
+
+    /* ==========================================
+       TOAST ALERTS - 极致简洁提示
+       ========================================== */
+    .toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .toast-box {
+      background: var(--text-main);
+      color: #FFFFFF;
+      padding: 10px 16px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      box-shadow: var(--shadow-toast);
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      gap: 8px;
+      transform: translateY(20px);
+      opacity: 0;
+      animation: toastSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
     }
 
+    @keyframes toastSlideIn {
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
   </style>
 </head>
 <body>
 
   <!-- ==============================================
-       SIDEBAR CONTAINER - 极美空气悬浮侧栏
+       1. SIDEBAR CONTAINER - 极美悬浮侧栏
        ============================================== -->
-  <aside class="nebula-aside" aria-label="核心控制导航">
-    <div class="brand-container">
-      <div class="brand-pulsar"></div>
-      <div class="brand-text">
+  <aside class="kernel-sidebar" aria-label="全局控制导航">
+    <div class="brand-area">
+      <div class="brand-ring"></div>
+      <div class="brand-info">
         <strong>Memory Kernel</strong>
-        <span>AGENT SPACE</span>
+        <span>Agent Memory Kernel</span>
       </div>
     </div>
 
-    <nav class="nav-group" aria-label="核脑功能板块">
-      <button class="nav-btn active" onclick="switchTab('drafts', this)">
+    <nav class="nav-list" aria-label="核心功能划分">
+      <button class="nav-item active" onclick="switchRedesignTab('drafts', this)">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
         </svg>
-        提炼审阅 (Drafts)
+        提炼收件箱 (Drafts)
       </button>
-      <button class="nav-btn" onclick="switchTab('memory-cards', this)">
+      <button class="nav-item" onclick="switchRedesignTab('memory-cards', this)">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"></path>
         </svg>
         记忆卡库 (Library)
       </button>
-      <button class="nav-btn" onclick="switchTab('agents', this)">
+      <button class="nav-item" onclick="switchRedesignTab('agents', this)">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
         </svg>
-        装载分配 (Loadout)
+        配置装载槽 (Loadout)
       </button>
-      <button class="nav-btn" onclick="switchTab('skills', this)">
+      <button class="nav-item" onclick="switchRedesignTab('skills', this)">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path>
         </svg>
-        本地技能 (Skills)
+        技能目录 (Skills)
       </button>
     </nav>
 
-    <div class="sidebar-footer">
-      <div class="project-pill">
+    <div class="sidebar-bottom">
+      <div class="active-project-card">
         <div class="project-info">
-          <span>Active Deck</span>
+          <span>Active Project</span>
           <strong>cogent-workflow</strong>
         </div>
-        <svg width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="opacity: 0.6;">
+        <svg width="10" height="10" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="opacity: 0.5;">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
         </svg>
       </div>
@@ -846,348 +1240,861 @@
   </aside>
 
   <!-- ==============================================
-       WORKSPACE SHELL - 亮色优雅主画布
+       2. WORKSPACE CONTAINER - 工作画布
        ============================================== -->
-  <section class="workspace-shell" aria-label="核心工作画布">
+  <main class="workspace-shell" aria-label="核心计算与展示面板">
 
     <!-- Topbar Header -->
-    <header class="topbar-header">
-      <div class="topbar-title">
-        <h1 id="page-title-label">提炼审阅 (Drafts)</h1>
+    <header class="workspace-header">
+      <div class="workspace-title">
+        <h1 id="redesign-page-title">提炼收件箱 (Drafts)</h1>
       </div>
 
-      <div class="topbar-controls">
-        <!-- 引擎切换器 -->
-        <div class="engine-switcher">
-          <button class="engine-opt active">Claude 4.5</button>
-          <button class="engine-opt">Codex-v2</button>
-          <button class="engine-opt">Local-LLM</button>
-        </div>
-
-        <!-- 任务通知 -->
-        <button class="btn-circle" title="本地任务池状态">
-          <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
-          </svg>
-        </button>
-
-        <!-- 极简运行状态舱 -->
-        <div class="status-capsule">
-          <span>Operational</span>
+      <div class="workspace-controls">
+        <div class="meta-status-capsule">
+          <span>Sync Status // 运作正常</span>
         </div>
       </div>
     </header>
 
-    <!-- Main Workspace Scrollable Content -->
-    <div class="main-workspace-content">
+    <!-- Workspace Body Area -->
+    <div class="workspace-body">
 
-      <!-- Primary Action Area -->
-      <div class="pane-primary">
-
-        <!-- 4大核心概览指标卡 -->
-        <section class="overview-grid" aria-label="核心治理指标板">
-          <div class="overview-card">
-            <span>待审提炼</span>
-            <h3>04</h3>
-            <p>1 条置信认证推荐</p>
-          </div>
-          <div class="overview-card">
-            <span>记忆卡总目</span>
-            <h3>18</h3>
-            <p>已部署 12 本地契约卡</p>
-          </div>
-          <div class="overview-card">
-            <span>装填分发率</span>
-            <h3>93%</h3>
-            <p>核心槽已全量配置</p>
-          </div>
-          <div class="overview-card">
-            <span>核脑风险</span>
-            <h3>01</h3>
-            <p>存在 1 个记忆卡冲突</p>
-          </div>
-        </section>
-
-        <!-- ==============================================
-             PANEL: 提炼审阅 (DRAFTS TAB)
-             ============================================== -->
-        <div id="tab-drafts" class="tab-content active">
-          <div class="section-title-bar">
-            <h2>待吸纳记忆候选流</h2>
-            <button class="panel-btn">批量吸纳</button>
+      <!-- ==============================================
+           A. TAB-DRAFTS: 待审提炼收件箱 [Two-Column Triage]
+           ============================================== -->
+      <section id="tab-drafts" class="tab-pane active">
+        <div class="triage-container">
+          <!-- 左栏：待审列表 -->
+          <div class="triage-list-panel">
+            <div class="panel-subheader">待吸纳记忆池 (Drafts Intake)</div>
+            <div class="triage-items" id="drafts-list-container">
+              <!-- JS 动态插补 Mock 数据，此处为骨架结构 -->
+            </div>
           </div>
 
-          <div class="stream-container">
-            <!-- 审阅卡片 1 -->
-            <article class="draft-card">
-              <div class="draft-card-header">
-                <div>
-                  <span class="meta-tag">Memory Draft // #104</span>
-                  <span class="meta-tag synthesis-tag">置信值 96%</span>
-                </div>
-                <div class="draft-actions">
-                  <button class="panel-btn">拒绝</button>
-                  <button class="panel-btn accent">批准提炼</button>
-                </div>
-              </div>
-              <div class="draft-card-body">
-                <div class="body-col">
-                  <div class="body-col-title">
-                    ORIGINAL SESSION / 原始会话证据
-                  </div>
-                  <div class="evidence-block">
-                    user: 不要再模拟数据库了，我们上个月因为<mark>模拟的测试通过但物理迁移挂掉</mark>吃过大亏，以后这里必须直连。<br>
-                    assistant: 明白，后续所有与数据迁移验证的流程均采用物理数据库验证。<br>
-                    user: 正是如此，另外把这个作为全局约束。
-                  </div>
-                </div>
-                <div class="body-col">
-                  <div class="body-col-title">
-                    DISTILLED CORE / 提纯后的记忆卡
-                  </div>
-                  <div class="distilled-preview-card">
-                    <div class="distilled-meta">测试验证策略：禁用数据库 Mock 行为</div>
-                    <div class="distilled-summary">
-                      所有集成测试必须基于真实物理数据库运行，严禁在迁移验证中进行 Mock 模拟。原因：防止 Mock 与物理实例差异导致部署失败。
-                    </div>
-                    <div class="distilled-tags">
-                      <span class="tag-pill">#testing</span>
-                      <span class="tag-pill">#database</span>
-                      <span class="tag-pill">#strict</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </article>
-
-            <!-- 审阅卡片 2 -->
-            <article class="draft-card">
-              <div class="draft-card-header">
-                <div>
-                  <span class="meta-tag">Memory Draft // #103</span>
-                  <span class="meta-tag synthesis-tag" style="color:var(--color-amber); background:rgba(180, 83, 9, 0.05); border-color:rgba(180, 83, 9, 0.1);">置信值 78%</span>
-                </div>
-                <div class="draft-actions">
-                  <button class="panel-btn">拒绝</button>
-                  <button class="panel-btn accent">批准提炼</button>
-                </div>
-              </div>
-              <div class="draft-card-body">
-                <div class="body-col">
-                  <div class="body-col-title">
-                    ORIGINAL SESSION / 原始会话证据
-                  </div>
-                  <div class="evidence-block">
-                    user: 记住这个项目的 <mark>CLAUDE.md 中包含的主题颜色只能是 slate 级别</mark>。<br>
-                    assistant: 好的，后续前端设计规范强绑定 slate 系列。
-                  </div>
-                </div>
-                <div class="body-col">
-                  <div class="body-col-title">
-                    DISTILLED CORE / 提纯后的记忆卡
-                  </div>
-                  <div class="distilled-preview-card">
-                    <div class="distilled-meta">界面约束：强制约束 Slate 皮肤主题</div>
-                    <div class="distilled-summary">
-                      将项目的调色板默认值限制在 slate 色阶下，所有新增的前端界面与图标禁止越级使用鲜艳冲突色。
-                    </div>
-                    <div class="distilled-tags">
-                      <span class="tag-pill">#ui-design</span>
-                      <span class="tag-pill">#theme</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </article>
+          <!-- 右栏：提炼证据详情 -->
+          <div class="triage-detail-panel">
+            <div class="detail-container" id="draft-detail-content">
+              <!-- 由 JS 数据驱动响应式更新内容 -->
+            </div>
           </div>
         </div>
+      </section>
 
-        <!-- ==============================================
-             PANEL: 记忆卡库 (LIBRARY TAB)
-             ============================================== -->
-        <div id="tab-memory-cards" class="tab-content">
-          <div class="section-title-bar">
-            <h2>本地已存记忆全景视图</h2>
-            <button class="panel-btn accent">增加空白记忆</button>
+      <!-- ==============================================
+           B. TAB-MEMORY-CARDS: 静谧全局记忆库 [Library Index]
+           ============================================== -->
+      <section id="tab-memory-cards" class="tab-pane">
+        <div class="library-shell">
+          <div class="library-action-header">
+            <div class="library-search-wrapper">
+              <input type="text" class="library-search-input" placeholder="检索或过滤全局记忆..." oninput="handleSearchLibrary(this.value)">
+            </div>
+
+            <button class="btn-governance-hub" onclick="toggleGovernanceOverlay(true)">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-9.618 3.57A12.072 12.072 0 003 13c0 5.855 4.301 10.741 10 11.849 5.699-1.108 10-5.994 10-11.849 0-3.218-1.503-6.102-3.882-8.016z"></path>
+              </svg>
+              治理监测窗 (Governance)
+            </button>
           </div>
 
-          <div class="stream-container">
-            <article class="draft-card">
-              <div class="draft-card-header">
-                <div>
-                  <span class="meta-tag" style="color:var(--color-secondary); background:rgba(15,118,110,0.05); border-color:rgba(15,118,110,0.1);">固封存盘 ACTIVE</span>
-                  <span class="meta-tag" style="margin-left: 12px;">card-091a</span>
-                </div>
-                <div class="draft-actions">
-                  <button class="panel-btn">备份克隆</button>
-                  <button class="panel-btn">注销解构</button>
-                </div>
+          <!-- 三纵栏布局 -->
+          <div class="library-grid">
+            <!-- Constraints / 系统级约束 -->
+            <div class="library-column">
+              <div class="column-header-row">
+                <span class="column-name">Constraints // 系统约束</span>
+                <span class="column-count" id="count-constraints">2</span>
               </div>
-              <div class="draft-card-body" style="grid-template-columns: 1fr;">
-                <div class="distilled-preview-card" style="border-style: solid;">
-                  <div class="flex-row-center-between">
-                    <div class="distilled-meta">命名与代码风格契约：多文件重构优先法则</div>
-                    <span style="font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);">2026/05/01</span>
-                  </div>
-                  <div class="distilled-summary" style="margin-top: 10px;">
-                    当跨模块、涉及文件数超过 3 个的全局字段更新时，必须优先以“演化升级（Evolutionary deprecants）”形式逐步变更，禁止进行暴力一刀切重命名，防范第三方依赖的断裂。
-                  </div>
-                  <div class="distilled-tags" style="margin-top: 10px;">
-                    <span class="tag-pill">#coding-standard</span>
-                    <span class="tag-pill">#refactor</span>
-                    <span class="tag-pill">#multi-files</span>
-                  </div>
-                </div>
-              </div>
-            </article>
-          </div>
-        </div>
-
-        <!-- ==============================================
-             PANEL: 智能体装填 (AGENTS TAB)
-             ============================================= -->
-        <div id="tab-agents" class="tab-content">
-          <div class="section-title-bar">
-            <h2>分配装载矩阵</h2>
-            <button class="panel-btn accent">全核能装填同步</button>
-          </div>
-
-          <div class="agent-matrix-grid">
-            <!-- 智能体槽位 1 -->
-            <div class="agent-slot-card">
-              <div class="agent-slot-header">
-                <div class="agent-avatar">C</div>
-                <div class="agent-slot-header-text">
-                  <h4>codex-refactorer // 后端核</h4>
-                  <span>架构体系与高级重构 Agent</span>
-                </div>
-              </div>
-              <div class="loadout-chips">
-                <span class="loadout-chip">禁用数据库 Mock 行为</span>
-                <span class="loadout-chip">多文件重构优先法则</span>
-                <span class="loadout-chip add-btn">+ 载入新卡</span>
+              <div class="library-cards-pool" id="pool-constraints">
+                <!-- JS 数据铺垫 -->
               </div>
             </div>
 
-            <!-- 智能体槽位 2 -->
-            <div class="agent-slot-card warning">
-              <div class="agent-slot-header">
-                <div class="agent-avatar" style="background: rgba(180, 83, 9, 0.08); color: var(--color-amber);">U</div>
-                <div class="agent-slot-header-text">
-                  <h4>ux-designer-agent // 体验核</h4>
-                  <span>体验规范与交互样式协同 Agent</span>
-                </div>
+            <!-- Procedures / 重构与流程 -->
+            <div class="library-column">
+              <div class="column-header-row">
+                <span class="column-name">Procedures // 规程流程</span>
+                <span class="column-count" id="count-procedures">2</span>
               </div>
-              <div class="loadout-chips">
-                <span class="loadout-chip">强制约束 Slate 皮肤主题</span>
-                <span class="loadout-chip add-btn">+ 载入新卡</span>
+              <div class="library-cards-pool" id="pool-procedures">
+                <!-- JS 数据铺垫 -->
+              </div>
+            </div>
+
+            <!-- Preferences / 人本与偏好 -->
+            <div class="library-column">
+              <div class="column-header-row">
+                <span class="column-name">Preferences // 团队偏好</span>
+                <span class="column-count" id="count-preferences">2</span>
+              </div>
+              <div class="library-cards-pool" id="pool-preferences">
+                <!-- JS 数据铺垫 -->
               </div>
             </div>
           </div>
         </div>
 
-        <!-- ==============================================
-             PANEL: 技能库 (SKILLS TAB)
-             ============================================== -->
-        <div id="tab-skills" class="tab-content">
-          <div class="section-title-bar">
-            <h2>核心技能索引地图</h2>
-            <button class="panel-btn accent">外接拓展技能</button>
+        <!-- 侧栏抽屉 Governance Hub -->
+        <div class="governance-overlay" id="governance-drawer">
+          <div class="governance-drawer-header">
+            <h3>治理监测系统 (Governance)</h3>
+            <button class="governance-drawer-close" onclick="toggleGovernanceOverlay(false)">[ 关闭 ]</button>
           </div>
+          <div class="governance-drawer-body">
+            <div class="gov-block">
+              <div class="gov-meta-row">
+                <span style="font-size: 11px; color: var(--text-dim); font-weight: 700;">LOADOUT RATIO</span>
+                <span class="gov-meta-val">93.0%</span>
+              </div>
+              <div class="gov-rail-bar">
+                <div class="gov-rail-fill"></div>
+              </div>
+              <p style="font-size: 11px; color: var(--text-muted); line-height: 1.5;">
+                全局 6 个已收录在库的记忆卡中，有 5 个已经作为规则配属至指定智能体插槽内，覆盖效率达成目标。
+              </p>
+            </div>
 
-          <div class="stream-container">
-            <article class="draft-card" style="border-left: 3px solid var(--text-main);">
-              <div class="draft-card-header">
-                <div>
-                  <span class="meta-tag">mcp-builder</span>
-                  <span style="font-size: 11px; color: var(--text-dim); margin-left: 14px;">MODEL CONTEXT PROTOCOL BUILDER</span>
-                </div>
+            <div class="gov-block" style="border-top: 1px solid var(--border-thin); padding-top: 16px;">
+              <div class="gov-meta-row" style="margin-bottom: 8px;">
+                <span style="font-size: 11px; color: var(--text-dim); font-weight: 700;">CARD DRIFTS / 冲突预警</span>
+                <span style="font-size: 9px; font-family: var(--font-mono); color: var(--text-dim);">实时监测</span>
               </div>
-              <div class="draft-card-body" style="grid-template-columns: 1fr;">
-                <div class="distilled-preview-card" style="border-style: solid;">
-                  <div class="distilled-summary">
-                    支持在系统检测到 Python FastMCP 或 TypeScript SDK 时自动化调度，指导开发人员在本地进行 API 连接与智能体工具链映射的构建。
-                  </div>
-                </div>
+              <div class="gov-conflict-toast">
+                <strong>高频漂移警戒 (card-103):</strong><br>
+                在会话中观察到前端体验智能体 ux-designer-agent 正尝试写入亮紫调色板，违背了当前的 Slate 规范铁律约束。
               </div>
-            </article>
+            </div>
           </div>
         </div>
+      </section>
 
-      </div>
-
-      <!-- Secondary Inspector Column (质量治理系统) -->
-      <div class="pane-secondary">
-
-        <!-- 核心治理面板 -->
-        <section class="inspector-panel" aria-label="核心质量治理监测器">
-          <div class="inspector-header">
-            <h3>Governance // 质量治理</h3>
-          </div>
-
-          <!-- 分配覆盖率仪表盘（禅意地平线刻度轨） -->
-          <div class="radial-impact-container">
-            <div class="horizon-indicator-block">
-              <div class="horizon-label">
-                <strong>93.0%</strong>
-                <span>LOADOUT RATIO</span>
-              </div>
-              <div class="horizon-rail">
-                <div class="horizon-dot"></div>
-              </div>
-            </div>
-
-            <p>
-              在 18 个记忆契约定义中，有 17 项已通过硬通道成功部署至核脑 2 个主力 Agent，边缘效益趋于稳健达成。
-            </p>
-          </div>
-
-          <!-- 冲突预警通知 -->
-          <div class="flex-row-center-between" style="border-top:1px solid var(--border-thin); padding-top:18px;">
-            <span style="font-size:11px; font-weight:700; color:var(--text-main);">当前发现预警</span>
-            <span style="font-size:10px; color:var(--text-dim); font-family: var(--font-mono);">SWEEP: 1M AGO</span>
-          </div>
-
-          <div class="quality-warning-item">
-            <div>
-              <strong>记忆卡异常漂移 (card-103):</strong><br>
-              ux-designer-agent 主动尝试打破全局 slate 配色骨架约束。
+      <!-- ==============================================
+           C. TAB-AGENTS: 配属装载插槽 [Loadout Slots]
+           ============================================== -->
+      <section id="tab-agents" class="tab-pane">
+        <div class="loadout-container">
+          <!-- 左栏：可用记忆卡池 -->
+          <div class="loadout-pool-panel">
+            <div class="panel-subheader">可用卡片池 (Memory Card Pool)</div>
+            <div class="loadout-pool-body" id="loadout-pool-container">
+              <!-- 由 JS 提供可插入的微卡 -->
             </div>
           </div>
 
-        </section>
-      </div>
+          <!-- 右栏：实体智能体槽位 -->
+          <div class="loadout-slots-panel">
+            <h2>已就绪的执行智能体内核 (Kernels)</h2>
+            <div class="state-controller" id="agents-slots-container">
+              <!-- 由 JS 实现直观的卡片拖拽与插卡响应 -->
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==============================================
+           D. TAB-SKILLS: 静谧高密度技能说明目录 (Searchable Directory)
+           ============================================== -->
+      <section id="tab-skills" class="tab-pane">
+        <div class="skills-triage">
+          <!-- 左侧过滤器与密集索引列表 -->
+          <div class="skills-filter-side">
+            <div class="skills-search-box">
+              <input type="text" class="skills-search-input" placeholder="全局搜索本地技能..." oninput="handleSearchSkills(this.value)">
+            </div>
+
+            <div class="skills-filters-area">
+              <div class="filter-group-header">作用域 (Scope)</div>
+              <div class="filter-tags-row">
+                <button class="filter-tag-btn active" onclick="filterSkillsByScope('all', this)">全部</button>
+                <button class="filter-tag-btn" onclick="filterSkillsByScope('global', this)">全局</button>
+                <button class="filter-tag-btn" onclick="filterSkillsByScope('project', this)">项目</button>
+              </div>
+
+              <div class="filter-group-header" style="margin-top: 6px;">类别 (Kind)</div>
+              <div class="filter-tags-row">
+                <button class="filter-tag-btn active" onclick="filterSkillsByKind('all', this)">全部</button>
+                <button class="filter-tag-btn" onclick="filterSkillsByKind('CLI/Utility', this)">CLI工具</button>
+                <button class="filter-tag-btn" onclick="filterSkillsByKind('API/Server', this)">API服务</button>
+              </div>
+            </div>
+
+            <div class="skills-items-list" id="skills-list-container">
+              <!-- JS 数据渲染 -->
+            </div>
+          </div>
+
+          <!-- 右侧技能 API 参数板 -->
+          <div class="skills-detail-side">
+            <div class="skill-detail-container" id="skill-detail-container">
+              <!-- 由 JS 秒级响应式驱动渲染 -->
+            </div>
+          </div>
+        </div>
+      </section>
 
     </div>
-  </section>
+  </main>
+
+  <!-- 浮动提示容器 -->
+  <div class="toast-container" id="toast-holder"></div>
 
   <!-- ==============================================
-       INTERACTION SCRIPT
+       STATE ENGINE & CORE CONTROLLER
        ============================================== -->
   <script>
-    function switchTab(tabId, el) {
-      // 1. 关闭所有 Tab
-      document.querySelectorAll('.tab-content').forEach(tab => {
-        tab.classList.remove('active');
-      });
-      // 2. 取消菜单激活态
-      document.querySelectorAll('.nav-btn').forEach(btn => {
-        btn.classList.remove('active');
-      });
+    // ==========================================
+    // 1. 全局静态数据源 (Real Domain Data)
+    // ==========================================
+    const mockDrafts = [
+      {
+        id: "card-104",
+        title: "禁用数据库 Mock 行为",
+        type: "Procedures",
+        confidence: "96%",
+        confidenceClass: "high",
+        excerpt: "所有集成测试必须基于真实物理数据库运行...",
+        evidence: `user: 不要再模拟数据库了，我们上个月因为<mark>模拟的测试通过但物理迁移挂掉</mark>吃过大亏，以后这里必须直连。\nassistant: 明白，后续所有与数据迁移验证的流程均采用物理数据库验证。\nuser: 正是如此，另外把这个作为全局约束。`,
+        summaryDistilled: "所有集成测试与数据模式变更迁移必须直接运行在真正的物理本地/沙箱数据库实例中验证，绝对不允许使用接口 Mock。防止隐藏的底层 SQL 方言和锁机制异差造成线上崩溃。",
+        originSession: "session_2d278a70",
+        tags: ["#testing", "#database", "#safety-triage"]
+      },
+      {
+        id: "card-103",
+        title: "强制约束 Slate 皮肤主题",
+        type: "Constraints",
+        confidence: "78%",
+        confidenceClass: "norm",
+        excerpt: "将项目的调色板默认值限制在 slate 色阶下...",
+        evidence: `user: 记住该项目的 <mark>设计规范中包含的主题颜色只能是 slate 级别</mark>。\nassistant: 好的，后续前端设计规范强绑定 slate 系列。`,
+        summaryDistilled: "系统前台界面组件与设计系统调色板强行收敛于 Slate 碳灰冷调色系。禁止越权使用鲜艳冲突的亮彩色渲染非紧急指示元素，确保视觉的绝对禅意素雅。",
+        originSession: "session_4a8bc312",
+        tags: ["#ui-system", "#slate-theme"]
+      },
+      {
+        id: "card-102",
+        title: "多文件重构优先法则",
+        type: "Procedures",
+        confidence: "89%",
+        confidenceClass: "high",
+        excerpt: "当跨模块涉及文件数超过 3 个的全局字段更新时...",
+        evidence: `user: 每次改超过 3 个文件时要<mark>先建废弃隔离，不允许一刀切改名</mark>。\nassistant: 了解，执行演化性变更（Evolutionary deprecants），分批平滑过渡变动。`,
+        summaryDistilled: "面临大范围跨模块重构、重命名时，采用先标记旧函数标记废弃、多版本共存平移的原则。避免单次 Commit 对协作树造成破坏性碎裂。",
+        originSession: "session_ef89cdd0",
+        tags: ["#refactoring", "#evolutionary", "#standard"]
+      }
+    ];
 
-      // 3. 激活当前
+    const mockLibrary = [
+      {
+        id: "card-091",
+        title: "单文件及函数边界红线",
+        type: "Constraints",
+        desc: "单个物理类文件行数红线控制在 1000 行内，常规业务处理函数封装在 100 行内；超出则触发拆组治理建议。",
+        timestamp: "2026/04/10",
+        tags: ["#line-limit", "#clean-code"]
+      },
+      {
+        id: "card-092",
+        title: "强制性变量语义审查",
+        type: "Constraints",
+        desc: "严格杜绝类似于 a, b, c 以及 temp 这种临时无主权命名。系统边界所有外来数据与入参必须完整覆盖 TS/JsonSchema 校验规则。",
+        timestamp: "2026/04/18",
+        tags: ["#naming", "#validation"]
+      },
+      {
+        id: "card-095",
+        title: "异步闭包全量错误自理",
+        type: "Procedures",
+        desc: "禁止保留空 Catch 块以及未捕获的反向追踪。所有存在调用侧风险的关键路径，必须有明确的分支输出日志记录。",
+        timestamp: "2026/04/28",
+        tags: ["#error-handling", "#async"]
+      },
+      {
+        id: "card-098",
+        title: "安全信标阻绝硬编码",
+        type: "Constraints",
+        desc: "禁止任何密钥、鉴权令牌、API 私密 Token 物理落盘写进业务源文件。任何涉密参数强制采用运行态环境变量承载。",
+        timestamp: "2026/05/02",
+        tags: ["#security", "#secrets-block"]
+      },
+      {
+        id: "card-101",
+        title: "中文简体用户交互约定",
+        type: "Preferences",
+        desc: "系统层与生成文案默认以简体中文进行反馈交互；除用户指明外，限制情绪化 Emoji 渲染，保持高严谨度工业级叙事形态。",
+        timestamp: "2026/05/11",
+        tags: ["#narrative-style", "#chinese-first"]
+      }
+    ];
+
+    const mockAgents = [
+      {
+        id: "codex-refactorer",
+        name: "codex-refactorer // 后端核",
+        desc: "架构体系与高级重构协同 Agent",
+        avatar: "C",
+        loaded: ["单文件及函数边界红线", "异步闭包全量错误自理"]
+      },
+      {
+        id: "ux-designer-agent",
+        name: "ux-designer-agent // 体验核",
+        desc: "前端设计系统与高保真交互代理",
+        avatar: "U",
+        loaded: ["中文简体用户交互约定"]
+      }
+    ];
+
+    const mockSkills = [
+      {
+        name: "mcp-builder",
+        namespace: "system:md-mcp-builder",
+        scope: "global",
+        kind: "API/Server",
+        desc: "Model Context Protocol 服务构筑底座。当侦测到代码引入 FastMCP 或 TypeScript SDK 时自动激活，映射本地 API 连接至大语言模型的能力视图地图中。",
+        schema: {
+          name: "mcp-builder",
+          version: "1.2.0",
+          protocols: ["fast-mcp", "typescript-sdk"],
+          parameters: {
+            host: "string (binding endpoint)",
+            secureConnection: "boolean",
+            autoRegistration: "boolean"
+          }
+        }
+      },
+      {
+        name: "officecli",
+        namespace: "utility:office-generator",
+        scope: "project",
+        kind: "CLI/Utility",
+        desc: "本地 Office 文档分析、改写和样式校验核心。可直接调取并精细校验 Word .docx、Excel .xlsx 及 PPT .pptx 的排版与段落语义架构。",
+        schema: {
+          command: "officecli",
+          actions: ["proofread", "create-table", "audit-formatting"],
+          supportedFormats: [".docx", ".xlsx", ".pptx"]
+        }
+      },
+      {
+        name: "skill-creator",
+        namespace: "system:skill-lifecycle",
+        scope: "global",
+        kind: "API/Server",
+        desc: "本地技能编排生命周期管家。用于评估、修正和优化所有由当前 Memory Kernel 发现的边缘技能，维持工具演进生命树状态。",
+        schema: {
+          evaluators: ["variance-analysis", "accuracy-metrics"],
+          maxAllowedStalenessDays: 14
+        }
+      },
+      {
+        name: "simplify",
+        namespace: "utility:code-de-duplicator",
+        scope: "project",
+        kind: "CLI/Utility",
+        desc: "代码冗余扫描器与重用审查专家。秒级识别多文件的冗余代码逻辑，提供重用和函数提取优化路线建议。",
+        schema: {
+          scanDirectories: ["src", "app"],
+          minimumSimilarityThreshold: 0.85
+        }
+      },
+      {
+        name: "security-review",
+        namespace: "system:security-auditor",
+        scope: "project",
+        kind: "API/Server",
+        desc: "分支态势安全合规检查锚点。在生成最终 PR 同步包前，对潜在的安全漏洞（如注入风险、越权逻辑、密钥溢出）执行闭环诊断。",
+        schema: {
+          auditEngine: "static-analysis-core",
+          rejectOnSevereRisk: true
+        }
+      }
+    ];
+
+    // ==========================================
+    // 2. 状态变量 (Runtime States)
+    // ==========================================
+    let currentActiveDraftId = "card-104";
+    let loadedLibrary = [...mockLibrary];
+    let loadedAgents = JSON.parse(JSON.stringify(mockAgents));
+    let selectedSkillName = "mcp-builder";
+
+    // 搜索与过滤临时状态
+    let libraryQuery = "";
+    let skillQuery = "";
+    let currentSkillScope = "all";
+    let currentSkillKind = "all";
+
+    // ==========================================
+    // 3. TAB 切换引擎
+    // ==========================================
+    function switchRedesignTab(tabId, buttonEl) {
+      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+
       document.getElementById('tab-' + tabId).classList.add('active');
-      el.classList.add('active');
+      buttonEl.classList.add('active');
 
-      // 4. 更新 Title 名
-      const titles = {
-        'drafts': '提炼审阅 (Drafts)',
+      const headers = {
+        'drafts': '提炼收件箱 (Drafts)',
         'memory-cards': '全局记忆卡图库 (Library)',
-        'skills': '智能体技能全景织网 (Skills)',
-        'agents': '智能体分配与装载核心 (Loadout)'
+        'agents': '配置装载槽 (Loadout)',
+        'skills': '技能目录 (Skills)'
       };
+      document.getElementById('redesign-page-title').innerText = headers[tabId];
 
-      document.getElementById('page-title-label').innerText = titles[tabId];
+      // 特殊初始化
+      if (tabId === 'memory-cards') {
+        toggleGovernanceOverlay(false);
+      }
+    }
+
+    // ==========================================
+    // 4. DRAFTS WORKFLOW INTERACTION
+    // ==========================================
+    function renderDraftsList() {
+      const container = document.getElementById('drafts-list-container');
+      container.innerHTML = "";
+
+      mockDrafts.forEach(d => {
+        const div = document.createElement('div');
+        div.className = `triage-card ${d.id === currentActiveDraftId ? 'active' : ''}`;
+        div.onclick = () => selectDraft(d.id);
+
+        div.innerHTML = `
+          <div class="triage-meta-row">
+            <span>DRAFT // ${d.id}</span>
+            <span class="confidence-badge ${d.confidenceClass === 'high' ? 'high' : ''}">置信值 ${d.confidence}</span>
+          </div>
+          <div class="triage-title">${d.title}</div>
+          <div class="triage-excerpt">${d.excerpt}</div>
+        `;
+        container.appendChild(div);
+      });
+    }
+
+    function selectDraft(id) {
+      currentActiveDraftId = id;
+      renderDraftsList();
+      renderDraftDetail();
+    }
+
+    function renderDraftDetail() {
+      const detailContainer = document.getElementById('draft-detail-content');
+      const draft = mockDrafts.find(d => d.id === currentActiveDraftId);
+
+      if (!draft) {
+        detailContainer.innerHTML = `<div style="color:var(--text-dim); text-align:center; padding: 40px 0;">该建议卡已处理或不存在</div>`;
+        return;
+      }
+
+      // 高密度双排版视图结构，只保留纯质感的吸纳按钮
+      detailContainer.innerHTML = `
+        <!-- 第一段：原始会话证据舱 -->
+        <article class="detail-card">
+          <div class="detail-section-title">ORIGINAL SESSION EVIDENCE / 原始会话核验证据</div>
+          <div class="evidence-paper">${draft.evidence}</div>
+        </article>
+
+        <!-- 第二段：拟写入格式卡片 -->
+        <article class="detail-card">
+          <div class="detail-section-title">PROPOSED WORKSPACE CONTRACT / 拟写入记忆契约</div>
+          <div class="distilled-card-body">
+            <div class="distilled-title-row">
+              <span class="distilled-title-label">${draft.title}</span>
+              <span class="distilled-type-badge">类型: ${draft.type}</span>
+            </div>
+
+            <div class="distilled-markdown">
+              <p>${draft.summaryDistilled}</p>
+            </div>
+
+            <div class="distilled-meta-grid">
+              <span class="distilled-meta-key">识别途径</span>
+              <span style="font-family: var(--font-mono);">${draft.originSession}.md (全局自动提炼)</span>
+
+              <span class="distilled-meta-key">检索标签</span>
+              <div class="distilled-tags">
+                ${draft.tags.map(t => `<span class="distilled-tag">${t}</span>`).join('')}
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- 纯指向的大 Charcoal 行动控制按钮 -->
+        <div class="detail-actions-area">
+          <button class="btn-outline-charcoal" onclick="discardDraft('${draft.id}')">忽略提炼建议 (Ignore)</button>
+          <button class="btn-solid-charcoal" onclick="absorbDraftToLibrary('${draft.id}')">吸纳此建议并入库 (Absorb)</button>
+        </div>
+      `;
+    }
+
+    function discardDraft(id) {
+      showNotice("已忽略该提炼建议");
+      // 软删除，将其从主视图中清除，并下钻至其余位置
+      const idx = mockDrafts.findIndex(d => d.id === id);
+      if (idx !== -1) {
+        mockDrafts.splice(idx, 1);
+        if (mockDrafts.length > 0) {
+          currentActiveDraftId = mockDrafts[0].id;
+        } else {
+          currentActiveDraftId = "";
+        }
+        renderDraftsList();
+        renderDraftDetail();
+      }
+    }
+
+    function absorbDraftToLibrary(id) {
+      const draft = mockDrafts.find(d => d.id === id);
+      if (!draft) return;
+
+      // 1. 追加至 Library 卡库
+      const newCard = {
+        id: `card-${Math.floor(Math.random() * 90) + 105}`,
+        title: draft.title,
+        type: draft.type,
+        desc: draft.summaryDistilled,
+        timestamp: "2026/05/20",
+        tags: draft.tags
+      };
+      loadedLibrary.unshift(newCard);
+
+      // 2. 消息通知
+      showNotice(`已成功批准，并将《${draft.title}》并入全局库中`);
+
+      // 3. 从列表中摘除该 Draft
+      const idx = mockDrafts.findIndex(d => d.id === id);
+      if (idx !== -1) {
+        mockDrafts.splice(idx, 1);
+        if (mockDrafts.length > 0) {
+          currentActiveDraftId = mockDrafts[0].id;
+        } else {
+          currentActiveDraftId = "";
+        }
+      }
+
+      // 4. 重建视图
+      renderDraftsList();
+      renderDraftDetail();
+      renderLibraryCards();
+      renderLoadoutPool();
+    }
+
+    // ==========================================
+    // 5. LIBRARY INDEX (三栏无打扰布局)
+    // ==========================================
+    function getLibraryData() {
+      // 聚合原始的加新增的
+      if (libraryQuery === "") {
+        return loadedLibrary;
+      }
+      return loadedLibrary.filter(c =>
+        c.title.includes(libraryQuery) ||
+        c.desc.includes(libraryQuery) ||
+        c.tags.some(t => t.includes(libraryQuery))
+      );
+    }
+
+    function renderLibraryCards() {
+      const data = getLibraryData();
+
+      const constraintsBox = document.getElementById('pool-constraints');
+      const proceduresBox = document.getElementById('pool-procedures');
+      const preferencesBox = document.getElementById('pool-preferences');
+
+      constraintsBox.innerHTML = "";
+      proceduresBox.innerHTML = "";
+      preferencesBox.innerHTML = "";
+
+      let countConstraints = 0;
+      let countProcedures = 0;
+      let countPreferences = 0;
+
+      data.forEach(card => {
+        const div = document.createElement('div');
+        div.className = 'card-item';
+        div.innerHTML = `
+          <div class="card-header-line">
+            <span class="card-id">${card.id}</span>
+            <span class="distilled-type-badge">${card.type[0]}</span>
+          </div>
+          <div class="card-body-text">
+            <h4>${card.title}</h4>
+            <p>${card.desc}</p>
+          </div>
+          <div class="card-footer-line">
+            <span class="card-footer-time">${card.timestamp}</span>
+            <div class="distilled-tags">
+              ${card.tags.map(t => `<span class="distilled-tag">${t}</span>`).join('')}
+            </div>
+          </div>
+        `;
+
+        if (card.type === 'Constraints') {
+          constraintsBox.appendChild(div);
+          countConstraints++;
+        } else if (card.type === 'Procedures') {
+          proceduresBox.appendChild(div);
+          countProcedures++;
+        } else if (card.type === 'Preferences') {
+          preferencesBox.appendChild(div);
+          countPreferences++;
+        }
+      });
+
+      document.getElementById('count-constraints').innerText = countConstraints;
+      document.getElementById('count-procedures').innerText = countProcedures;
+      document.getElementById('count-preferences').innerText = countPreferences;
+    }
+
+    function handleSearchLibrary(q) {
+      libraryQuery = q.trim();
+      renderLibraryCards();
+    }
+
+    function toggleGovernanceOverlay(open) {
+      const drawer = document.getElementById('governance-drawer');
+      if (open) {
+        drawer.classList.add('open');
+      } else {
+        drawer.classList.remove('open');
+      }
+    }
+
+    // ==========================================
+    // 6. LOADING SLOTS (物理插槽模拟)
+    // ==========================================
+    function renderLoadoutPool() {
+      const container = document.getElementById('loadout-pool-container');
+      container.innerHTML = "";
+
+      // 显示 Library 中的所有记忆以充当可插拔芯片池
+      loadedLibrary.forEach(c => {
+        const div = document.createElement('div');
+        div.className = 'pool-chip';
+        div.onclick = () => plugIntoActiveAgent(c.title);
+
+        div.innerHTML = `
+          <span class="pool-chip-text">${c.title}</span>
+          <span class="pool-chip-action">+ 指派装填</span>
+        `;
+        container.appendChild(div);
+      });
+    }
+
+    function renderAgentsSlots() {
+      const container = document.getElementById('agents-slots-container');
+      container.innerHTML = "";
+
+      loadedAgents.forEach(agent => {
+        const card = document.createElement('div');
+        card.className = 'agent-card-slot';
+
+        const dockedChipsMarkup = agent.loaded.length > 0
+          ? agent.loaded.map(c => `
+              <div class="docked-chip">
+                <span>${c}</span>
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" onclick="unplugCardFromAgent('${agent.id}', '${c}')">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+              </div>
+            `).join('')
+          : `<span class="dock-empty-tip">未载入指令卡，当前采用系统兜底策略。</span>`;
+
+        card.innerHTML = `
+          <div class="agent-slot-meta">
+            <div class="agent-slot-avatar-row">
+              <div class="agent-slot-avatar">${agent.avatar}</div>
+              <div>
+                <div class="agent-slot-id-label">${agent.name}</div>
+                <div style="font-size: 10px; color: var(--text-dim);">${agent.desc}</div>
+              </div>
+            </div>
+            <div class="agent-slot-sync-indicator">已装填同步 (Active)</div>
+          </div>
+
+          <div class="slot-dock">
+            ${dockedChipsMarkup}
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function plugIntoActiveAgent(cardTitle) {
+      // 默认指派给第一个智能体槽位（高质感简捷原型设计），如果第一个满了则顺延或交互提示
+      const targetAgent = loadedAgents[0];
+
+      if (targetAgent.loaded.includes(cardTitle)) {
+        showNotice(`装填失败: 该智能体已具有《${cardTitle}》的规则切片`);
+        return;
+      }
+
+      targetAgent.loaded.push(cardTitle);
+      showNotice(`已将约束《${cardTitle}》装填入「${targetAgent.id}」插槽`);
+      renderAgentsSlots();
+    }
+
+    function unplugCardFromAgent(agentId, cardTitle) {
+      const agent = loadedAgents.find(a => a.id === agentId);
+      if (!agent) return;
+
+      const idx = agent.loaded.indexOf(cardTitle);
+      if (idx !== -1) {
+        agent.loaded.splice(idx, 1);
+        showNotice(`已注销「${agentId}」的约束卡《${cardTitle}》`);
+        renderAgentsSlots();
+      }
+    }
+
+    // ==========================================
+    // 7. SKILLS SEARCHABLE DIRECTORY
+    // ==========================================
+    function getFilteredSkills() {
+      return mockSkills.filter(s => {
+        const matchesSearch = s.name.toLowerCase().includes(skillQuery.toLowerCase()) ||
+                              s.desc.toLowerCase().includes(skillQuery.toLowerCase()) ||
+                              s.namespace.toLowerCase().includes(skillQuery.toLowerCase());
+
+        const matchesScope = currentSkillScope === 'all' || s.scope === currentSkillScope;
+        const matchesKind = currentSkillKind === 'all' || s.kind === currentSkillKind;
+
+        return matchesSearch && matchesScope && matchesKind;
+      });
+    }
+
+    function renderSkillsList() {
+      const container = document.getElementById('skills-list-container');
+      container.innerHTML = "";
+
+      const filtered = getFilteredSkills();
+
+      if (filtered.length === 0) {
+        container.innerHTML = `<div style="padding: 30px; text-align: center; color: var(--text-dim);">未检索到对齐的本地技能</div>`;
+        return;
+      }
+
+      filtered.forEach(s => {
+        const div = document.createElement('div');
+        div.className = `skill-list-card ${s.name === selectedSkillName ? 'active' : ''}`;
+        div.onclick = () => selectSkill(s.name);
+
+        div.innerHTML = `
+          <div class="skill-name-label">${s.name}</div>
+          <div class="skill-namespace">${s.namespace}</div>
+        `;
+        container.appendChild(div);
+      });
+    }
+
+    function selectSkill(name) {
+      selectedSkillName = name;
+      renderSkillsList();
+      renderSkillDetail();
+    }
+
+    function renderSkillDetail() {
+      const container = document.getElementById('skill-detail-container');
+      const skill = mockSkills.find(s => s.name === selectedSkillName);
+
+      if (!skill) {
+        container.innerHTML = `<div style="color:var(--text-dim); text-align:center; padding: 40px 0;">请选择技能以查看细目</div>`;
+        return;
+      }
+
+      container.innerHTML = `
+        <div class="detail-card">
+          <div class="detail-section-title">技能定位与调用上下文 (Location & Scope)</div>
+          <div class="distilled-card-body">
+            <h2 style="font-size: 15px; font-weight: 750; color: var(--text-main); margin-bottom: 8px;">${skill.name}</h2>
+            <div style="font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); margin-bottom: 12px;">域命名空间: ${skill.namespace}</div>
+
+            <div class="skill-desc-block">
+              <p>${skill.desc}</p>
+            </div>
+
+            <div class="distilled-meta-grid" style="margin-top: 14px;">
+              <span class="distilled-meta-key">调度级别</span>
+              <span>${skill.scope === 'global' ? '全局自动调配' : '项目级边界拦截'}</span>
+
+              <span class="distilled-meta-key">工具宿主</span>
+              <span style="font-family: var(--font-mono); font-weight: 700;">${skill.kind}</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="detail-card">
+          <div class="detail-section-title font-mono">FORMAL PARAMETER SCHEMA / 形参定义规范</div>
+          <pre class="skill-code-json">${JSON.stringify(skill.schema, null, 2)}</pre>
+        </div>
+      `;
+    }
+
+    function handleSearchSkills(query) {
+      skillQuery = query;
+      renderSkillsList();
+    }
+
+    function filterSkillsByScope(scope, btn) {
+      // 按钮高亮管理
+      btn.parentNode.querySelectorAll('.filter-tag-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      currentSkillScope = scope;
+      renderSkillsList();
+    }
+
+    function filterSkillsByKind(kind, btn) {
+      btn.parentNode.querySelectorAll('.filter-tag-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      currentSkillKind = kind;
+      renderSkillsList();
+    }
+
+    // ==========================================
+    // 8. TOAST NOTIFICATION UTILITY
+    // ==========================================
+    function showNotice(text) {
+      const container = document.getElementById('toast-holder');
+      const toast = document.createElement('div');
+      toast.className = 'toast-box';
+      toast.innerHTML = `
+        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="stroke-width: 2.5px;">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+        <span>${text}</span>
+      `;
+      container.appendChild(toast);
+
+      setTimeout(() => {
+        toast.style.animation = 'none';
+        toast.style.transition = 'opacity 0.25s';
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 250);
+      }, 3000);
+    }
+
+    // ==========================================
+    // 9. LIFE SYSTEM INITIALIZATION
+    // ==========================================
+    window.onload = function() {
+      // 初始化 Drafts
+      renderDraftsList();
+      renderDraftDetail();
+
+      // 初始化 Library
+      renderLibraryCards();
+
+      // 初始化 Loadout Slots
+      renderLoadoutPool();
+      renderAgentsSlots();
+
+      // 初始化 Skills
+      renderSkillsList();
+      renderSkillDetail();
     }
   </script>
 </body>

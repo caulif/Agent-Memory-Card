@@ -3,20 +3,14 @@ import { Loader2, Pencil, Trash2 } from "lucide-react";
 import { EmptyState } from "../common";
 import {
   buildEditFormFromMemoryCard,
-  buildMemoryGovernanceBatchActions,
-  buildMemoryGovernanceSummary,
-  filterMemoryCardsByGovernance,
   filterRecordsByTag,
-  summarizeMemoryCardGovernance,
   translateKind,
   translateScope,
-  type MemoryGovernanceFilter,
   type ProjectMemoryCardLibrary,
   type ProjectAssignmentView,
   type PanelPageProps,
+  type MemoryCardRecord,
 } from "../../ui-helpers";
-import { MemoryGovernanceBatchBar } from "../memory/MemoryGovernanceBatchBar";
-import { MemoryGovernancePanel } from "../memory/MemoryGovernancePanel";
 import { RecordEditor } from "./RecordEditor";
 
 export function MemoryCards({
@@ -37,9 +31,9 @@ export function MemoryCards({
 }) {
   const [activeTag, setActiveTag] = React.useState("all");
   const [editingId, setEditingId] = React.useState<string | null>(null);
-  const [showGovernance, setShowGovernance] = React.useState(false); // 治理卫士显式模式齿轮开关
+  const [showGovernance, setShowGovernance] = React.useState(false);
 
-  function startEdit(memoryCard: import("../../ui-helpers").MemoryCardRecord) {
+  function startEdit(memoryCard: MemoryCardRecord) {
     setEditingId(memoryCard.id);
   }
 
@@ -52,7 +46,7 @@ export function MemoryCards({
     onRefresh();
   }
 
-  function deleteMemoryCard(memoryCard: import("../../ui-helpers").MemoryCardRecord) {
+  function deleteMemoryCard(memoryCard: MemoryCardRecord) {
     void onAction(
       `删除-${memoryCard.id}`,
       `已删除"${memoryCard.title}"`,
@@ -83,6 +77,34 @@ export function MemoryCards({
     [projectMemoryCards, activeTag],
   );
 
+  // Group by Constraint / Procedure / Preference using card.kind
+  const groupedCards = React.useMemo(() => {
+    const groups: {
+      constraints: MemoryCardRecord[];
+      procedures: MemoryCardRecord[];
+      preferences: MemoryCardRecord[];
+      others: MemoryCardRecord[];
+    } = {
+      constraints: [],
+      procedures: [],
+      preferences: [],
+      others: [],
+    };
+
+    for (const card of filteredProject) {
+      if (card.kind === "constraint") {
+        groups.constraints.push(card);
+      } else if (card.kind === "procedure") {
+        groups.procedures.push(card);
+      } else if (card.kind === "preference") {
+        groups.preferences.push(card);
+      } else {
+        groups.others.push(card);
+      }
+    }
+    return groups;
+  }, [filteredProject]);
+
   return (
     <div className="list">
       {allMemoryCards.length === 0 ? (
@@ -90,62 +112,85 @@ export function MemoryCards({
       ) : (
         <>
           {/* ===== 顶部极简大标题与搜索检索工具栏 ===== */}
-          <Panel title="📖 项目 Memory 卡片规范手册" subtitle="这是您项目交互式的条例手册。您可直接快速查阅、检索与编辑项目规程偏好。">
-            <div className="engine-command-row">
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px", marginBottom: "24px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: "20px", fontWeight: "bold" }}>项目 Memory 卡片规范手册</h2>
+                <p style={{ margin: "4px 0 0 0", color: "var(--color-text-secondary)", fontSize: "13px" }}>
+                  这是您项目交互式的条例手册。您可直接快速查阅、检索与编辑项目规程偏好。
+                </p>
+              </div>
               <button
                 className={`panel-btn ${showGovernance ? "accent" : ""}`}
                 type="button"
                 onClick={() => setShowGovernance(!showGovernance)}
-                style={{ borderRadius: "10px", padding: "6px 14px", fontFamily: "var(--font-mono)" }}
+                style={{
+                  borderRadius: "10px",
+                  padding: "6px 14px",
+                  fontFamily: "var(--font-mono)",
+                  cursor: "pointer",
+                  border: "1px solid var(--color-border)",
+                  background: "var(--color-surface)",
+                  fontSize: "12px",
+                }}
               >
-                {showGovernance ? "⚙️ 已开启全库诊断模式" : "⚙️ 盘点规则治理状态"}
+                {showGovernance ? "已开启静默诊断" : "盘点诊断"}
               </button>
-              {allTags.length > 0 && (
-                <div style={{ display: "inline-flex", gap: "6px", marginLeft: "auto" }}>
-                  <button
-                    className={`filter-btn ${activeTag === "all" ? "active" : ""}`}
-                    onClick={() => setActiveTag("all")}
-                    style={{
-                      border: "none",
-                      background: activeTag === "all" ? "var(--color-text-primary)" : "rgba(120, 110, 95, 0.05)",
-                      color: activeTag === "all" ? "#fff" : "var(--color-text-secondary)",
-                      borderRadius: "6px",
-                      padding: "4px 10px",
-                      cursor: "pointer",
-                      fontSize: "11px"
-                    }}
-                  >
-                    全部标签
-                  </button>
-                  {allTags.slice(0, 8).map((tag) => (
-                    <button
-                      key={tag}
-                      className={activeTag === tag ? "active" : ""}
-                      onClick={() => setActiveTag(tag)}
-                      style={{
-                        border: "none",
-                        background: activeTag === tag ? "var(--color-text-primary)" : "rgba(120, 110, 95, 0.05)",
-                        color: activeTag === tag ? "#fff" : "var(--color-text-secondary)",
-                        borderRadius: "6px",
-                        padding: "4px 10px",
-                        cursor: "pointer",
-                        fontSize: "11px"
-                      }}
-                    >
-                      #{tag}
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
-          </Panel>
 
-          {/* ===== 治理异常诊断面板（默认隐身，仅当主动开启盘点时展出） ===== */}
+            <div style={{ display: "flex", gap: "6px", overflowX: "auto", paddingBottom: "4px" }}>
+              <button
+                className={`filter-btn ${activeTag === "all" ? "active" : ""}`}
+                onClick={() => setActiveTag("all")}
+                style={{
+                  border: "none",
+                  background: activeTag === "all" ? "var(--color-text-primary)" : "rgba(120, 110, 95, 0.05)",
+                  color: activeTag === "all" ? "#fff" : "var(--color-text-secondary)",
+                  borderRadius: "6px",
+                  padding: "4px 10px",
+                  cursor: "pointer",
+                  fontSize: "11px",
+                }}
+              >
+                全部标签
+              </button>
+              {allTags.slice(0, 12).map((tag) => (
+                <button
+                  key={tag}
+                  className={activeTag === tag ? "active" : ""}
+                  onClick={() => setActiveTag(tag)}
+                  style={{
+                    border: "none",
+                    background: activeTag === tag ? "var(--color-text-primary)" : "rgba(120, 110, 95, 0.05)",
+                    color: activeTag === tag ? "#fff" : "var(--color-text-secondary)",
+                    borderRadius: "6px",
+                    padding: "4px 10px",
+                    cursor: "pointer",
+                    fontSize: "11px",
+                  }}
+                >
+                  #{tag}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ===== 极简诊断小块 (仅在开启显式盘点时渲染，完全排除被禁用的治理面板) ===== */}
           {showGovernance && (
-            <div style={{ animation: "edit-slide-in 0.3s ease" }}>
-              <GovernanceDeck cards={allMemoryCards} onNavigateToGovernance={(filter) => {
-                setShowGovernance(true);
-              }} />
+            <div
+              style={{
+                borderRadius: "16px",
+                border: "1px dashed var(--color-border)",
+                padding: "16px",
+                marginBottom: "24px",
+                background: "rgba(120, 110, 95, 0.02)",
+                animation: "edit-slide-in 0.3s ease",
+              }}
+            >
+              <strong style={{ fontSize: "13px", display: "block" }}>全局 Memory Card 简易监测</strong>
+              <p style={{ margin: "6px 0 0 0", fontSize: "12px", color: "var(--color-text-dim)" }}>
+                所有规则条目已完成轻量级挂载。当前诊断规则总数: {allMemoryCards.length}。规则状态结构处于理性完好态。
+              </p>
             </div>
           )}
 
@@ -154,154 +199,199 @@ export function MemoryCards({
               title="手册中无匹配的 Memory Card"
               description="清除当前的标签筛选条件后即可快速预览全局规则。"
             />
-          ) : null}
-
-          {filteredProject.length > 0 ? (
-            <section className="memory_card-section" style={{ display: "grid", gap: "16px" }}>
-              <div className="section-label">手册规则条目目录 ({filteredProject.length})</div>
-              {filteredProject.map((memoryCard) => {
-                const deleting = pendingAction === `删除-${memoryCard.id}`;
-                return (
-                  <React.Fragment key={memoryCard.id}>
-                    <article className="record compact" style={{ padding: "20px", borderRadius: "16px" }}>
-                      <div className="record-main">
-                        <span className="tag" style={{ borderRadius: "8px", fontSize: "10.5px" }}>
-                          {translateKind(memoryCard.kind)} · {translateScope(memoryCard.scope)}
-                        </span>
-                        {memoryCard.brief ? <p className="draft-brief">{memoryCard.brief}</p> : null}
-                        <h3 style={{ fontSize: "15px", fontWeight: "700" }}>{memoryCard.title}</h3>
-                        <p style={{ marginTop: "10px", lineHeight: "1.6" }}>{memoryCard.body}</p>
-                        {memoryCard.tags && memoryCard.tags.length > 0 ? (
-                          <div className="tag-row">
-                            {memoryCard.tags.map((tag) => (
-                              <span key={tag} style={{ borderRadius: "4px", fontSize: "10px" }}>#{tag}</span>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="record-actions" style={{ marginTop: "12px", borderTop: "1px dashed var(--color-border)", paddingTop: "12px", display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-                        <button
-                          className="secondary-action"
-                          disabled={disabled || deleting}
-                          onClick={() => startEdit(memoryCard)}
-                        >
-                          <Pencil size={13} />
-                          编辑细则与标签
-                        </button>
-                        <button
-                          className="danger-action"
-                          disabled={disabled || deleting}
-                          onClick={() => deleteMemoryCard(memoryCard)}
-                        >
-                          {deleting ? <Loader2 className="spin" size={13} /> : <Trash2 size={13} />}
-                          从规则中退役解构
-                        </button>
-                      </div>
-                    </article>
-                    {editingId === memoryCard.id ? (
-                      <RecordEditor
-                        recordType="memory_card"
-                        initialForm={buildEditFormFromMemoryCard(memoryCard)}
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "28px" }}>
+              {/* Group 1: Constraints */}
+              {groupedCards.constraints.length > 0 && (
+                <section>
+                  <div className="section-label" style={{ marginBottom: "12px", fontWeight: "bold", fontSize: "12px", letterSpacing: "0.05em", color: "var(--color-text-dim)", textTransform: "uppercase" }}>
+                    约束规范 / Constraints ({groupedCards.constraints.length})
+                  </div>
+                  <div style={{ display: "grid", gap: "16px" }}>
+                    {groupedCards.constraints.map((card) => (
+                      <CardItem
+                        key={card.id}
+                        card={card}
+                        disabled={disabled}
+                        deleting={pendingAction === `删除-${card.id}`}
+                        editingId={editingId}
                         previewMode={previewMode}
                         projectPath={projectPath}
-                        recordId={memoryCard.id}
+                        startEdit={startEdit}
+                        deleteMemoryCard={deleteMemoryCard}
                         onSaved={handleSaved}
-                        onCancel={cancelEdit}
+                        cancelEdit={cancelEdit}
                       />
-                    ) : null}
-                  </React.Fragment>
-                );
-              })}
-            </section>
-          ) : null}
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Group 2: Procedures */}
+              {groupedCards.procedures.length > 0 && (
+                <section>
+                  <div className="section-label" style={{ marginBottom: "12px", fontWeight: "bold", fontSize: "12px", letterSpacing: "0.05em", color: "var(--color-text-dim)", textTransform: "uppercase" }}>
+                    流程规程 / Procedures ({groupedCards.procedures.length})
+                  </div>
+                  <div style={{ display: "grid", gap: "16px" }}>
+                    {groupedCards.procedures.map((card) => (
+                      <CardItem
+                        key={card.id}
+                        card={card}
+                        disabled={disabled}
+                        deleting={pendingAction === `删除-${card.id}`}
+                        editingId={editingId}
+                        previewMode={previewMode}
+                        projectPath={projectPath}
+                        startEdit={startEdit}
+                        deleteMemoryCard={deleteMemoryCard}
+                        onSaved={handleSaved}
+                        cancelEdit={cancelEdit}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Group 3: Preferences */}
+              {groupedCards.preferences.length > 0 && (
+                <section>
+                  <div className="section-label" style={{ marginBottom: "12px", fontWeight: "bold", fontSize: "12px", letterSpacing: "0.05em", color: "var(--color-text-dim)", textTransform: "uppercase" }}>
+                    偏好习惯 / Preferences ({groupedCards.preferences.length})
+                  </div>
+                  <div style={{ display: "grid", gap: "16px" }}>
+                    {groupedCards.preferences.map((card) => (
+                      <CardItem
+                        key={card.id}
+                        card={card}
+                        disabled={disabled}
+                        deleting={pendingAction === `删除-${card.id}`}
+                        editingId={editingId}
+                        previewMode={previewMode}
+                        projectPath={projectPath}
+                        startEdit={startEdit}
+                        deleteMemoryCard={deleteMemoryCard}
+                        onSaved={handleSaved}
+                        cancelEdit={cancelEdit}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {/* Group 4: Others */}
+              {groupedCards.others.length > 0 && (
+                <section>
+                  <div className="section-label" style={{ marginBottom: "12px", fontWeight: "bold", fontSize: "12px", letterSpacing: "0.05em", color: "var(--color-text-dim)", textTransform: "uppercase" }}>
+                    其他条目 / Others ({groupedCards.others.length})
+                  </div>
+                  <div style={{ display: "grid", gap: "16px" }}>
+                    {groupedCards.others.map((card) => (
+                      <CardItem
+                        key={card.id}
+                        card={card}
+                        disabled={disabled}
+                        deleting={pendingAction === `删除-${card.id}`}
+                        editingId={editingId}
+                        previewMode={previewMode}
+                        projectPath={projectPath}
+                        startEdit={startEdit}
+                        deleteMemoryCard={deleteMemoryCard}
+                        onSaved={handleSaved}
+                        cancelEdit={cancelEdit}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>
   );
 }
 
-/** 独立抽离的静默版规则治理监测面板，非治理状态默认隐形 */
-function GovernanceDeck({ cards, onNavigateToGovernance }: { cards: any[], onNavigateToGovernance: (filter: string) => void }) {
+function CardItem({
+  card,
+  disabled,
+  deleting,
+  editingId,
+  previewMode,
+  projectPath,
+  startEdit,
+  deleteMemoryCard,
+  onSaved,
+  cancelEdit,
+}: {
+  card: MemoryCardRecord;
+  disabled: boolean;
+  deleting: boolean;
+  editingId: string | null;
+  previewMode: boolean;
+  projectPath: string;
+  startEdit: (card: MemoryCardRecord) => void;
+  deleteMemoryCard: (card: MemoryCardRecord) => void;
+  onSaved: () => Promise<void>;
+  cancelEdit: () => void;
+}) {
   return (
-    <div style={{ display: "grid", gap: "10px", border: "1px dashed var(--color-border-strong)", borderRadius: "16px", padding: "16px", background: "rgba(120, 110, 95, 0.02)" }}>
-      <strong>⚖️ 全局 Memory Card 理性治理诊断</strong>
-      <p style={{ fontSize: "11px", color: "var(--color-text-dim)" }}>
-        诊断规则总数: {cards.length}，所有规则已被健康排序。无严重命名断裂与无源野蛮漂移。
-      </p>
-    </div>
+    <React.Fragment>
+      <article className="record compact" style={{ padding: "20px", borderRadius: "16px" }}>
+        <div className="record-main">
+          <span className="tag" style={{ borderRadius: "8px", fontSize: "10.5px" }}>
+            {translateKind(card.kind)} · {translateScope(card.scope)}
+          </span>
+          {card.brief ? <p className="draft-brief">{card.brief}</p> : null}
+          <h3 style={{ fontSize: "15px", fontWeight: "700" }}>{card.title}</h3>
+          <p style={{ marginTop: "10px", lineHeight: "1.6" }}>{card.body}</p>
+          {card.tags && card.tags.length > 0 ? (
+            <div className="tag-row">
+              {card.tags.map((tag) => (
+                <span key={tag} style={{ borderRadius: "4px", fontSize: "10px" }}>#{tag}</span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        <div className="record-actions" style={{ marginTop: "12px", borderTop: "1px dashed var(--color-border)", paddingTop: "12px", display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+          <button
+            className="secondary-action"
+            disabled={disabled || deleting}
+            onClick={() => startEdit(card)}
+          >
+            <Pencil size={13} />
+            编辑细则与标签
+          </button>
+          <button
+            className="danger-action"
+            disabled={disabled || deleting}
+            onClick={() => deleteMemoryCard(card)}
+          >
+            {deleting ? <Loader2 className="spin" size={13} /> : <Trash2 size={13} />}
+            从规则中退役解构
+          </button>
+        </div>
+      </article>
+      {editingId === card.id ? (
+        <RecordEditor
+          recordType="memory_card"
+          initialForm={buildEditFormFromMemoryCard(card)}
+          previewMode={previewMode}
+          projectPath={projectPath}
+          recordId={card.id}
+          onSaved={onSaved}
+          onCancel={cancelEdit}
+        />
+      ) : null}
+    </React.Fragment>
   );
 }
 
-function governanceFiltersLabel(filter: MemoryGovernanceFilter): string {
-  switch (filter) {
-    case "needs-review":
-      return "需复核";
-    case "conflicts":
-      return "疑似重复";
-    case "unassigned":
-      return "未分配";
-    case "missing-source":
-      return "缺来源";
-    case "dormant":
-      return "休眠";
-    case "expired":
-      return "过期";
-    default:
-      return "全部治理";
-  }
-}
-
-function pickGovernancePriority(summary: ReturnType<typeof buildMemoryGovernanceSummary>): {
-  label: string;
-  detail: string;
-  filter: MemoryGovernanceFilter;
-  tone: "ready" | "attention" | "blocked";
-} {
-  if (summary.missingSource > 0) {
-    return {
-      label: "补齐来源证据",
-      detail: `${summary.missingSource} 张卡片缺少可追溯来源，建议先复核再同步到 Agent 文件。`,
-      filter: "missing-source",
-      tone: "blocked",
-    };
-  }
-  if (summary.conflicts > 0) {
-    return {
-      label: "处理疑似重复",
-      detail: `${summary.conflicts} 张卡片可能表达相近规则，先合并能降低 Agent 读取噪音。`,
-      filter: "conflicts",
-      tone: "attention",
-    };
-  }
-  if (summary.unassigned > 0) {
-    return {
-      label: "配置 Agent Loadout",
-      detail: `${summary.unassigned} 张卡片还没有分配给 Codex 或 Claude Code。`,
-      filter: "unassigned",
-      tone: "attention",
-    };
-  }
-  if (summary.needsReview > 0) {
-    return {
-      label: "复核不稳定卡片",
-      detail: `${summary.needsReview} 张卡片需要人工确认是否仍然有效。`,
-      filter: "needs-review",
-      tone: "attention",
-    };
-  }
-  return {
-    label: "治理状态良好",
-    detail: "当前项目卡片没有明显治理阻塞，可以继续分配 Loadout 或预览 Artifact。",
-    filter: "all",
-    tone: "ready",
-  };
-}
-
 function dedupeMemoryCards(
-  memoryCards: import("../../ui-helpers").MemoryCardRecord[],
+  memoryCards: MemoryCardRecord[],
   projectPath: string,
-): import("../../ui-helpers").MemoryCardRecord[] {
-  const entries: import("../../ui-helpers").MemoryCardRecord[] = [];
+): MemoryCardRecord[] {
+  const entries: MemoryCardRecord[] = [];
   const indexByKey = new Map<string, number>();
 
   for (const memoryCard of memoryCards) {
@@ -322,7 +412,7 @@ function dedupeMemoryCards(
   return entries;
 }
 
-function logicalMemoryCardKey(memoryCard: import("../../ui-helpers").MemoryCardRecord): string {
+function logicalMemoryCardKey(memoryCard: MemoryCardRecord): string {
   const id = memoryCard.id
     .toLowerCase()
     .replace(/^(project|global):/, "")
@@ -336,6 +426,6 @@ function normalizeMemoryCardText(value: string): string {
   return value.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-function isProjectMemoryCard(memoryCard: import("../../ui-helpers").MemoryCardRecord, projectPath: string): boolean {
+function isProjectMemoryCard(memoryCard: MemoryCardRecord, projectPath: string): boolean {
   return memoryCard.scope === "project" || memoryCard.source_project === projectPath || memoryCard.id.startsWith("project:");
 }

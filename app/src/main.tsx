@@ -254,6 +254,8 @@ function App() {
     setProjectMenuOpen(false);
   }
 
+  const isFocusedPage = ["drafts", "memory-cards", "skills", "agents"].includes(page);
+
   return (
     <main className="shell">
       {/* ===== 左侧导航 ===== */}
@@ -404,7 +406,7 @@ function App() {
         </header>
 
         {/* 概览指标条 */}
-        {selectedProject ? (
+        {selectedProject && !isFocusedPage ? (
           <ProjectOverviewStrip
             snapshot={snapshot}
             dashboard={dashboard}
@@ -435,7 +437,7 @@ function App() {
               </div>
             </section>
           ) : null}
-          <div className="workspace-layout">
+          <div className={isFocusedPage ? "workspace-focused" : "workspace-layout"}>
             <section className="primary-pane">
               {appStateError ? (
                 <EmptyState title="无法读取桌面运行时" description={appStateError} />
@@ -448,16 +450,11 @@ function App() {
                       inbox={reviewInbox}
                       assignment={assignmentView}
                       library={memory_cardLibrary}
-                      quality={qualityView}
-                      evalRun={evalRunView}
                       pendingAction={pendingAction}
                       disabled={!candidateInbox && !reviewInbox && !snapshot}
                       onAction={projectAction}
-                      onBatchCandidateAction={batchCandidateAction}
                       previewMode={previewMode}
                       projectPath={selectedProject}
-                      synthesisEngine={synthesisEngine}
-                      onSynthesisEngineChange={setSynthesisEngine}
                       onRefresh={() => {
                         void loadReadModelsForPage(selectedProject, "drafts");
                       }}
@@ -480,13 +477,10 @@ function App() {
                   )}
                   {page === "skills" && (
                     <Skills
-                      snapshot={snapshot}
                       skillLibrary={skillLibrary}
-                      memoryLibrary={memory_cardLibrary}
-                      quality={qualityView}
-                      pendingAction={pendingAction}
-                      disabled={!skillLibrary && !snapshot}
-                      onAction={projectAction}
+                      actionState={pendingAction}
+                      disabled={!skillLibrary}
+                      dispatchAction={projectAction}
                     />
                   )}
                   {page === "agents" && (
@@ -494,11 +488,9 @@ function App() {
                       snapshot={snapshot}
                       assignment={assignmentView}
                       library={memory_cardLibrary}
-                      quality={qualityView}
                       pendingAction={pendingAction}
                       disabled={!assignmentView && !snapshot}
                       onAction={projectAction}
-                      projects={projects}
                     />
                   )}
                   {page === "settings" && <Settings state={state} snapshot={snapshot} projectPath={selectedProject} previewMode={previewMode} synthesisEngine={synthesisEngine} theme={theme} onThemeChange={setTheme} onSynthesisEngineChange={setSynthesisEngine} />}
@@ -507,76 +499,78 @@ function App() {
             </section>
 
             {/* 右侧检查器 — 按页面显示不同内容 */}
-            <div className="inspector">
-              {page === "drafts" ? (
-                <Panel title="质量状态" icon={ShieldCheck}>
-                  <div className="quality">
-                    <span>通过 {qualityView?.rule_ci.passed ?? snapshot?.rule_ci.passed ?? 0}</span>
-                    <span>失败 {qualityView?.rule_ci.failed ?? snapshot?.rule_ci.failed ?? 0}</span>
-                  </div>
-                  <StatusList
-                    empty="暂无质量警告。"
-                    items={[
-                      ...(qualityView?.status.warnings ?? snapshot?.status.warnings ?? []),
-                      ...(qualityView?.build_preview.warnings ?? snapshot?.build_preview.warnings ?? []),
-                    ]}
-                    tone="warning"
-                  />
-                </Panel>
-              ) : page === "agents" ? (
-                <Panel title="分配影响力" icon={GitBranch}>
-                  <div className="assignment-impact">
-                    <div className="impact-ring-wrap">
-                      <svg width="100" height="100" viewBox="0 0 100 100">
-                        <circle cx="50" cy="50" r="42" fill="none" stroke="var(--color-border)" strokeWidth="6" />
-                        <circle
-                          cx="50"
-                          cy="50"
-                          r="42"
-                          fill="none"
-                          stroke="var(--color-accent)"
-                          strokeWidth="6"
-                          strokeDasharray={`${(coveragePct / 100) * 263.9} 263.9`}
-                          strokeLinecap="round"
-                          transform="rotate(-90 50 50)"
-                        />
-                      </svg>
-                      <div className="impact-ring-text">
-                        <strong>{coveragePct}%</strong>
-                        <span>覆盖率</span>
-                      </div>
+            {!isFocusedPage && (
+              <div className="inspector">
+                {page === "drafts" ? (
+                  <Panel title="质量状态" icon={ShieldCheck}>
+                    <div className="quality">
+                      <span>通过 {qualityView?.rule_ci.passed ?? snapshot?.rule_ci.passed ?? 0}</span>
+                      <span>失败 {qualityView?.rule_ci.failed ?? snapshot?.rule_ci.failed ?? 0}</span>
                     </div>
-                    <div className="impact-stats">
-                      <div className="impact-stat">
-                        <strong>{missingCount}</strong>
-                        <span>未分配</span>
+                    <StatusList
+                      empty="暂无质量警告。"
+                      items={[
+                        ...(qualityView?.status.warnings ?? snapshot?.status.warnings ?? []),
+                        ...(qualityView?.build_preview.warnings ?? snapshot?.build_preview.warnings ?? []),
+                      ]}
+                      tone="warning"
+                    />
+                  </Panel>
+                ) : page === "agents" ? (
+                  <Panel title="分配影响力" icon={GitBranch}>
+                    <div className="assignment-impact">
+                      <div className="impact-ring-wrap">
+                        <svg width="100" height="100" viewBox="0 0 100 100">
+                          <circle cx="50" cy="50" r="42" fill="none" stroke="var(--color-border)" strokeWidth="6" />
+                          <circle
+                            cx="50"
+                            cy="50"
+                            r="42"
+                            fill="none"
+                            stroke="var(--color-accent)"
+                            strokeWidth="6"
+                            strokeDasharray={`${(coveragePct / 100) * 263.9} 263.9`}
+                            strokeLinecap="round"
+                            transform="rotate(-90 50 50)"
+                          />
+                        </svg>
+                        <div className="impact-ring-text">
+                          <strong>{coveragePct}%</strong>
+                          <span>覆盖率</span>
+                        </div>
                       </div>
-                      <div className="impact-stat">
-                        <strong>{conflictCount}</strong>
-                        <span>冲突</span>
+                      <div className="impact-stats">
+                        <div className="impact-stat">
+                          <strong>{missingCount}</strong>
+                          <span>未分配</span>
+                        </div>
+                        <div className="impact-stat">
+                          <strong>{conflictCount}</strong>
+                          <span>冲突</span>
+                        </div>
                       </div>
+                      <button className="secondary-action" style={{ width: "100%" }} disabled>
+                        查看详情
+                      </button>
                     </div>
-                    <button className="secondary-action" style={{ width: "100%" }} disabled>
-                      查看详情
-                    </button>
-                  </div>
-                </Panel>
-              ) : page === "memory-cards" ? (
-                <Panel title="演化摘要" icon={Boxes}>
-                  <div className="quality">
-                    <span>片段 {memory_cardCount}</span>
-                    <span>已装 {installedCount}</span>
-                  </div>
-                  <StatusList
-                    empty="暂无演化信号。"
-                    items={[
-                      ...(qualityView?.status.warnings ?? snapshot?.status.warnings ?? []).slice(0, 4),
-                    ]}
-                    tone="warning"
-                  />
-                </Panel>
-              ) : null}
-            </div>
+                  </Panel>
+                ) : page === "memory-cards" ? (
+                  <Panel title="演化摘要" icon={Boxes}>
+                    <div className="quality">
+                      <span>片段 {memory_cardCount}</span>
+                      <span>已装 {installedCount}</span>
+                    </div>
+                    <StatusList
+                      empty="暂无演化信号。"
+                      items={[
+                        ...(qualityView?.status.warnings ?? snapshot?.status.warnings ?? []).slice(0, 4),
+                      ]}
+                      tone="warning"
+                    />
+                  </Panel>
+                ) : null}
+              </div>
+            )}
           </div>
         </section>
       </section>

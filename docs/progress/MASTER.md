@@ -36,3 +36,40 @@
     4.  `docs/plan/task-breakdown.md` (优先执行路线)
     5.  `docs/plan/dependency-graph.md` (Mermaid lanes 网格)
     6.  `docs/plan/milestones.md` (MS 标定成果)
+
+---
+
+## 5. 2026-05-20 页面专注重构续跑记录
+*   **Scope**: Drafts / MemoryCards / Agents / Skills 四大核心页继续按“每页只做一件事”减法重构。
+*   **Prototype**: 已由 Claude Code 重写 `app/preview_redesign.html` 为四页高保真原型，并经 Playwright 截图审查。
+*   **Production Changes**:
+    *   `Drafts.tsx`: 收束为 Review Inbox，两栏候选/证据审阅，移除 eval、批量、编辑表单、诊断芯片和已审流。
+    *   `MemoryCards.tsx`: 收束为 Library Index，治理信息隐藏到轻量诊断开关。
+    *   `Agents.tsx`: 收束为 Loadout Slots，保留卡池与智能体接收槽，移除矩阵/重读/同步大动作噪音。
+    *   `Skills.tsx`: 收束为 Skills Directory，移除 Memory Card 只读绑定与构建同步杂讯。
+    *   `main.tsx`: 对四个专注页隐藏 ProjectOverviewStrip 与右侧 inspector。
+*   **Guardrail**: 新增 `app/scripts/verify-ui-focus-contract.mjs`，并挂载 `bun run --cwd app verify-ui`。
+*   **Verification**:
+    *   `bun run --cwd app verify-ui` -> PASS
+    *   `bun run --cwd app build` -> PASS
+    *   Playwright production screenshots captured under `output/playwright/production-*-final.png`
+*   **GitHub Evidence**:
+    *   Issue #32 commented with Drafts implementation evidence.
+    *   Issue #33 commented with MemoryCards implementation evidence.
+    *   Issue #34 commented with Agents / Skills implementation evidence.
+
+---
+
+## 6. 2026-05-20 Skills 赋能闭环复审记录
+*   **Intent**: 复查“提炼结果是否能真正赋能 Skills”，避免 Skills Directory 退化为只读字典。
+*   **Finding**: 后端读模型已提供 `linked_memory_cards` / `recommended_memory_cards`，且 Tauri 已支持 `attach_memory_card_to_skill`；前端上一轮减法后没有给用户一条从已批准 Memory Card 到常用 Skill 补强的轻量操作路径。
+*   **Production Changes**:
+    *   `Skills.tsx`: 在所选 Skill 详情中新增“已纳入上下文 / 可采纳的优化建议”，保留字典检索心智，同时允许一键把推荐 Memory Card 纳入 Skill supplement。
+    *   `main.tsx`: 向 Skills Directory 传入轻量 action dispatcher，不恢复旧的质量看板、同步动作或只读大面板。
+    *   `project-detail.css`: 修复 Skills 页面桌面/移动端响应式布局，移动端无横向溢出。
+*   **Verification**:
+    *   `bun run --cwd app verify-ui` -> PASS
+    *   `bun test --cwd app ./src/utils/review-workbench.test.ts ./src/utils/kernel-plan.test.ts` -> PASS
+    *   `bun run --cwd app build` -> PASS
+    *   `cargo test --manifest-path src-tauri/Cargo.toml skill` -> PASS
+    *   Playwright desktop/mobile checks show Skills loop visible, no console errors, no horizontal overflow.

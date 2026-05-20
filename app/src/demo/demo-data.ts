@@ -53,7 +53,7 @@ export function createDemoProjectSnapshot(projectPath: string): ProjectSnapshot 
         brief: "前端需在无原生运行时自动降级为演示模式",
         kind: "rule",
         scope: "project",
-        body: "当桌面运行时不可用时，前端进入演示模式，继续展示项目、草稿、技能片段和分配矩阵。",
+        body: "当桌面运行时不可用时，前端进入演示模式，继续展示项目、草稿、技能片段和装填槽位。",
         targets: ["codex", "claude-code"],
         evidence: "来自当前预览会话的静态示例。",
         confidence: 0.91,
