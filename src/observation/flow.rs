@@ -364,7 +364,7 @@ fn dedupe_signals(signals: &mut Vec<FlowSignal>) {
 }
 
 fn compact_snippet(text: &str, max_chars: usize) -> String {
-    let cleaned = text.replace('\0', " ").replace('\n', " ");
+    let cleaned = text.replace(['\0', '\n'], " ");
     if cleaned.chars().count() <= max_chars {
         return cleaned;
     }

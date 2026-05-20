@@ -77,7 +77,7 @@ impl FastEmbedMatcher {
             .model
             .lock()
             .map_err(|_| anyhow::anyhow!("fastembed model lock poisoned"))?;
-        let embeddings = model.embed(texts.to_vec(), None)?;
+        let embeddings = model.embed(texts, None)?;
         Ok(embeddings)
     }
 }

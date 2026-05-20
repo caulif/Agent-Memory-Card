@@ -618,7 +618,7 @@ fn anthropic_unstructured_json_body(body: &serde_json::Value) -> serde_json::Val
     else {
         return fallback;
     };
-    fallback.as_object_mut().map(|object| {
+    if let Some(object) = fallback.as_object_mut() {
         object.remove("output_config");
         let max_tokens = object
             .get("max_tokens")
@@ -627,7 +627,7 @@ fn anthropic_unstructured_json_body(body: &serde_json::Value) -> serde_json::Val
             .saturating_mul(4)
             .max(4096);
         object.insert("max_tokens".to_string(), serde_json::json!(max_tokens));
-    });
+    }
     if let Some(messages) = fallback
         .get_mut("messages")
         .and_then(|value| value.as_array_mut())

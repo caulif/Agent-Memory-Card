@@ -22,18 +22,36 @@ export function Skills({
   const [activeSkillId, setActiveSkillId] = React.useState("");
   const [searchQuery, setSearchQuery] = React.useState("");
   const [selectedKind, setSelectedKind] = React.useState("all");
+  const [locallyAttachedCards, setLocallyAttachedCards] = React.useState<Record<string, string[]>>({});
+
+  const visibleSkills = React.useMemo(() => {
+    return skills.map((skill) => {
+      const localIds = locallyAttachedCards[skill.id] ?? [];
+      if (localIds.length === 0) return skill;
+
+      const linkedIds = new Set(skill.linked_memory_cards.map((card) => card.id));
+      const locallyLinked = skill.recommended_memory_cards.filter((card) => localIds.includes(card.id) && !linkedIds.has(card.id));
+      if (locallyLinked.length === 0) return skill;
+
+      return {
+        ...skill,
+        linked_memory_cards: [...skill.linked_memory_cards, ...locallyLinked],
+        recommended_memory_cards: skill.recommended_memory_cards.filter((card) => !localIds.includes(card.id)),
+      };
+    });
+  }, [locallyAttachedCards, skills]);
 
   const kinds = React.useMemo(() => {
     const list = new Set<string>();
-    for (const s of skills) {
+    for (const s of visibleSkills) {
       if (s.source_kind) list.add(s.source_kind);
     }
     return ["all", ...Array.from(list)];
-  }, [skills]);
+  }, [visibleSkills]);
 
   const filteredSkills = React.useMemo(() => {
     const query = searchQuery.toLowerCase();
-    return skills.filter((skill) => {
+    return visibleSkills.filter((skill) => {
       const nameMatch = skill.name?.toLowerCase().includes(query);
       const descMatch = skill.description?.toLowerCase().includes(query);
       const cardMatch = [...skill.linked_memory_cards, ...skill.recommended_memory_cards].some((card) =>
@@ -42,7 +60,7 @@ export function Skills({
       const kindMatch = selectedKind === "all" || skill.source_kind === selectedKind;
       return (nameMatch || descMatch || cardMatch) && kindMatch;
     });
-  }, [skills, searchQuery, selectedKind]);
+  }, [visibleSkills, searchQuery, selectedKind]);
 
   const activeSkill = React.useMemo(
     () => filteredSkills.find((skill) => skill.id === activeSkillId) ?? filteredSkills[0] ?? null,
@@ -200,6 +218,12 @@ export function Skills({
               disabled={disabled}
               actionState={actionState}
               dispatchAction={dispatchAction}
+              onAttached={(cardId) => {
+                setLocallyAttachedCards((current) => ({
+                  ...current,
+                  [activeSkill.id]: Array.from(new Set([...(current[activeSkill.id] ?? []), cardId])),
+                }));
+              }}
             />
 
             <div
@@ -246,6 +270,7 @@ function SkillOptimizationPanel({
   disabled,
   actionState,
   dispatchAction,
+  onAttached,
 }: {
   skillId: string;
   linkedCards: MemoryCardRecord[];
@@ -253,6 +278,7 @@ function SkillOptimizationPanel({
   disabled: boolean;
   actionState: string;
   dispatchAction: ProjectAction;
+  onAttached: (cardId: string) => void;
 }) {
   const visibleLinked = linkedCards.slice(0, 3);
   const visibleRecommended = recommendedCards.slice(0, 4);
@@ -322,12 +348,13 @@ function SkillOptimizationPanel({
                     busyLabel="正在纳入"
                     busy={actionState === key}
                     disabled={disabled}
-                    onClick={() =>
-                      dispatchAction(key, "已纳入 Skill 上下文", "attach_memory_card_to_skill", {
+                    onClick={async () => {
+                      await dispatchAction(key, "已纳入 Skill 上下文", "attach_memory_card_to_skill", {
                         skillId,
                         memoryCardId: card.id,
-                      })
-                    }
+                      });
+                      onAttached(card.id);
+                    }}
                   />
                 </div>
               );

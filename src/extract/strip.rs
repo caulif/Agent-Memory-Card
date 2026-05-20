@@ -126,7 +126,7 @@ fn methodology_signal_lines(body: &str) -> Vec<String> {
         .map(|line| normalize_methodology_line(&line))
         .filter(|line| {
             let count = line.chars().count();
-            count >= MIN_MEANINGFUL_CHARS && count <= MAX_METHODOLOGY_SIGNAL_CHARS
+            (MIN_MEANINGFUL_CHARS..=MAX_METHODOLOGY_SIGNAL_CHARS).contains(&count)
         })
         .filter(|line| looks_like_methodology_signal(line))
         .filter(|line| !looks_like_methodology_artifact(line))

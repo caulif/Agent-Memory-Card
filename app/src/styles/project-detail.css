@@ -2428,10 +2428,8 @@
 }
 
 .skill-detail-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
+  display: grid;
+  gap: 8px;
   min-width: 0;
 }
 

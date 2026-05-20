@@ -5,6 +5,10 @@ use super::*;
         reject_draft, sync_project_for_test,
     };
 
+    fn normalized_slash(path: &std::path::Path) -> String {
+        fsutil::path_to_slash(&fsutil::normalize_project_root(path).expect("normalize path"))
+    }
+
     #[test]
     fn app_state_uses_existing_registry() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -124,10 +128,7 @@ use super::*;
         let dashboard =
             app_service::load_project_dashboard(project.path(), home.path()).expect("dashboard");
 
-        assert_eq!(
-            dashboard.project_path,
-            fsutil::path_to_slash(project.path())
-        );
+        assert_eq!(dashboard.project_path, normalized_slash(project.path()));
         assert_eq!(dashboard.candidate_count, 1);
         assert_eq!(dashboard.draft_count, 1);
         assert_eq!(dashboard.memory_card_count, 1);
@@ -714,7 +715,7 @@ use super::*;
         )
         .expect("confirmed approval should execute");
 
-        assert_eq!(ack.project_path, fsutil::path_to_slash(temp.path()));
+        assert_eq!(ack.project_path, normalized_slash(temp.path()));
         assert_eq!(draft::load_drafts(temp.path()).expect("drafts").len(), 0);
         assert_eq!(memory_card::load_memory_cards(temp.path()).expect("memory_cards").len(), 1);
         let audit = agent_kernel::kernel::load_audit_entries(temp.path()).expect("audit");
@@ -805,7 +806,7 @@ use super::*;
         )
         .expect("confirmed rejection should execute");
 
-        assert_eq!(ack.project_path, fsutil::path_to_slash(temp.path()));
+        assert_eq!(ack.project_path, normalized_slash(temp.path()));
         assert_eq!(draft::load_drafts(temp.path()).expect("drafts").len(), 0);
         let audit = agent_kernel::kernel::load_audit_entries(temp.path()).expect("audit");
         assert_eq!(audit.len(), 1);

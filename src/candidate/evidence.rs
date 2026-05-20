@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceTrust {
     UserDirect,
@@ -8,27 +8,17 @@ pub enum SourceTrust {
     AssistantSummary,
     ToolOutput,
     Artifact,
+    #[default]
     Unknown,
 }
 
-impl Default for SourceTrust {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EvidenceValidity {
     Valid,
+    #[default]
     Weak,
     Invalid,
-}
-
-impl Default for EvidenceValidity {
-    fn default() -> Self {
-        Self::Weak
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]

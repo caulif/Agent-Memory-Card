@@ -46,3 +46,8 @@
 !/app/src/utils/review-workbench.test.ts
 !/app/src/utils/memory-governance.test.ts
 !/app/src/utils/kernel-plan.test.ts
+!/src/build/tests.rs
+!/src/candidate/tests.rs
+!/src/eval/tests.rs
+!/src/extract/induce/batch_tests.rs
+!/src/provider/tests.rs

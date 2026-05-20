@@ -59,7 +59,12 @@ mod tests {
         )
         .expect("clear targets");
 
-        assert_eq!(ack.project_path, fsutil::path_to_slash(temp.path()));
+        assert_eq!(
+            ack.project_path,
+            fsutil::path_to_slash(
+                &fsutil::normalize_project_root(temp.path()).expect("normalize temp path")
+            )
+        );
         let project = agent_kernel::config::load_or_default_project_config(temp.path())
             .expect("project");
         assert_eq!(project.memory_cards.include[0].targets, vec!["claude-code"]);

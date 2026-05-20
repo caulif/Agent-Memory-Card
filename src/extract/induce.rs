@@ -137,6 +137,7 @@ pub fn induce_batch_with_provider(
 
 /// 单簇归纳的结果（成功 / 拒绝 / 失败）。
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum InductionOutcome {
     Accepted(InducedCandidate),
     /// LLM 主动 reject（这个簇不构成规则）

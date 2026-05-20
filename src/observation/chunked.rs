@@ -436,6 +436,7 @@ pub(super) fn extract_llm_chunks_to_report(
     Ok(merged)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn merge_flow_candidates(
     project_root: &Path,
     observations: &[ObservationRecord],
@@ -479,6 +480,7 @@ fn merge_flow_candidates(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn merge_failure_flow_candidates(
     project_root: &Path,
     observations: &[ObservationRecord],

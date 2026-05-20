@@ -25,22 +25,13 @@ pub const STAGE_INDUCE: &str = "induce";
 pub const STAGE_CRYSTALLIZE: &str = "crystallize";
 
 /// 流水线选项：组合各层配置 + 是否跳过 INDUCE。
+#[derive(Default)]
 pub struct PipelineOptions {
     pub cluster: ClusterOptions,
     /// LLM 归纳策略：默认先选 Top-K 高信号 evidence，再一次批量综合。
     pub induce: InduceMode,
     /// 不传 provider 即跳过 INDUCE / CRYSTALLIZE，只到 Layer 3
     pub skip_induce: bool,
-}
-
-impl Default for PipelineOptions {
-    fn default() -> Self {
-        Self {
-            cluster: ClusterOptions::default(),
-            induce: InduceMode::default(),
-            skip_induce: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
