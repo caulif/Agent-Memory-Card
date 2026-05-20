@@ -264,12 +264,13 @@
     *   `app/scripts/verify-ui-focus-contract.mjs`: 增加 demo read-model guardrail，要求预览数据保留 synthesis decisions，避免回退为空 Inbox。
     *   `app/src/components/pages/Drafts.tsx`: 候选兜底预览改为成熟 Memory Card 形态，使用“目标 / 适用场景 / 执行方式 / 边界 / 验收”，删除“用于把……”这种内部加工口吻。
     *   `app/scripts/verify-ui-focus-contract.mjs`: 增加 Review Inbox 成熟度 guardrail，要求候选兜底预览保留规范 Memory Card 字段，并禁止退回内部加工文案。
-    *   `tests/extract_quality_v2.rs`: fake LLM provider 显式使用 UTF-8 stdout，修复 Windows GitHub Actions 上中文 JSON 输出触发 Python `UnicodeEncodeError` 的 CI 失败。
+    *   `tests/extract_quality_v2.rs`: fake LLM provider 显式使用 UTF-8 stdout，修复 Windows GitHub Actions 上中文 JSON 输出触发 Python `UnicodeEncodeError` 的 CI 失败；同时收窄 refine 响应分支，只有明确的 `FinalMemoryRefinement` / `"candidates"` prompt 才返回 `{ items: [...] }`，避免 extract 阶段误拿 refine JSON shape。
 *   **Verification**:
     *   `bun run --cwd app verify-ui` -> PASS.
     *   `bun test --cwd app ./src/utils/review-workbench.test.ts ./src/utils/kernel-plan.test.ts` -> PASS, 28 passed.
     *   `bun run --cwd app build` -> PASS.
     *   `cargo test --test extract_quality_v2 --quiet` -> PASS, 21 passed / 1 ignored.
+    *   `cargo test --test extract_quality_v2 llm_provider_filters_and_rewrites_candidate_into_memory_card_shape -- --nocapture` -> PASS.
     *   `cargo fmt --check` -> PASS.
     *   `git diff --check` -> PASS.
     *   Browser trial on `http://127.0.0.1:1420`: Review Inbox 显示 `待审建议收件箱 (2)`、`LLM Provider`、`项目级 Skill 补强`、`Value Delta`；候选正文显示成熟 Memory Card shape；无“页面数据加载失败”；无横向溢出；不再出现“用于把”模板腔。
