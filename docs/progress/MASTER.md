@@ -243,4 +243,10 @@
     *   `.github/workflows/ci.yml`: 增加 workflow concurrency group，按分支/PR head 自动取消旧 run。
     *   `.github/workflows/ci.yml`: 为 Windows job、release build、Tauri build/test、CLI smoke 等步骤设置明确 timeout。
     *   `.github/workflows/ci.yml`: 将本轮核心质量门纳入 CI：Rust lib tests、`extract_quality_v2`、`golden_set_regression`、`verify-ui`、前端 utility tests 与 app build。
+    *   `main.tsx` / `useProjectSelection.ts`: 修复浏览器预览模式进入时的 read-model 竞态，直接加载 demo read models，不再短暂调用 Tauri `invoke` 并显示“页面数据加载失败”。
 *   **Goal**: CI 不再无限悬挂，并且能覆盖 Memory Card synthesis 这条生产力主线，而不只是编译 smoke。
+*   **User Trial Evidence**:
+    *   Playwright CLI 打开 `http://127.0.0.1:1420` 后，`Suggestion Review` 与“浏览器演示模式”可见。
+    *   页面正文不再出现“页面数据加载失败”。
+    *   `documentElement.scrollWidth <= clientWidth`，无横向溢出。
+    *   剩余 console error 为 `/favicon.ico` 404，属于静态资源噪音，未影响 UI 功能路径。

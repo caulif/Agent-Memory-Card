@@ -48,6 +48,7 @@ import {
   buildEditFormFromMemoryCard,
   buildKernelPlanForEditor,
   confirmedAgentManagedPolicy,
+  createDemoProjectDashboard,
   createDemoProjectSnapshot,
   deriveMemoryCardEvolution,
   describeDraftForReview,
@@ -125,19 +126,26 @@ function App() {
     qualityView,
     evalRunView,
     clearProjectReadModels,
+    hydrateReadModelsFromDemo,
     loadDashboard,
     loadReadModelsForPage,
   } = readModels;
 
-  const activateProject = React.useCallback((projectPath: string, targetPage: PageId) => {
+  const activateProject = React.useCallback((projectPath: string, targetPage: PageId, options?: { previewMode?: boolean }) => {
     setDashboard(null);
     clearProjectReadModels();
+    if (options?.previewMode) {
+      setDashboard(createDemoProjectDashboard(projectPath));
+      hydrateReadModelsFromDemo(projectPath, targetPage);
+      setMessage("浏览器预览模式：已加载静态演示工作台。");
+      return;
+    }
     setMessage("项目已打开，正在后台加载工作台数据。");
     window.setTimeout(() => {
       void loadDashboard(projectPath);
       void loadReadModelsForPage(projectPath, targetPage);
     }, 0);
-  }, [clearProjectReadModels, loadDashboard, loadReadModelsForPage, setDashboard, setMessage]);
+  }, [clearProjectReadModels, hydrateReadModelsFromDemo, loadDashboard, loadReadModelsForPage, setDashboard, setMessage]);
 
   const clearProject = React.useCallback(() => {
     setDashboard(null);
