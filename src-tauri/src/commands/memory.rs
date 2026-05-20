@@ -150,6 +150,7 @@ pub fn attach_memory_card_to_skill(
     project_path: String,
     memory_card_id: String,
     skill_id: String,
+    fusion_mode: Option<String>,
     confirmed_policy: Option<kernel::KernelPolicy>,
     decision_token: Option<String>,
 ) -> CommandResult<ProjectMutationAck> {
@@ -159,11 +160,16 @@ pub fn attach_memory_card_to_skill(
             memory_card_id: memory_card_id.clone(),
             skill_id: skill_id.clone(),
         },
-        serde_json::json!({ "memory_card_id": memory_card_id.clone(), "skill_id": skill_id.clone() }),
+        serde_json::json!({ "memory_card_id": memory_card_id.clone(), "skill_id": skill_id.clone(), "fusion_mode": fusion_mode.clone() }),
         confirmed_policy,
         decision_token,
     )?;
-    app_service::attach_memory_card_to_skill(Path::new(&project_path), &memory_card_id, &skill_id)
+    app_service::attach_memory_card_to_skill(
+        Path::new(&project_path),
+        &memory_card_id,
+        &skill_id,
+        fusion_mode.as_deref(),
+    )
         .map_err(error_to_string)?;
     project_ack(&project_path)
 }

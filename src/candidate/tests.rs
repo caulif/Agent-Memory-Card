@@ -140,6 +140,45 @@ fn approving_candidate_creates_memory_card_and_preserves_metadata() {
 }
 
 #[test]
+fn approving_merge_candidate_updates_existing_memory_card() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    memory_card::add_memory_card(
+        temp.path(),
+        "project:frontend-flow",
+        "Frontend Flow",
+        "Run frontend checks before sync.",
+        "procedure",
+        "project",
+        vec!["codex".to_string()],
+    )
+    .expect("existing memory card");
+
+    let mut candidate = new_candidate(
+        "project:frontend-flow-update",
+        0.93,
+        Some("llm-memory-refine"),
+    );
+    candidate.title = "Frontend Flow Update".to_string();
+    candidate.body = "When changing frontend workflows, run focused UI tests before syncing generated agent artifacts; keep broad tests for larger changes.".to_string();
+    candidate.kind = "procedure".to_string();
+    candidate.extraction.suggested_action = Some(ExtractionAction::merge_into_existing(
+        "project:frontend-flow".to_string(),
+        0.91,
+    ));
+    add_candidate(temp.path(), candidate).expect("candidate");
+
+    let updated = approve_candidate_to_memory_card(temp.path(), "project:frontend-flow-update")
+        .expect("updated memory card");
+    let visible = list_visible_candidates(temp.path()).expect("visible candidates");
+    let cards = memory_card::load_memory_cards(temp.path()).expect("memory cards");
+
+    assert_eq!(updated.id, "project:frontend-flow");
+    assert!(updated.body.contains("focused UI tests"));
+    assert_eq!(cards.len(), 1);
+    assert!(visible.is_empty());
+}
+
+#[test]
 fn approving_legacy_principle_candidate_normalizes_kind() {
     let temp = tempfile::tempdir().expect("tempdir");
     let mut candidate = new_candidate("global:legacy-principle", 0.92, Some("principle-signal"));

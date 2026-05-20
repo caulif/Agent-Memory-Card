@@ -1,5 +1,5 @@
 import React from "react";
-import { CheckCircle2, Link2 } from "lucide-react";
+import { CheckCircle2, Link2, RefreshCw } from "lucide-react";
 import { ActionButton, EmptyState } from "../common";
 import {
   type MemoryCardRecord,
@@ -69,10 +69,23 @@ export function Skills({
 
   if (skills.length === 0) {
     return (
-      <EmptyState
-        title="暂无 Skills 注册"
-        description="系统会在后端自动检测本地 Skill 目录，自动解析其内置的工具集定义与作用域Scope。"
-      />
+      <div className="skills-workbench">
+        <EmptyState
+          title="暂无 Skills 注册"
+          description="点击下方扫描真实 Skills，系统会读取当前项目、Codex、Claude Code、superpowers 和插件缓存中的 SKILL.md。"
+        />
+        <div className="empty-state-actions">
+          <ActionButton
+            variant="primary"
+            icon={RefreshCw}
+            label="扫描真实 Skills"
+            busyLabel="扫描中"
+            busy={actionState === "扫描 Skills"}
+            disabled={disabled}
+            onClick={() => dispatchAction("扫描 Skills", "已刷新真实 Skill Registry", "import_project", { scanHome: true })}
+          />
+        </div>
+      </div>
     );
   }
 
@@ -85,8 +98,22 @@ export function Skills({
           <p style={{ margin: "4px 0 0 0", color: "var(--color-text-secondary)", fontSize: "13px" }}>
             查阅当前注册生效的工具集契约规范，这是智能体在当前项目被授予的专属拓展本领。
           </p>
+          {skillLibrary ? (
+            <p className="skills-source-line">
+              扫描时间 {skillLibrary.generated_at || "未记录"} · {formatSourceCounts(skillLibrary.source_counts)}
+            </p>
+          ) : null}
         </div>
         <div className="skills-filter-row">
+          <ActionButton
+            variant="secondary"
+            icon={RefreshCw}
+            label="扫描真实 Skills"
+            busyLabel="扫描中"
+            busy={actionState === "扫描 Skills"}
+            disabled={disabled}
+            onClick={() => dispatchAction("扫描 Skills", "已刷新真实 Skill Registry", "import_project", { scanHome: true })}
+          />
           {kinds.length > 2 ? (
             <select
               value={selectedKind}
@@ -352,6 +379,23 @@ function SkillOptimizationPanel({
                       await dispatchAction(key, "已纳入 Skill 上下文", "attach_memory_card_to_skill", {
                         skillId,
                         memoryCardId: card.id,
+                        fusionMode: "manual",
+                      });
+                      onAttached(card.id);
+                    }}
+                  />
+                  <ActionButton
+                    variant="primary"
+                    icon={Link2}
+                    label="自动融合"
+                    busyLabel="融合中"
+                    busy={actionState === `融合-${skillId}|${card.id}`}
+                    disabled={disabled}
+                    onClick={async () => {
+                      await dispatchAction(`融合-${skillId}|${card.id}`, "已自动融合进 Skill 上下文", "attach_memory_card_to_skill", {
+                        skillId,
+                        memoryCardId: card.id,
+                        fusionMode: "auto",
                       });
                       onAttached(card.id);
                     }}
@@ -364,6 +408,15 @@ function SkillOptimizationPanel({
       </section>
     </div>
   );
+}
+
+function formatSourceCounts(sourceCounts: Record<string, number>) {
+  const entries = Object.entries(sourceCounts ?? {});
+  if (entries.length === 0) return "未发现来源";
+  return entries
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([kind, count]) => `${kind} ${count}`)
+    .join(" / ");
 }
 
 function MemoryCardMini({ card, tone }: { card: MemoryCardRecord; tone: "linked" | "recommended" }) {

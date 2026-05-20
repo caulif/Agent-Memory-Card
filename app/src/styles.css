@@ -972,6 +972,35 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.engine-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 4px 8px 4px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-canvas);
+}
+
+.engine-picker span {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.engine-picker select {
+  min-height: 28px;
+  max-width: 170px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
 /* ===== 命令工具栏 ===== */
 .command-strip {
   display: flex;

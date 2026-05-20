@@ -138,7 +138,7 @@ if (!fs.existsSync(mainPath)) {
   // c. 校验传给 Drafts 组件的参数，禁止传递无关/已禁用的 props
   const draftsBlock = mainContent.match(/<Drafts[\s\S]*?\/>/)?.[0];
   if (draftsBlock) {
-    const bannedDraftsProps = ['evalRun', 'onBatchCandidateAction', 'synthesisEngine', 'onSynthesisEngineChange'];
+    const bannedDraftsProps = ['evalRun', 'onBatchCandidateAction'];
     const foundProps = bannedDraftsProps.filter(p => draftsBlock.includes(p + '='));
     if (foundProps.length > 0) {
       console.log(`[FAIL] main.tsx <Drafts />: Found extraneous/banned props passed: ${foundProps.map(p => `'${p}'`).join(', ')}`);

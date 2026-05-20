@@ -105,3 +105,31 @@
     *   `cargo test --manifest-path Cargo.toml --lib` -> PASS, 303 passed.
     *   `cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture` -> PASS, 44 passed.
     *   Playwright user trial report: `output/playwright/ui-trial-report.json`
+
+---
+
+## 8. 2026-05-20 真实 Skill Registry 与成熟卡片闭环修正
+*   **Issue**: GitHub #36 tracks the follow-up from real user trial.
+*   **User Findings Addressed**:
+    *   Drafts 页之前没有可见 LLM 引擎选项，且主按钮硬编码 `claude-code`。
+    *   Skills 页只读取旧 `.agent-kernel/skill-index.yml`，没有像 Codex 一样刷新真实本地 Skills 的入口。
+    *   Memory Card 审阅/挂载应展示成熟规则，重复或相似内容应合并，而不是让用户批准粗糙候选和重复卡片。
+*   **Production Changes**:
+    *   `Drafts.tsx`: 增加极简提炼引擎选择器，支持 `LLM Provider / Claude Code / Codex / Local`，主提炼动作使用用户选择的 engine。
+    *   `main.tsx`: 项目切换时读取 Provider 配置；若第三方 Provider 已启用，默认切到 `llm`。
+    *   `scanner.rs`: home scan 扩展到 Codex superpowers 与 Codex plugin cache；本项目 `import --scan-home` 实测索引 57 个 Skills。
+    *   `Skills.tsx`: 增加“扫描真实 Skills”；Skill read model 显示扫描时间与来源计数，保留字典心智。
+    *   Skill 挂载：新增 `manual` 直接挂载与 `auto` LLM/确定性融合 supplement；构建时写入融合后的 `AGENT_KERNEL_MEMORY_CARDS.md` 内容。
+    *   Candidate 批准：当提炼动作标记 `merge_into_existing` 时，批准会更新既有 Memory Card，不再新增重复卡。
+*   **Verification**:
+    *   `bun run --cwd app verify-ui` -> PASS
+    *   `bun test --cwd app ./src/utils/kernel-plan.test.ts` -> PASS
+    *   `bun run --cwd app build` -> PASS
+    *   `cargo fmt --check` -> PASS
+    *   `cargo clippy -- -D warnings` -> PASS
+    *   `cargo test --manifest-path Cargo.toml --lib` -> PASS, 304 passed.
+    *   `cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture` -> PASS, 45 passed.
+    *   `cargo test --test extract_quality_v2 --quiet` -> PASS, 21 passed / 1 ignored.
+    *   `cargo test --test golden_set_regression --quiet` -> PASS, 3 passed.
+    *   `agent-kernel import --project . --scan-home` -> indexed 57 Skills, including 6 plugin and 28 superpowers entries.
+    *   Playwright preview trial -> no console errors, no desktop/mobile horizontal overflow; Drafts engine options and Skills scan/manual/auto-fuse controls visible.

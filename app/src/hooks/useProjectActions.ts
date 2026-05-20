@@ -158,6 +158,7 @@ export function useProjectActions({
         "fuse_memory_cards_to_draft",
         "attach_memory_card_to_skill",
         "promote_memory_card_to_global", "install_global_memory_card_to_project",
+        "import_project",
         "sync_project",
         "import_artifact_drifts",
         "import_artifact_drift_path",

@@ -50,6 +50,15 @@ export function getProjectSkillLibrary(projectPath: string) {
   return invoke<ProjectSkillLibrary>("get_project_skill_library", { projectPath });
 }
 
+export function importProject(args: {
+  projectPath: string;
+  scanHome: boolean;
+  confirmedPolicy: KernelPolicyPayload;
+  decisionToken?: string;
+}) {
+  return invoke<ProjectMutationAck>("import_project", args);
+}
+
 export function getProjectAssignmentView(projectPath: string) {
   return invoke<ProjectAssignmentView>("get_project_assignment_view", { projectPath });
 }

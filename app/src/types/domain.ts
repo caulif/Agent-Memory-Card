@@ -71,6 +71,7 @@ export type MemoryCardRecord = {
   brief?: string;
   tags?: string[];
   language?: string;
+  activation?: string;
   source_project?: string;
   extraction?: ExtractionMetadata | null;
   approved_from?: string | null;
@@ -148,6 +149,8 @@ export type ProjectSkillView = {
 
 export type ProjectSkillLibrary = {
   project_path: string;
+  generated_at: string;
+  source_counts: Record<string, number>;
   skills: ProjectSkillView[];
 };
 

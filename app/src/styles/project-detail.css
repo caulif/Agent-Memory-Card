@@ -2335,6 +2335,20 @@
   max-width: 640px;
 }
 
+.skills-source-line {
+  margin: 6px 0 0;
+  color: var(--color-text-dim);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.empty-state-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 14px;
+}
+
 .skills-filter-row {
   display: flex;
   gap: 10px;

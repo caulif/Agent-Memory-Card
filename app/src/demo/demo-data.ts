@@ -259,6 +259,8 @@ export function createDemoProjectSkillLibrary(projectPath: string): ProjectSkill
   const snapshot = createDemoProjectSnapshot(projectPath);
   return {
     project_path: snapshot.project_path,
+    generated_at: "demo",
+    source_counts: { project: 2 },
     skills: [
       {
         id: "project:obsidian-markdown",

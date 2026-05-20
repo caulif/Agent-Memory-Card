@@ -1,11 +1,12 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::thread;
 
 use agent_kernel::{
     build, candidate, catalog, config, draft, eval, fsutil, kernel, memory_card, observation,
-    project_registry, rule_test, scanner,
+    project_registry, provider, rule_test, scanner,
 };
+use chrono::Utc;
 use serde::Serialize;
 
 use crate::{
@@ -48,6 +49,8 @@ pub struct ProjectMemoryCardLibrary {
 #[derive(Debug, Serialize)]
 pub struct ProjectSkillLibrary {
     pub project_path: String,
+    pub generated_at: String,
+    pub source_counts: BTreeMap<String, usize>,
     pub skills: Vec<ProjectSkillView>,
 }
 
@@ -275,9 +278,14 @@ pub fn attach_memory_card_to_skill(
     project_root: &Path,
     memory_card_id: &str,
     skill_id: &str,
+    fusion_mode: Option<&str>,
 ) -> anyhow::Result<()> {
     let root = fsutil::normalize_project_root(project_root)?;
-    config::add_skill_supplement(&root, skill_id, memory_card_id)
+    if fusion_mode == Some("auto") {
+        attach_memory_card_to_skill_with_fusion(&root, memory_card_id, skill_id)
+    } else {
+        config::add_skill_supplement(&root, skill_id, memory_card_id)
+    }
 }
 
 pub fn install_catalog_package(
@@ -413,16 +421,21 @@ pub fn load_project_skill_library(project_root: &Path) -> anyhow::Result<Project
     let project = config::load_or_default_project_config(&root)?;
     let index = config::load_skill_index(&root)?;
     let memory_cards = memory_card::load_memory_cards(&root)?;
+    let mut source_counts = BTreeMap::new();
+    for skill in &index.skills {
+        *source_counts.entry(skill.source_kind.clone()).or_insert(0) += 1;
+    }
 
     let skills = index
         .skills
         .into_iter()
         .map(|skill| {
-            let linked_ids = project
+            let supplement_decl = project
                 .skills
                 .supplements
                 .iter()
-                .find(|supplement| supplement.skill == skill.id)
+                .find(|supplement| supplement.skill == skill.id);
+            let linked_ids = supplement_decl
                 .map(|supplement| supplement.memory_cards.iter().cloned().collect::<BTreeSet<_>>())
                 .unwrap_or_default();
             let mirror_targets = project
@@ -435,7 +448,19 @@ pub fn load_project_skill_library(project_root: &Path) -> anyhow::Result<Project
             let linked_memory_cards = memory_cards
                 .iter()
                 .filter(|record| linked_ids.contains(&record.id))
-                .cloned()
+                .map(|record| {
+                    let mut linked = record.clone();
+                    if let Some(entry) = supplement_decl.and_then(|decl| {
+                        decl.entries
+                            .iter()
+                            .find(|entry| entry.memory_card == record.id)
+                    }) {
+                        linked.title = entry.title.clone();
+                        linked.body = entry.body.clone();
+                        linked.brief = format!("Skill supplement ({})：{}", entry.mode, entry.body);
+                    }
+                    linked
+                })
                 .collect::<Vec<_>>();
             let recommended_memory_cards = memory_cards
                 .iter()
@@ -461,8 +486,122 @@ pub fn load_project_skill_library(project_root: &Path) -> anyhow::Result<Project
 
     Ok(ProjectSkillLibrary {
         project_path: fsutil::path_to_slash(&root),
+        generated_at: index.generated_at,
+        source_counts,
         skills,
     })
+}
+
+fn attach_memory_card_to_skill_with_fusion(
+    project_root: &Path,
+    memory_card_id: &str,
+    skill_id: &str,
+) -> anyhow::Result<()> {
+    let index = config::load_skill_index(project_root)?;
+    let skill = index
+        .skills
+        .iter()
+        .find(|skill| skill.id == skill_id)
+        .ok_or_else(|| anyhow::anyhow!("skill `{skill_id}` was not found in skill index"))?;
+    let memory_card = memory_card::load_memory_cards(project_root)?
+        .into_iter()
+        .find(|record| record.id == memory_card_id)
+        .ok_or_else(|| anyhow::anyhow!("memory_card `{memory_card_id}` does not exist"))?;
+
+    let body = fuse_memory_card_for_skill_with_provider(project_root, skill, &memory_card)
+        .unwrap_or_else(|| fuse_memory_card_for_skill_deterministic(skill, &memory_card));
+    let entry = config::SkillSupplementEntry {
+        memory_card: memory_card_id.to_string(),
+        title: format!("{} · Skill supplement", memory_card.title),
+        body,
+        mode: "auto-fused".to_string(),
+        updated_at: Utc::now().to_rfc3339(),
+    };
+    config::add_skill_supplement_entry(project_root, skill_id, entry)
+}
+
+#[derive(serde::Deserialize)]
+struct SkillFusionResponse {
+    body: String,
+}
+
+fn fuse_memory_card_for_skill_with_provider(
+    project_root: &Path,
+    skill: &config::SkillRecord,
+    memory_card: &memory_card::MemoryCardRecord,
+) -> Option<String> {
+    let cfg = provider::load_or_default_provider_config(project_root).ok()?;
+    let request = provider::ProviderRequest {
+        system_prompt: r#"你是 Agent Skill supplement 编辑器。
+
+目标：把一条 Memory Card 转写成当前 Skill 的补充说明，而不是简单拼接。
+
+规则：
+- 输出必须能直接写入 AGENT_KERNEL_MEMORY_CARDS.md。
+- 用 When / Do / Boundary 或中文等价结构组织。
+- 保留 Memory Card 的真实意图，但只写与该 Skill 使用场景相关的部分。
+- 不要编造工具、路径、API 或用户没有确认的规则。
+- 如果原 Memory Card 与 Skill 无关，写成“仅在相关任务中参考”的弱补充边界。
+- 只返回 JSON。"#
+            .to_string(),
+        user_prompt: serde_json::json!({
+            "skill": {
+                "id": skill.id,
+                "name": skill.name,
+                "description": skill.description,
+                "source_kind": skill.source_kind,
+            },
+            "memory_card": {
+                "id": memory_card.id,
+                "title": memory_card.title,
+                "kind": memory_card.kind,
+                "scope": memory_card.scope,
+                "body": memory_card.body,
+                "brief": memory_card.brief,
+                "tags": memory_card.tags,
+            }
+        })
+        .to_string(),
+        json_schema: Some(provider::ProviderJsonSchema {
+            name: "SkillSupplementFusion".to_string(),
+            strict: true,
+            schema: serde_json::json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "body": { "type": "string" }
+                },
+                "required": ["body"]
+            }),
+        }),
+    };
+    let output = provider::call_provider_for_role(
+        &cfg,
+        provider::ProviderRole::Refine,
+        &request,
+        2048,
+    )
+    .ok()?;
+    let parsed: SkillFusionResponse = serde_json::from_str(output.trim()).ok()?;
+    let body = parsed.body.trim().to_string();
+    (body.chars().count() >= 24 && body.chars().count() <= 1200).then_some(body)
+}
+
+fn fuse_memory_card_for_skill_deterministic(
+    skill: &config::SkillRecord,
+    memory_card: &memory_card::MemoryCardRecord,
+) -> String {
+    if memory_card.language == "zh" {
+        format!(
+            "When / 触发：使用 `{}` 处理与 `{}` 相关的任务时。\n\nDo / 动作：参考 Memory Card「{}」：{}\n\nBoundary / 边界：仅在该规则与当前 Skill 的职责相符时应用；若证据不足，先保留人工审阅边界。",
+            skill.name, memory_card.kind, memory_card.title, memory_card.body
+        )
+    } else {
+        format!(
+            "When: Use `{}` for work related to `{}`.\n\nDo: Apply Memory Card \"{}\": {}\n\nBoundary: Apply only when it fits this Skill's responsibility; keep human review when evidence is weak.",
+            skill.name, memory_card.kind, memory_card.title, memory_card.body
+        )
+    }
 }
 
 fn memory_card_recommends_for_skill(record: &memory_card::MemoryCardRecord) -> bool {

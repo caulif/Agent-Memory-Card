@@ -232,7 +232,7 @@ use super::*;
         )
         .expect("skill index");
 
-        attach_memory_card_to_skill(temp.path(), "project:use-axios", "skill:frontend")
+        attach_memory_card_to_skill(temp.path(), "project:use-axios", "skill:frontend", None)
             .expect("attach memory_card");
 
         let config = config::load_or_default_project_config(temp.path()).expect("config");
@@ -271,7 +271,7 @@ use super::*;
             vec!["codex".to_string()],
         )
         .expect("workflow card");
-        attach_memory_card_to_skill(temp.path(), "project:use-axios", "skill:frontend")
+        attach_memory_card_to_skill(temp.path(), "project:use-axios", "skill:frontend", None)
             .expect("attach memory_card");
 
         let library = load_project_skill_library(temp.path()).expect("skill library");
@@ -293,6 +293,52 @@ use super::*;
                 .iter()
                 .any(|card| card.id == "project:use-axios")
         );
+    }
+
+    #[test]
+    fn auto_fused_skill_attachment_exposes_supplement_body() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        config::save_skill_index(
+            temp.path(),
+            &config::SkillIndex {
+                generated_at: "test".to_string(),
+                skills: vec![config::SkillRecord {
+                    id: "skill:frontend".to_string(),
+                    name: "Frontend".to_string(),
+                    description: "Use when improving React frontend workflows".to_string(),
+                    source_path: ".agents/skills/frontend".to_string(),
+                    source_kind: "project".to_string(),
+                    source_hash: "hash".to_string(),
+                    warnings: Vec::new(),
+                }],
+            },
+        )
+        .expect("skill index");
+        memory_card::add_memory_card(
+            temp.path(),
+            "project:frontend-workflow",
+            "Frontend Workflow",
+            "When changing frontend workflows, run focused UI tests before syncing generated agent artifacts.",
+            "procedure",
+            "project",
+            vec!["codex".to_string()],
+        )
+        .expect("workflow card");
+
+        attach_memory_card_to_skill(
+            temp.path(),
+            "project:frontend-workflow",
+            "skill:frontend",
+            Some("auto"),
+        )
+        .expect("auto attach memory_card");
+
+        let config = config::load_or_default_project_config(temp.path()).expect("config");
+        assert_eq!(config.skills.supplements[0].entries[0].mode, "auto-fused");
+        let library = load_project_skill_library(temp.path()).expect("skill library");
+        let linked = &library.skills[0].linked_memory_cards[0];
+        assert!(linked.body.contains("When") || linked.body.contains("触发"));
+        assert!(linked.body.contains("Frontend"));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import {
+  getCustomProviderConfig,
   planKernelCommand,
   scanProjectsJob,
   updateDraft,
@@ -205,6 +206,21 @@ function App() {
     if (!selectedProject) return;
     void loadReadModelsForPage(selectedProject, page);
   }, [page, selectedProject, previewMode, loadReadModelsForPage]);
+
+  React.useEffect(() => {
+    if (!selectedProject || previewMode) return;
+    let cancelled = false;
+    void getCustomProviderConfig(selectedProject)
+      .then((config) => {
+        if (!cancelled && config.enabled) setSynthesisEngine("llm");
+      })
+      .catch(() => {
+        if (!cancelled) setSynthesisEngine("claude-code");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [previewMode, selectedProject]);
 
   const projects = state?.registry.projects ?? [];
   const activeProject = projects.find((project) => project.path === selectedProject);
@@ -455,6 +471,8 @@ function App() {
                       onAction={projectAction}
                       previewMode={previewMode}
                       projectPath={selectedProject}
+                      synthesisEngine={synthesisEngine}
+                      onSynthesisEngineChange={setSynthesisEngine}
                       onRefresh={() => {
                         void loadReadModelsForPage(selectedProject, "drafts");
                       }}

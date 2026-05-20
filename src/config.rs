@@ -83,6 +83,17 @@ pub struct MirrorDecl {
 pub struct SkillSupplementDecl {
     pub skill: String,
     pub memory_cards: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entries: Vec<SkillSupplementEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillSupplementEntry {
+    pub memory_card: String,
+    pub title: String,
+    pub body: String,
+    pub mode: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -348,6 +359,57 @@ pub fn add_skill_supplement(
         config.skills.supplements.push(SkillSupplementDecl {
             skill: skill_id.to_string(),
             memory_cards: vec![memory_card_id.to_string()],
+            entries: Vec::new(),
+        });
+    }
+    save_project_config(&root, &config)
+}
+
+pub fn add_skill_supplement_entry(
+    project_root: &Path,
+    skill_id: &str,
+    entry: SkillSupplementEntry,
+) -> Result<()> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    let index = load_skill_index(&root)?;
+    if !index.skills.iter().any(|skill| skill.id == skill_id) {
+        return Err(anyhow!(
+            "skill `{skill_id}` was not found in .agent-kernel/skill-index.yml"
+        ));
+    }
+
+    let memory_card_id = entry.memory_card.clone();
+    let memory_card_exists = crate::memory_card::load_memory_cards(&root)?
+        .iter()
+        .any(|record| record.id == memory_card_id);
+    if !memory_card_exists {
+        return Err(anyhow!("memory_card `{memory_card_id}` does not exist"));
+    }
+
+    let mut config = load_or_default_project_config(&root)?;
+    if let Some(existing) = config
+        .skills
+        .supplements
+        .iter_mut()
+        .find(|item| item.skill == skill_id)
+    {
+        if !existing
+            .memory_cards
+            .iter()
+            .any(|item| item == &memory_card_id)
+        {
+            existing.memory_cards.push(memory_card_id.clone());
+            existing.memory_cards.sort();
+        }
+        existing
+            .entries
+            .retain(|item| item.memory_card != memory_card_id);
+        existing.entries.push(entry);
+    } else {
+        config.skills.supplements.push(SkillSupplementDecl {
+            skill: skill_id.to_string(),
+            memory_cards: vec![memory_card_id],
+            entries: vec![entry],
         });
     }
     save_project_config(&root, &config)

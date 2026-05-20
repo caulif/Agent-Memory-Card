@@ -15,6 +15,15 @@ import {
   type PanelPageProps,
 } from "../../ui-helpers";
 
+type SynthesisEngine = "claude-code" | "codex" | "local" | "llm";
+
+const ENGINE_OPTIONS: Array<{ value: SynthesisEngine; label: string; hint: string }> = [
+  { value: "llm", label: "LLM Provider", hint: "使用 Settings 中的 Provider 做抽取、审核与最终转写" },
+  { value: "claude-code", label: "Claude Code", hint: "调用本地 Claude Code CLI；失败时后端会回退" },
+  { value: "codex", label: "Codex", hint: "调用本地 Codex CLI 做候选整理" },
+  { value: "local", label: "Local", hint: "只用本地规则，速度快但不会做 LLM 转写" },
+];
+
 export function Drafts({
   snapshot,
   candidates,
@@ -26,6 +35,8 @@ export function Drafts({
   onAction,
   previewMode,
   projectPath,
+  synthesisEngine,
+  onSynthesisEngineChange,
   onRefresh,
 }: PanelPageProps & {
   candidates: ProjectCandidateInbox | null;
@@ -34,6 +45,8 @@ export function Drafts({
   library: ProjectMemoryCardLibrary | null;
   previewMode: boolean;
   projectPath: string;
+  synthesisEngine: SynthesisEngine;
+  onSynthesisEngineChange: (engine: SynthesisEngine) => void;
   onRefresh: () => void;
 }) {
   const allCandidates = React.useMemo(() => sortCandidatesForInbox(candidates?.candidates ?? []), [candidates]);
@@ -55,6 +68,17 @@ export function Drafts({
       {/* ===== 顶部极简指示行 ===== */}
       <Panel title="Suggestion Review" subtitle="审阅系统近期会话提炼出的建议规则，确认匹配真实历史证据后，一键吸纳转正。">
         <div className="engine-command-row">
+          <label className="engine-picker" title={ENGINE_OPTIONS.find((item) => item.value === synthesisEngine)?.hint}>
+            <span>提炼引擎</span>
+            <select
+              value={synthesisEngine}
+              onChange={(event) => onSynthesisEngineChange(event.target.value as SynthesisEngine)}
+            >
+              {ENGINE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
           <ActionButton
             className="hero-button"
             icon={RefreshCw}
@@ -66,7 +90,7 @@ export function Drafts({
               onAction("整理历史", "已开始整理分析建议", "evolve_project", {
                 targets: ["codex", "claude-code"],
                 dryRun: false,
-                engine: "claude-code",
+                engine: synthesisEngine,
               })
             }
           />
@@ -247,6 +271,7 @@ function CandidateDetail({
             <p style={{ margin: 0, fontSize: "12.5px", color: "var(--color-warning-text)", background: "var(--color-warning-bg)", padding: "8px 10px", borderRadius: "var(--radius-sm)", border: "1px solid rgba(212, 162, 59, 0.15)" }}>
               <strong>合并建议：</strong>已存在相近 Memory Card 标识 (<code>{candidate.extraction.suggested_action.target_record || candidate.extraction.suggested_action.record_id}</code>)
               {candidate.extraction.suggested_action.similarity != null && `，相似度约为 ${Math.round(candidate.extraction.suggested_action.similarity * 100)}%`}
+              。批准后会更新既有卡片，不会新增重复项。
             </p>
           )}
         </div>

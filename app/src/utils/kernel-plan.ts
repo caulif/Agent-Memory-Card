@@ -67,6 +67,10 @@ export function buildKernelPlanForInvoke(commandName: string, args: Record<strin
   if (commandName === "save_custom_provider_config") {
     return { command: { type: "configure-provider" }, payload: { input: args.input ?? {} } };
   }
+  if (commandName === "import_project") {
+    const scanHome = Boolean(args.scanHome);
+    return { command: { type: "import-project", scan_home: scanHome }, payload: { scan_home: scanHome } };
+  }
   if (commandName === "set_memory_card_targets") {
     return {
       command: { type: "assign-memory-card", id: args.id, targets: args.targets ?? [] },
@@ -112,7 +116,7 @@ export function buildKernelPlanForInvoke(commandName: string, args: Record<strin
   if (commandName === "attach_memory_card_to_skill") {
     return {
       command: { type: "attach-memory-card-to-skill", memory_card_id: args.memoryCardId, skill_id: args.skillId },
-      payload: { memory_card_id: args.memoryCardId, skill_id: args.skillId },
+      payload: { memory_card_id: args.memoryCardId, skill_id: args.skillId, fusion_mode: args.fusionMode ?? null },
     };
   }
   if (commandName === "fuse_memory_cards_to_draft") {

@@ -116,6 +116,7 @@ describe("kernel mutation planning", () => {
       payload: {
         memory_card_id: "project:frontend-workflow",
         skill_id: "project:obsidian-markdown",
+        fusion_mode: null,
       },
     });
 

@@ -491,6 +491,47 @@ pub fn approve_candidate_to_memory_card(project_root: &Path, id: &str) -> Result
             candidate.status
         ));
     }
+    if let Some(target_id) = candidate
+        .extraction
+        .suggested_action
+        .as_ref()
+        .filter(|action| action.action == "merge_into_existing")
+        .and_then(|action| {
+            action
+                .target_record
+                .clone()
+                .or_else(|| action.record_id.clone())
+        })
+    {
+        if let Some(existing_memory_card) = memory_card::load_memory_cards(&root)?
+            .into_iter()
+            .find(|memory_card| memory_card.id == target_id)
+        {
+            let updated = memory_card::update_memory_card_from_review(
+                &root,
+                &target_id,
+                existing_memory_card.title.clone(),
+                candidate.body.clone(),
+                candidate.brief.clone(),
+                candidate.tags.clone(),
+                candidate.language.clone(),
+                approvable_kind.clone(),
+                existing_memory_card.scope.clone(),
+            )?;
+            candidate.status = CandidateStatus::Promoted;
+            candidate.updated_at = Utc::now().to_rfc3339();
+            save_candidate(&root, &candidate)?;
+            feedback::record_feedback(
+                &root,
+                "candidate",
+                &candidate.id,
+                "approved-existing-memory_card-merge",
+                &candidate.body,
+                None,
+            )?;
+            return Ok(updated);
+        }
+    }
     // 检查同名 memory_card 是否已存在；若是同一概念的更新，则吸收到现有 MemoryCard。
     if let Some(existing_memory_card) = memory_card::load_memory_cards(&root)?
         .into_iter()

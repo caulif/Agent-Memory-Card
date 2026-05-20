@@ -536,7 +536,17 @@ fn write_skill_supplement(
     );
     for memory_card_id in &decl.memory_cards {
         if let Some(record) = memory_cards.get(memory_card_id) {
-            out.push_str(&format!("## {}\n\n{}\n\n", record.title, record.body));
+            let generated = decl
+                .entries
+                .iter()
+                .find(|entry| entry.memory_card == *memory_card_id);
+            let title = generated
+                .map(|entry| entry.title.as_str())
+                .unwrap_or(record.title.as_str());
+            let body = generated
+                .map(|entry| entry.body.as_str())
+                .unwrap_or(record.body.as_str());
+            out.push_str(&format!("## {}\n\n{}\n\n", title, body));
         }
     }
 
