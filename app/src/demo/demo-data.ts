@@ -260,29 +260,70 @@ export function createDemoProjectCandidateInbox(projectPath: string): ProjectCan
       reason: draft.reason ?? "演示候选来自本地高价值过滤。",
       matched_template: draft.matched_template,
       source_observations: [`demo-observation-${index + 1}`],
-      extraction: draft.extraction ?? {
-        card_function: index === 0 ? "skill_targeted" : "library",
-        value_claim: index === 0
-          ? "补强目标 Skill 的预览验收边界，避免用户只能看到静态卡片却不知道是否可用。"
-          : "让预览模式中的安全动作保持清晰边界。",
-        value_delta: {
-          existing_behavior: index === 0 ? "现有预览流程能加载静态数据。" : "现有演示模式会拦截写操作。",
-          missing_part: index === 0 ? "缺少一眼可见的验收标准和未来行为改进。" : "缺少对用户动作反馈边界的明确说明。",
-          new_behavior: index === 0 ? "审阅时展示 Value Delta，先判断卡片是否真的改善 Skill 或工作流。" : "用户点击危险动作时只看到安全反馈，不误以为真实写入已发生。",
-          why_not_duplicate: "该候选必须说明新增价值；若已被已有 Memory Card 覆盖，应合并或忽略。",
-        },
-        target_context: {
-          target_type: index === 0 ? "project_skill" : "workflow",
-          target_id: index === 0 ? "project:obsidian-markdown" : null,
-          why_this_target: index === 0 ? "这是一个 Skill-targeted Memory Card 示例。" : "这是一个普通工作流 Memory Card 示例。",
-        },
-        synthesis_trace: [
-          { step: "filter", summary: "Demo candidate kept for review." },
-          { step: "value_delta", summary: "Demo metadata shows the value-directed synthesis contract." },
-        ],
-      },
+      extraction: createDemoCandidateSynthesis(draft.extraction, index),
       status: "candidate",
     })),
+  };
+}
+
+function createDemoCandidateSynthesis(base: ProjectSnapshot["drafts"][number]["extraction"], index: number) {
+  if (index === 1) {
+    return {
+      ...(base ?? {}),
+      card_function: "library",
+      synthesis_action: "already_covered",
+      synthesis_stop_reason: "already_covered",
+      value_claim: "这条安全边界已由既有 Memory Card 覆盖，正确动作是归档候选而不是新增重复卡。",
+      value_delta: {
+        existing_behavior: "既有 Memory Card「本地安全动作」已说明预览模式不访问真实文件系统。",
+        missing_part: "未发现新的触发、动作或边界，只是重复同一安全约束。",
+        new_behavior: "审阅时选择 No New Card，保持规则库和 Skill 上下文精简。",
+        why_not_duplicate: "重复卡会让 agent 在相同安全边界上读取两份相似说明，降低上下文清晰度。",
+      },
+      target_context: {
+        target_type: "memory_card",
+        target_id: "safe-actions",
+        why_this_target: "该既有 Memory Card 已充分覆盖演示模式写操作边界。",
+      },
+      suggested_action: {
+        action: "already_covered",
+        route: "memory_card",
+        target_record: "safe-actions",
+        record_id: "safe-actions",
+        similarity: 0.94,
+        reason: "既有 Memory Card 已覆盖同一行为边界。",
+        rationale: "No Card Is A Success: 保持规则库精简。",
+      },
+      synthesis_trace: [
+        { step: "search_memory_cards", summary: "Found existing Memory Card safe-actions." },
+        { step: "find_memory_duplicates", summary: "Classified the candidate as already covered." },
+        { step: "stop", summary: "Stopped with already_covered after producing no-new-card decision." },
+      ],
+    };
+  }
+  return {
+    ...(base ?? {}),
+    card_function: "skill_targeted",
+    synthesis_action: "skill_targeted_card",
+    synthesis_stop_reason: "skill_gap_found",
+    value_claim: "补强目标 Skill 的预览验收边界，避免用户只能看到静态卡片却不知道是否可用。",
+    value_delta: {
+      existing_behavior: "现有预览流程能加载静态数据。",
+      missing_part: "缺少一眼可见的验收标准和未来行为改进。",
+      new_behavior: "审阅时展示 Value Delta，先判断卡片是否真的改善 Skill 或工作流。",
+      why_not_duplicate: "它补上 Skill 的验收边界，不是重复描述预览模式。",
+    },
+    target_context: {
+      target_type: "project_skill",
+      target_id: "project:obsidian-markdown",
+      why_this_target: "这是一个 Skill-targeted Memory Card 示例，展示如何把提炼结果转成可挂载的 Skill 上下文。",
+    },
+    synthesis_trace: [
+      { step: "search_observations", summary: "Read demo review evidence." },
+      { step: "search_skills", summary: "Matched a project-level Skill target." },
+      { step: "compare_with_skill", summary: "Found a concrete Skill gap." },
+      { step: "stop", summary: "Stopped with skill_gap_found after producing a targeted card." },
+    ],
   };
 }
 

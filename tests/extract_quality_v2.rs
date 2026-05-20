@@ -91,6 +91,8 @@ fn llm_provider_filters_and_rewrites_candidate_into_memory_card_shape() {
 import json
 import sys
 
+sys.stdout.reconfigure(encoding="utf-8")
+
 prompt = sys.stdin.read()
 if "最终质检与改写器" in prompt:
     output = {"items":[{"index":0,"decision":"keep","title":"保留人工审阅边界","body":"当候选来自 assistant synthesis 时，先确认它有用户明确接受或真实历史证据；目标是避免 AI 自己的建议绕过人工审阅边界。","kind":"procedure","memory_tier":"collaboration_preference","confidence":0.94,"reason":"Rewritten into trigger-action-boundary memory."}]}

@@ -522,18 +522,13 @@ function matureCandidatePreview(candidate: CandidateRecord) {
   const body = looksStructuredCandidateBody(candidate.body)
     ? candidate.body.trim()
     : renderCandidatePreviewBody(candidate, language);
-  const actionLine = body
-    .split("\n")
-    .find((line) => line.includes("动作") || line.toLowerCase().startsWith("do:"))
-    ?.replace("动作：", "")
-    .replace("Do:", "")
-    .trim();
+  const actionLine = extractActionLine(body);
   return {
     title,
     body,
     brief: language === "zh"
-      ? `用于把“${title}”转成可执行、可审阅的长期规则。${actionLine ? `重点：${actionLine}` : ""}`
-      : `Use this as an executable, reviewable long-term rule for ${title}.`,
+      ? `长期规则：${actionLine || title}`
+      : `Long-term rule: ${actionLine || title}`,
   };
 }
 
@@ -545,16 +540,35 @@ function renderCandidatePreviewBody(candidate: CandidateRecord, language: "zh" |
   const action = rest || source;
   if (language === "zh") {
     return [
-      `触发：${ensureZhWhen(trigger || candidate.title)}`,
-      `动作：${stripSentenceEnd(action)}`,
-      "边界：仅在该建议与真实历史证据一致、且适合成为长期项目规则时吸收入库；一次性任务应忽略。",
+      `目标：让“${cleanCandidateTitle(candidate.title, candidate.body)}”成为可复用、可审阅、可挂载的 Memory Card。`,
+      `适用场景：${ensureZhWhen(trigger || candidate.title)}`,
+      `执行方式：${stripSentenceEnd(action)}`,
+      "边界：仅在真实历史证据支持、且能长期改善项目工作流或 Skill 行为时吸收入库；一次性任务、重复内容和临时偏好应忽略。",
+      "验收：批准后应能独立说明触发条件、执行动作、适用边界和相对既有 Memory Card 的新增价值。",
     ].join("\n\n");
   }
   return [
+    `Purpose: Make "${cleanCandidateTitle(candidate.title, candidate.body)}" a reusable, reviewable, attachable Memory Card.`,
     `When: ${trigger || candidate.title}`,
     `Do: ${stripSentenceEnd(action)}`,
-    "Boundary: Approve only when the evidence supports a durable project rule; ignore one-off task chatter.",
+    "Boundary: Approve only when evidence supports a durable improvement to project workflow or Skill behavior; ignore one-off task chatter, duplicates, and temporary preferences.",
+    "Acceptance: The approved card should state its trigger, action, boundary, and incremental value over existing Memory Cards.",
   ].join("\n\n");
+}
+
+function extractActionLine(body: string) {
+  const actionLine = body
+    .split("\n")
+    .find((line) =>
+      line.includes("执行方式")
+      || line.includes("动作")
+      || line.toLowerCase().startsWith("do:")
+    );
+  return actionLine
+    ?.replace("执行方式：", "")
+    .replace("动作：", "")
+    .replace("Do:", "")
+    .trim();
 }
 
 function ensureZhWhen(value: string) {
@@ -590,5 +604,6 @@ function inferCandidateLanguage(candidate: CandidateRecord): "zh" | "en" {
 function looksStructuredCandidateBody(body: string) {
   const lower = body.toLowerCase();
   return (lower.includes("when") && lower.includes("do") && lower.includes("boundary"))
-    || (body.includes("触发") && body.includes("动作") && body.includes("边界"));
+    || (body.includes("触发") && body.includes("动作") && body.includes("边界"))
+    || (body.includes("目标") && body.includes("适用场景") && body.includes("执行方式") && body.includes("边界"));
 }

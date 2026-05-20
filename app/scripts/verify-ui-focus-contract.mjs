@@ -106,6 +106,54 @@ for (const [filePath, bannedTerms] of Object.entries(pages)) {
   }
 }
 
+// 1b. 浏览器演示数据必须展示核心产品判断，不能退回空 Inbox。
+const demoPath = path.resolve(__dirname, '../src/demo/demo-data.ts');
+if (!fs.existsSync(demoPath)) {
+  console.error(`Error: demo-data.ts does not exist at ${demoPath}`);
+  hasFailure = true;
+} else {
+  const demoContent = fs.readFileSync(demoPath, 'utf8');
+  const demoRequiredTerms = [
+    'skill_targeted_card',
+    'already_covered',
+    'No Card Is A Success',
+    'value_delta',
+    'synthesis_trace'
+  ];
+  const missingDemoTerms = demoRequiredTerms.filter(term => !demoContent.includes(term));
+  if (missingDemoTerms.length > 0) {
+    console.log('[FAIL] demo-data.ts: Browser preview must show synthesis decisions, not an empty inbox.');
+    console.log(`       Missing required terms: ${missingDemoTerms.map(t => `'${t}'`).join(', ')}\n`);
+    hasFailure = true;
+  } else {
+    console.log('[PASS] demo-data.ts: Preview data demonstrates synthesis value decisions.\n');
+  }
+}
+
+// 1c. Review Inbox 的兜底候选预览必须像成熟 Memory Card，不能显示内部加工口吻。
+const draftsPath = path.resolve(__dirname, '../src/components/pages/Drafts.tsx');
+if (!fs.existsSync(draftsPath)) {
+  console.error(`Error: Drafts.tsx does not exist at ${draftsPath}`);
+  hasFailure = true;
+} else {
+  const draftsContent = fs.readFileSync(draftsPath, 'utf8');
+  const requiredMemoryCardShape = ['目标：', '适用场景：', '执行方式：', '验收：'];
+  const missingShapeTerms = requiredMemoryCardShape.filter(term => !draftsContent.includes(term));
+  if (missingShapeTerms.length > 0 || draftsContent.includes('用于把')) {
+    console.log('[FAIL] Drafts.tsx: Candidate preview must render a mature Memory Card shape.');
+    if (missingShapeTerms.length > 0) {
+      console.log(`       Missing required shape terms: ${missingShapeTerms.map(t => `'${t}'`).join(', ')}`);
+    }
+    if (draftsContent.includes('用于把')) {
+      console.log("       Found banned internal wording: '用于把'");
+    }
+    console.log('');
+    hasFailure = true;
+  } else {
+    console.log('[PASS] Drafts.tsx: Candidate fallback preview uses mature Memory Card wording.\n');
+  }
+}
+
 // 2. 审核主入口 main.tsx 的专注页解耦、杂繁包裹剔除及传参收紧情况
 const mainPath = path.resolve(__dirname, '../src/main.tsx');
 if (!fs.existsSync(mainPath)) {
