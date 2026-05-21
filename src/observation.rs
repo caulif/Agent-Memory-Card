@@ -1,6 +1,4 @@
 use std::fs;
-#[cfg(test)]
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -17,29 +15,31 @@ use crate::provider;
 use crate::textutil;
 
 mod agent_engine_impl;
-mod chunked;
+pub(crate) mod chunked;
 mod conversation;
+pub(crate) mod failure_flow;
+mod flow;
 mod incremental;
 mod replay;
 mod report_render;
 mod sessions_index;
 
 use agent_engine_impl::{
-    default_candidate_kind, default_candidate_scope, is_usable_agent_candidate,
-    normalize_candidate_kind, normalize_candidate_scope, parse_agent_candidates, run_agent_engine,
+    agent_synthesis_prompt, default_candidate_kind, default_candidate_scope,
+    is_usable_agent_candidate, normalize_candidate_kind, normalize_candidate_scope,
+    parse_agent_candidates, run_agent_engine,
 };
 use conversation::{
     collect_jsonl, collect_single_jsonl, conversation_belongs_to_project,
     normalize_observation_body,
 };
-#[cfg(test)]
-use incremental::{ObservationIndex, ObservationSourceState, metadata_modified_unix_ms};
 use incremental::{
     load_observation_index, read_incremental_conversation_text, save_observation_index,
 };
 pub use replay::{ObservationReplayReport, replay_local_conversations};
 
 const DAILY_CANDIDATE_LIMIT: usize = 8;
+const REPLAY_CANDIDATE_LIMIT: usize = 16;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ObservationRecord {
@@ -70,6 +70,18 @@ pub struct AutoEvolveReport {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct CandidatePreviewText {
+    pub id: String,
+    pub title: String,
+    pub body: String,
+    pub scope: String,
+    pub kind: String,
+    pub memory_tier: String,
+    pub confidence: Option<f32>,
+    pub matched_template: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ObservationSynthesisReport {
     pub engine: String,
     pub created: usize,
@@ -77,6 +89,7 @@ pub struct ObservationSynthesisReport {
     pub candidates: usize,
     pub drafts: Vec<String>,
     pub candidate_drafts: Vec<String>,
+    pub candidate_previews: Vec<CandidatePreviewText>,
     pub dry_run: bool,
 }
 
@@ -90,6 +103,7 @@ pub struct ObservationEvolveReport {
     pub synthesis_skipped: usize,
     pub drafts: Vec<String>,
     pub candidate_drafts: Vec<String>,
+    pub candidate_previews: Vec<CandidatePreviewText>,
     pub dry_run: bool,
 }
 
@@ -119,6 +133,12 @@ struct AgentMemoryCardCandidate {
     confidence: Option<f32>,
     #[serde(default)]
     reason: Option<String>,
+    /// LLM 必须从原文短句中复制的证据（用于回填 evidence_span.quote）。
+    #[serde(default)]
+    evidence_quote: Option<String>,
+    /// LLM 从 material 标头 `obs:<id>` 中选出的真实引用过的 observation IDs。
+    #[serde(default)]
+    source_observation_ids: Vec<String>,
 }
 
 pub fn import_observation_file(
@@ -294,6 +314,37 @@ pub fn synthesize_observations_to_drafts_with_engine(
     dry_run: bool,
     engine: &str,
 ) -> Result<ObservationSynthesisReport> {
+    synthesize_observations_to_drafts_with_engine_and_limit(
+        project_root,
+        targets,
+        dry_run,
+        engine,
+        DAILY_CANDIDATE_LIMIT,
+    )
+}
+
+pub(crate) fn synthesize_observations_to_drafts_for_replay(
+    project_root: &Path,
+    targets: Vec<String>,
+    dry_run: bool,
+    engine: &str,
+) -> Result<ObservationSynthesisReport> {
+    synthesize_observations_to_drafts_with_engine_and_limit(
+        project_root,
+        targets,
+        dry_run,
+        engine,
+        REPLAY_CANDIDATE_LIMIT,
+    )
+}
+
+fn synthesize_observations_to_drafts_with_engine_and_limit(
+    project_root: &Path,
+    targets: Vec<String>,
+    dry_run: bool,
+    engine: &str,
+    candidate_limit: usize,
+) -> Result<ObservationSynthesisReport> {
     let observations = load_observations(project_root)?;
     let mut report = ObservationSynthesisReport {
         engine: engine.to_string(),
@@ -302,6 +353,7 @@ pub fn synthesize_observations_to_drafts_with_engine(
         candidates: 0,
         drafts: Vec::new(),
         candidate_drafts: Vec::new(),
+        candidate_previews: Vec::new(),
         dry_run,
     };
 
@@ -316,14 +368,14 @@ pub fn synthesize_observations_to_drafts_with_engine(
             &observations,
             targets.clone(),
             &source,
-            DAILY_CANDIDATE_LIMIT,
+            candidate_limit,
         )?,
         "llm" => chunked::extract_llm_chunks_to_report(
             project_root,
             &observations,
             targets.clone(),
             &source,
-            DAILY_CANDIDATE_LIMIT,
+            candidate_limit,
         )?,
         "claude-code" | "codex" => {
             let (prefiltered, filtered_material) = prefilter_agent_synthesis_material(
@@ -339,6 +391,7 @@ pub fn synthesize_observations_to_drafts_with_engine(
             match synthesize_with_agent_engine(
                 project_root,
                 &filtered_material,
+                &observations,
                 targets.clone(),
                 &source,
                 dry_run,
@@ -357,7 +410,7 @@ pub fn synthesize_observations_to_drafts_with_engine(
                         &observations,
                         targets.clone(),
                         &source,
-                        DAILY_CANDIDATE_LIMIT,
+                        candidate_limit,
                     )?
                 }
                 Err(error) => {
@@ -367,7 +420,7 @@ pub fn synthesize_observations_to_drafts_with_engine(
                         &observations,
                         targets.clone(),
                         &source,
-                        DAILY_CANDIDATE_LIMIT,
+                        candidate_limit,
                     )?
                 }
             }
@@ -377,7 +430,7 @@ pub fn synthesize_observations_to_drafts_with_engine(
             &observations,
             targets.clone(),
             &source,
-            DAILY_CANDIDATE_LIMIT,
+            candidate_limit,
         )?,
     };
     let synthesized_candidates = extracted
@@ -424,6 +477,18 @@ pub fn synthesize_observations_to_drafts_with_engine(
                 value_scores: Default::default(),
                 abstraction_of: candidate.abstraction_of.clone(),
                 abstracted_from: candidate.abstracted_from.clone(),
+                pipeline_version: None,
+                layer_trace: Vec::new(),
+                rejected_at: None,
+                evidence_bundle: None,
+                card_function: None,
+                value_claim: None,
+                value_delta: None,
+                target_context: None,
+                skill_usefulness: None,
+                synthesis_trace: Vec::new(),
+                synthesis_action: None,
+                synthesis_stop_reason: None,
             };
             let result = candidate::add_candidate(
                 project_root,
@@ -460,6 +525,23 @@ pub fn synthesize_observations_to_drafts_with_engine(
             .iter()
             .map(|candidate| candidate.id.clone()),
     );
+    report
+        .candidate_previews
+        .extend(
+            synthesized_candidates
+                .iter()
+                .take(20)
+                .map(|candidate| CandidatePreviewText {
+                    id: candidate.id.clone(),
+                    title: candidate.title.clone(),
+                    body: candidate.body.clone(),
+                    scope: candidate.scope.clone(),
+                    kind: candidate.kind.clone(),
+                    memory_tier: candidate.memory_tier.as_str().to_string(),
+                    confidence: candidate.confidence,
+                    matched_template: candidate.matched_template.clone(),
+                }),
+        );
     report.skipped += skipped_count;
     report.candidates += candidate_count;
     if created_count == 0 && candidate_count == 0 {
@@ -507,7 +589,7 @@ fn prefilter_agent_synthesis_material(
     targets: Vec<String>,
     source: &str,
 ) -> Result<(extract::ExtractReport, String)> {
-    let raw_material = chunked::prefiltered_synthesis_material(observations, 24_000);
+    let raw_material = chunked::prefiltered_synthesis_material(observations, 16_000);
     let prefiltered = extract::extract_high_value_text_to_drafts(
         project_root,
         &raw_material,
@@ -517,35 +599,9 @@ fn prefilter_agent_synthesis_material(
         true,
         DAILY_CANDIDATE_LIMIT,
     )?;
-    let filtered_material = candidate_synthesis_material(&prefiltered.candidates, 8_000);
-    Ok((prefiltered, filtered_material))
-}
-
-fn candidate_synthesis_material(
-    candidates: &[extract::ExtractCandidatePreview],
-    max_chars: usize,
-) -> String {
-    let mut out = String::new();
-    for candidate in candidates {
-        if out.len() >= max_chars {
-            break;
-        }
-        out.push_str("\n---\n");
-        out.push_str(&format!(
-            "title: {}\nkind: {}\nscope: {}\nconfidence: {:.0}%\nevidence: {}\nreason: {}\nbody:\n{}\n",
-            candidate.title,
-            candidate.kind,
-            candidate.scope,
-            candidate.confidence.unwrap_or(0.0) * 100.0,
-            candidate.evidence,
-            candidate.reason.as_deref().unwrap_or("local high-value prefilter"),
-            candidate.body
-        ));
-    }
-    if out.len() > max_chars {
-        truncate_utf8_boundary(&mut out, max_chars);
-    }
-    out
+    // 给 codex/claude-code 直接喂带 `obs:<id>` 标头的原始观察材料，
+    // 这样 LLM 才能按 prompt 要求把每条产出回指到 observation id。
+    Ok((prefiltered, raw_material))
 }
 
 fn truncate_utf8_boundary(text: &mut String, max_len: usize) {
@@ -574,6 +630,7 @@ fn agent_report_has_enough_recall(report: &ObservationSynthesisReport, minimum: 
 fn synthesize_with_agent_engine(
     project_root: &Path,
     material: &str,
+    observations: &[ObservationRecord],
     targets: Vec<String>,
     source: &str,
     dry_run: bool,
@@ -581,11 +638,9 @@ fn synthesize_with_agent_engine(
 ) -> Result<ObservationSynthesisReport> {
     let prompt = agent_synthesis_prompt(material);
     let output = run_agent_engine(engine, &prompt, Duration::from_secs(60))?;
-    let mut candidates = filter_agent_candidates_through_local_gate(
-        project_root,
-        parse_agent_candidates(&output)?,
-        source,
-    )?;
+    let parsed = parse_agent_candidates(&output)?;
+    let filtered = filter_agent_candidates_through_local_gate(project_root, parsed, source)?;
+    let mut candidates = filtered;
     candidates.sort_by(|(a, _, _), (b, _, _)| {
         b.confidence
             .unwrap_or(0.0)
@@ -601,6 +656,7 @@ fn synthesize_with_agent_engine(
         candidates: candidates.len(),
         drafts: Vec::new(),
         candidate_drafts: Vec::new(),
+        candidate_previews: Vec::new(),
         dry_run,
     };
 
@@ -609,9 +665,43 @@ fn synthesize_with_agent_engine(
             report.skipped += 1;
             continue;
         }
+        // 硬约束：必须有可信溯源（obs id + evidence_quote）。
+        // LLM 没返回 source_observation_ids 时，用 evidence_quote 在 observations 中反查回填。
+        let evidence_quote = candidate
+            .evidence_quote
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("")
+            .to_string();
+        let source_observation_ids = if !candidate.source_observation_ids.is_empty() {
+            candidate.source_observation_ids.clone()
+        } else if !evidence_quote.is_empty() {
+            backfill_observation_ids_from_quote(&evidence_quote, observations)
+        } else {
+            Vec::new()
+        };
+        if source_observation_ids.is_empty() || evidence_quote.is_empty() {
+            report.skipped += 1;
+            continue;
+        }
         let scope = normalize_candidate_scope(&candidate.scope);
         let id = format!("{}:{}", scope, textutil::slug(&candidate.title));
         report.candidate_drafts.push(id.clone());
+        report.candidate_previews.push(CandidatePreviewText {
+            id: id.clone(),
+            title: candidate.title.clone(),
+            body: candidate.body.clone(),
+            scope: scope.clone(),
+            kind: normalize_candidate_kind(&candidate.kind),
+            memory_tier: if scope == "global" {
+                candidate::MemoryTier::CrossProjectPrinciple.as_str()
+            } else {
+                candidate::MemoryTier::ProjectRule.as_str()
+            }
+            .to_string(),
+            confidence: candidate.confidence,
+            matched_template: Some(format!("agent-synthesis:{engine}")),
+        });
         if dry_run {
             continue;
         }
@@ -622,7 +712,7 @@ fn synthesize_with_agent_engine(
             origin: chunk.origin.as_str().to_string(),
             matched_signal: score.matched_signal.clone(),
             reason: score.reason.clone(),
-            source_observations: Vec::new(),
+            source_observations: source_observation_ids.clone(),
             score_breakdown: score.breakdown.clone(),
             classification: Some(classification.clone()),
             similar_record: routed_action.record_id.clone(),
@@ -630,8 +720,8 @@ fn synthesize_with_agent_engine(
             suggested_action: Some(routed_action),
             evidence_span: Some(candidate::EvidenceSpan {
                 role: chunk.origin.as_str().to_string(),
-                quote: candidate.body.clone(),
-                observation_id: None,
+                quote: evidence_quote.clone(),
+                observation_id: source_observation_ids.first().cloned(),
                 turn_id: None,
                 surrounding_context: Vec::new(),
             }),
@@ -643,6 +733,27 @@ fn synthesize_with_agent_engine(
             value_scores: Default::default(),
             abstraction_of: None,
             abstracted_from: None,
+            pipeline_version: None,
+            layer_trace: Vec::new(),
+            rejected_at: None,
+            evidence_bundle: None,
+            card_function: None,
+            value_claim: None,
+            value_delta: None,
+            target_context: None,
+            skill_usefulness: None,
+            synthesis_trace: Vec::new(),
+            synthesis_action: None,
+            synthesis_stop_reason: None,
+        };
+        let evidence_text = if source_observation_ids.is_empty() {
+            format!("{source}: synthesized by {engine}")
+        } else {
+            format!(
+                "{source}: synthesized by {engine}; quote=\"{}\"; obs={}",
+                evidence_quote.replace('"', "'"),
+                source_observation_ids.join(",")
+            )
         };
         candidate::add_candidate(
             project_root,
@@ -656,7 +767,7 @@ fn synthesize_with_agent_engine(
                 tags: candidate.tags,
                 language: candidate.language,
                 targets: targets.clone(),
-                evidence: format!("{source}: synthesized by {engine}"),
+                evidence: evidence_text,
                 confidence: candidate.confidence.or(Some(0.84)),
                 reason: candidate.reason.or_else(|| {
                     Some(format!(
@@ -664,7 +775,7 @@ fn synthesize_with_agent_engine(
                     ))
                 }),
                 matched_template: Some(format!("agent-synthesis:{engine}")),
-                source_observations: Vec::new(),
+                source_observations: source_observation_ids,
                 extraction,
             },
         )?;
@@ -765,44 +876,36 @@ fn agent_candidate_chunk(
     }
 }
 
-fn agent_synthesis_prompt(material: &str) -> String {
-    format!(
-        r#"You are helping build Agent Memory Kernel, a local MemoryCard evolution engine.
-
-Extract only durable, high-value agent skills from the local conversation material.
-
-Definition:
-- A Skill is an agent capability package: triggerable, reusable, procedural, and useful across future tasks.
-- A MemoryCard is lighter: one stable preference, constraint, convention, workflow, correction, project improvement, root-cause learning, architecture decision, or supplement that can be compiled into Claude Code / Codex instructions or attached to a Skill.
-- Keep only items that would still improve future work after the current bug or feature request is finished.
-- Prefer a balanced set: project rules, cross-project principles, and collaboration preferences.
-- Use scope="global" for cross-project principles and durable collaboration preferences; use scope="project" only when the rule depends on this project.
-- Keep durable product quality constraints when they state a reusable acceptance bar, for example "outside model reasoning, interactions should not feel stuck or janky".
-
-Reject:
-- one-off requests like "continue", "fix this", "optimize UI", "how do I start"
-- stack traces, terminal output, base instructions, system/developer prompts
-- vague project brainstorming, PRD sections, fixture/gold-set requirements, or priority outlines without a durable future behavior
-- unresolved product requests or bug reports such as "add a progress window", "UI is ugly", "tell me why it is stuck"; do not reject a product quality constraint when it includes a durable standard
-- secrets, credentials, personal sensitive content
-- raw error logs unless they include the reusable cause and fix
-
-Return only a JSON array, no markdown. Max 12 items.
-Each item: title, body, brief, tags, language, kind, scope, confidence, reason.
-Allowed kind: preference, constraint, procedure, convention, correction, anti-pattern.
-Allowed scope: global, project, agent.
-Brief must be a concise Simplified Chinese explanation of what the candidate is for.
-Tags must be compact and content-specific, for example axios, bun, frontend, http, js, structured-data, parser, 通用范式, agent-behavior, tool-use, meta-instruction.
-Use confidence >= 0.78 only. Body must be concise, general, imperative, and reusable.
-
-Recall targets:
-- cross-project: core functionality first, user perspective/experience, planning before edits, real-history validation.
-- collaboration: small-change fast tests / large-change broad tests, preserve human review boundaries, prefer candidate quality over quantity.
-- product quality constraint: keep stable acceptance bars such as non-reasoning UI operations should remain smooth.
-
-Material:
-{material}"#
-    )
+/// LLM 没返回 source_observation_ids 时，用 evidence_quote 的子串匹配反查 obs id；
+/// 同时处理双向：observation body 含 quote，或 quote 含 observation body 的关键片段。
+fn backfill_observation_ids_from_quote(
+    quote: &str,
+    observations: &[ObservationRecord],
+) -> Vec<String> {
+    let needle = quote.trim();
+    if needle.is_empty() {
+        return Vec::new();
+    }
+    let direct: Vec<String> = observations
+        .iter()
+        .filter(|observation| observation.body.contains(needle))
+        .map(|observation| observation.id.clone())
+        .collect();
+    if !direct.is_empty() {
+        return direct;
+    }
+    // 长 quote 的退化情形：观察 body 的核心句被复制到 quote 里，反向再匹配一次。
+    if needle.chars().count() < 12 {
+        return Vec::new();
+    }
+    observations
+        .iter()
+        .filter(|observation| {
+            let body = observation.body.trim();
+            !body.is_empty() && needle.contains(body)
+        })
+        .map(|observation| observation.id.clone())
+        .collect()
 }
 
 pub fn evolve_local_conversations(
@@ -850,6 +953,7 @@ fn evolve_local_conversations_from_files_with_engine(
         synthesis_skipped: synthesized.skipped,
         drafts: synthesized.drafts,
         candidate_drafts: synthesized.candidate_drafts,
+        candidate_previews: synthesized.candidate_previews,
         dry_run,
     })
 }

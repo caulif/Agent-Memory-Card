@@ -34,14 +34,42 @@ export function buildKernelPlanForInvoke(commandName: string, args: Record<strin
   if (commandName === "reject_candidate") {
     return { command: { type: "reject-candidate", id: args.id }, payload: { id: args.id, reason: args.reason ?? null } };
   }
+  if (commandName === "update_candidate") {
+    return {
+      command: { type: "update-candidate", id: args.id },
+      payload: { id: args.id, input: args.input ?? {} },
+    };
+  }
   if (commandName === "gc_candidates") {
     return { command: { type: "gc-candidates" }, payload: {} };
   }
   if (commandName === "sync_project") {
     return { command: { type: "compile-project", dry_run: false }, payload: { dry_run: false } };
   }
+  if (commandName === "import_artifact_drifts") {
+    return { command: { type: "import-artifact-drifts" }, payload: {} };
+  }
+  if (commandName === "import_artifact_drift_path") {
+    return { command: { type: "import-artifact-drifts" }, payload: { artifact_path: args.artifactPath } };
+  }
+  if (commandName === "keep_artifact_drifts") {
+    return { command: { type: "keep-artifact-drifts" }, payload: {} };
+  }
+  if (commandName === "keep_artifact_drift_path") {
+    return { command: { type: "keep-artifact-drifts" }, payload: { artifact_path: args.artifactPath } };
+  }
+  if (commandName === "discard_artifact_drifts") {
+    return { command: { type: "discard-artifact-drifts" }, payload: {} };
+  }
+  if (commandName === "discard_artifact_drift_path") {
+    return { command: { type: "discard-artifact-drifts" }, payload: { artifact_path: args.artifactPath } };
+  }
   if (commandName === "save_custom_provider_config") {
     return { command: { type: "configure-provider" }, payload: { input: args.input ?? {} } };
+  }
+  if (commandName === "import_project") {
+    const scanHome = Boolean(args.scanHome);
+    return { command: { type: "import-project", scan_home: scanHome }, payload: { scan_home: scanHome } };
   }
   if (commandName === "set_memory_card_targets") {
     return {
@@ -53,6 +81,12 @@ export function buildKernelPlanForInvoke(commandName: string, args: Record<strin
     return {
       command: { type: "delete-memory-card", id: args.id },
       payload: { id: args.id },
+    };
+  }
+  if (commandName === "update_memory_card") {
+    return {
+      command: { type: "update-memory-card", id: args.id },
+      payload: { id: args.id, input: args.input ?? {} },
     };
   }
   if (commandName === "clear_memory_card_targets") {
@@ -79,6 +113,12 @@ export function buildKernelPlanForInvoke(commandName: string, args: Record<strin
       payload: { package_id: args.packageId, targets: args.targets ?? [] },
     };
   }
+  if (commandName === "attach_memory_card_to_skill") {
+    return {
+      command: { type: "attach-memory-card-to-skill", memory_card_id: args.memoryCardId, skill_id: args.skillId },
+      payload: { memory_card_id: args.memoryCardId, skill_id: args.skillId, fusion_mode: args.fusionMode ?? null },
+    };
+  }
   if (commandName === "fuse_memory_cards_to_draft") {
     const input = (args.input ?? {}) as Record<string, unknown>;
     return {
@@ -97,10 +137,16 @@ export function buildKernelPlanForInvoke(commandName: string, args: Record<strin
   return null;
 }
 
-export function buildKernelPlanForEditor(recordType: "draft" | "memory_card", recordId: string, input: Record<string, unknown>): KernelPlanRequest {
+export function buildKernelPlanForEditor(recordType: "draft" | "candidate" | "memory_card", recordId: string, input: Record<string, unknown>): KernelPlanRequest {
   if (recordType === "draft") {
     return {
       command: { type: "update-draft", id: recordId },
+      payload: { id: recordId, input },
+    };
+  }
+  if (recordType === "candidate") {
+    return {
+      command: { type: "update-candidate", id: recordId },
       payload: { id: recordId, input },
     };
   }
@@ -155,7 +201,7 @@ export function getPreviewActionMessage(actionKey: string) {
     return "预览模式：已从草稿列表移除演示项，不会写入文件。";
   }
 
-  if (actionKey.startsWith("安装") || actionKey === "同步" || actionKey === "整理历史") {
+  if (actionKey.startsWith("安装") || actionKey === "同步" || actionKey === "整理历史" || actionKey === "导入 Drift") {
     return "预览模式：已模拟完成操作，不会写入文件。";
   }
 

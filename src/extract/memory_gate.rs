@@ -174,6 +174,12 @@ fn looks_like_current_task_state(lower: &str) -> bool {
 }
 
 fn looks_like_memory_pipeline_meta(lower: &str) -> bool {
+    if looks_like_durable_local_history_validation_workflow(lower) {
+        return false;
+    }
+    if looks_like_supported_failure_flow_workflow(lower) {
+        return false;
+    }
     let candidate_pipeline_rule = lower.contains("候选记忆")
         || (lower.contains("候选质量") && lower.contains("候选数量"))
         || lower.contains("候选被判定为无长期价值")
@@ -188,6 +194,7 @@ fn looks_like_memory_pipeline_meta(lower: &str) -> bool {
         || (lower.contains("核心功能链路") && lower.contains("周边功能")))
         && !lower.contains("所有项目")
         && !lower.contains("每次");
+    let generation_quality_acceptance = looks_like_generation_quality_acceptance_chatter(lower);
 
     (candidate_pipeline_rule
         && (lower.contains("只保留")
@@ -197,6 +204,87 @@ fn looks_like_memory_pipeline_meta(lower: &str) -> bool {
             || lower.contains("质量优先")))
         || (memory_pipeline_terms && lower.contains("候选"))
         || generic_planning_principle
+        || generation_quality_acceptance
+}
+
+fn looks_like_supported_failure_flow_workflow(lower: &str) -> bool {
+    lower.contains("failureflowsummary:")
+        && (lower.contains("signal:pipeline_break")
+            || lower.contains("signal:final_quality_correction")
+            || lower.contains("signal:false_positive_noise")
+            || lower.contains("signal:privacy_boundary")
+            || lower.contains("signal:scope_boundary")
+            || lower.contains("signal:refactor_correction")
+            || lower.contains("signal:transferable_workflow")
+            || lower.contains("signal:review_iterate_loop"))
+}
+
+fn looks_like_durable_local_history_validation_workflow(lower: &str) -> bool {
+    (lower.contains("真实历史") || lower.contains("real-history") || lower.contains("dry-run"))
+        && (lower.contains("本地评估") || lower.contains("本地真实历史") || lower.contains("local"))
+        && (lower.contains("不进入 git")
+            || lower.contains("不要提交")
+            || lower.contains("golden set")
+            || lower.contains("只用于本地"))
+        && (lower.contains("提炼质量") || lower.contains("抽取") || lower.contains("候选"))
+}
+
+fn looks_like_generation_quality_acceptance_chatter(lower: &str) -> bool {
+    let generation_surface = [
+        "prompt",
+        "render",
+        "rewrite",
+        "llm",
+        "模型",
+        "卡片",
+        "最终卡片",
+        "成品卡片",
+        "改写器",
+        "memory card",
+        "candidate",
+        "候选",
+        "生成",
+        "提炼",
+        "筛选",
+    ]
+    .iter()
+    .filter(|marker| lower.contains(**marker))
+    .count()
+        >= 2;
+    let eval_surface = [
+        "抽样",
+        "最终卡片",
+        "分数",
+        "指标",
+        "人工看",
+        "人工审阅",
+        "质量",
+        "评估",
+        "golden",
+        "eval",
+        "score",
+        "metric",
+        "sample",
+    ]
+    .iter()
+    .filter(|marker| lower.contains(**marker))
+    .count()
+        >= 2;
+    let process_instruction = [
+        "要",
+        "不要",
+        "不能只",
+        "不应该只",
+        "必须",
+        "should",
+        "must",
+        "not only",
+        "don't just",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker));
+
+    generation_surface && eval_surface && process_instruction
 }
 
 fn looks_like_one_off_write_scope(lower: &str, durable: bool) -> bool {
@@ -321,5 +409,22 @@ mod tests {
                 .disposition,
             MemoryGateDisposition::Reject
         );
+        assert_eq!(
+            decision("修改卡片改写器时，必须抽样审阅最终卡片，不要只看质量分。").disposition,
+            MemoryGateDisposition::Reject
+        );
+    }
+
+    #[test]
+    fn keeps_supported_failure_flow_workflow() {
+        let decision = evaluate_memory_candidate(
+            "提取异常先定位链路断点",
+            "当记忆提取结果异常少、质量差或没有进入最终卡片阶段时，先定位链路断点，包括候选召回、LLM induction、JSON 解析、质量门控和 crystallize。",
+            "FailureFlowSummary:\n- signal:pipeline_break obs:a text:LLM induction JSON 被截断，解析失败，所以没有进入最终 crystallize 卡片阶段。",
+            "procedure",
+            "global",
+        );
+
+        assert_eq!(decision.disposition, MemoryGateDisposition::Accept);
     }
 }

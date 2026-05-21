@@ -1,5 +1,6 @@
 ﻿import { Bell, Boxes, CloudCog, GitBranch } from "lucide-react";
-import type { DraftRecord, MemoryCardRecord, EditFormData, PageDef } from "../types/domain";
+import { LibraryBig } from "lucide-react";
+import type { CandidateRecord, DraftRecord, MemoryCardRecord, EditFormData, PageDef } from "../types/domain";
 
 export const KIND_OPTIONS = ["rule", "memory_card", "observation", "preference", "constraint", "procedure", "convention"];
 export const SCOPE_OPTIONS = ["project", "global", "agent"];
@@ -8,6 +9,7 @@ export const EDITABLE_AGENTS = ["codex", "claude-code"];
 export const PAGES: PageDef[] = [
   { id: "drafts", label: "审阅", icon: Bell },
   { id: "memory-cards", label: "记忆卡", icon: Boxes },
+  { id: "skills", label: "技能", icon: LibraryBig },
   { id: "agents", label: "分配", icon: GitBranch },
   { id: "settings", label: "设置", icon: CloudCog },
 ];
@@ -21,6 +23,18 @@ export function buildEditFormFromDraft(draft: DraftRecord): EditFormData {
     scope: draft.scope,
     tagsInput: (draft.tags ?? []).join("，"),
     targets: [...(draft.targets ?? [])],
+  };
+}
+
+export function buildEditFormFromCandidate(candidate: CandidateRecord): EditFormData {
+  return {
+    title: candidate.title,
+    brief: candidate.brief ?? "",
+    body: candidate.body,
+    kind: candidate.kind,
+    scope: candidate.scope,
+    tagsInput: (candidate.tags ?? []).join("，"),
+    targets: [...(candidate.targets ?? [])],
   };
 }
 

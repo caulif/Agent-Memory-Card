@@ -238,6 +238,22 @@ pub(super) fn methodology_pair_candidates(sentence: &str) -> Vec<Candidate> {
             "Abstracted a stable governance preference from review-boundary guidance.".to_string(),
         ));
     }
+    if mentions_visual_planning(&lower) {
+        abstract_specs.push((
+            "Use Visual Planning Aids".to_string(),
+            "Use lightweight mockups, comparison diagrams, or flow diagrams to support project-startup and UI or architecture planning discussions.".to_string(),
+            MemoryTier::CollaborationPreference,
+            "Abstracted a durable planning preference for visual collaboration during project startup.".to_string(),
+        ));
+    }
+    if mentions_reference_research_planning(&lower) {
+        abstract_specs.push((
+            "Research References Before Planning".to_string(),
+            "Before planning a new feature or project direction, look for relevant open-source projects, comparable products, or other useful references.".to_string(),
+            MemoryTier::CollaborationPreference,
+            "Abstracted a durable planning preference to research external references before proposing a plan.".to_string(),
+        ));
+    }
 
     if abstract_specs.is_empty() {
         return Vec::new();
@@ -299,6 +315,8 @@ pub(super) fn has_methodology_signal(body: &str) -> bool {
         || mentions_test_strategy(&lower)
         || mentions_user_experience_principle(&lower)
         || mentions_core_functionality(&lower)
+        || mentions_visual_planning(&lower)
+        || mentions_reference_research_planning(&lower)
 }
 
 pub(super) fn memory_tier_from_guess(guess: Option<&str>, body: &str) -> MemoryTier {
@@ -312,6 +330,8 @@ pub(super) fn memory_tier_from_guess(guess: Option<&str>, body: &str) -> MemoryT
                 || mentions_real_history_validation(&lower)
                 || mentions_review_boundary(&lower)
                 || mentions_test_strategy(&lower)
+                || mentions_visual_planning(&lower)
+                || mentions_reference_research_planning(&lower)
             {
                 MemoryTier::CollaborationPreference
             } else if mentions_user_experience_principle(&lower)
@@ -333,6 +353,8 @@ pub(super) fn abstracted_item_from_spec(
         if mentions_design_planning(&spec.body.to_lowercase())
             || mentions_real_history_validation(&spec.body.to_lowercase())
             || mentions_test_strategy(&spec.body.to_lowercase())
+            || mentions_visual_planning(&spec.body.to_lowercase())
+            || mentions_reference_research_planning(&spec.body.to_lowercase())
         {
             MemoryTier::CollaborationPreference
         } else {
@@ -477,4 +499,31 @@ fn mentions_review_boundary(lower: &str) -> bool {
         || lower.contains("human approval")
         || lower.contains("先 review")
         || lower.contains("candidate/draft")
+}
+
+fn mentions_visual_planning(lower: &str) -> bool {
+    (lower.contains("可视化")
+        || lower.contains("mockup")
+        || lower.contains("对比图")
+        || lower.contains("流程图")
+        || lower.contains("架构图")
+        || lower.contains("浏览器"))
+        && (lower.contains("讨论")
+            || lower.contains("规划")
+            || lower.contains("方案")
+            || lower.contains("布局")
+            || lower.contains("边聊边做"))
+}
+
+fn mentions_reference_research_planning(lower: &str) -> bool {
+    (lower.contains("借鉴")
+        || lower.contains("参考")
+        || lower.contains("开源项目")
+        || lower.contains("同类产品")
+        || lower.contains("相关内容"))
+        && (lower.contains("规划")
+            || lower.contains("方案")
+            || lower.contains("启动")
+            || lower.contains("实现新功能")
+            || lower.contains("新增功能"))
 }

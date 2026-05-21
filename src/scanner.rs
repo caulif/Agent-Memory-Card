@@ -172,6 +172,8 @@ fn skill_roots(root: &Path, scan_home: bool) -> Vec<PathBuf> {
         roots.push(home.join(".agents").join("skills"));
         roots.push(home.join(".claude").join("skills"));
         roots.push(home.join(".codex").join("skills"));
+        roots.push(home.join(".codex").join("superpowers").join("skills"));
+        roots.push(home.join(".codex").join("plugins").join("cache"));
         roots.push(home.join(".copilot").join("skills"));
     }
 
@@ -298,6 +300,9 @@ fn source_kind(skill_dir: &Path, project_root: &Path) -> String {
         || path.contains("\\.agents\\skills\\superpowers\\")
     {
         "superpowers".to_string()
+    } else if path.contains("/.codex/plugins/cache/") || path.contains("\\.codex\\plugins\\cache\\")
+    {
+        "plugin".to_string()
     } else {
         "referenced".to_string()
     }

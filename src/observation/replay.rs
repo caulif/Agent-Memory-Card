@@ -8,8 +8,8 @@ use crate::fsutil;
 
 use super::conversation::{ConversationProjectMatch, conversation_project_match};
 use super::{
-    ObservationImportReport, discover_local_conversation_files, import_observation_text,
-    synthesize_observations_to_drafts_with_engine,
+    CandidatePreviewText, ObservationImportReport, discover_local_conversation_files,
+    import_observation_text, synthesize_observations_to_drafts_for_replay,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -26,6 +26,7 @@ pub struct ObservationReplayReport {
     pub synthesis_skipped: usize,
     pub drafts: Vec<String>,
     pub candidate_drafts: Vec<String>,
+    pub candidate_previews: Vec<CandidatePreviewText>,
     pub dry_run: bool,
 }
 
@@ -80,7 +81,7 @@ pub fn replay_local_conversations(
     }
 
     let synthesized =
-        synthesize_observations_to_drafts_with_engine(&replay_root, targets, dry_run, engine)?;
+        synthesize_observations_to_drafts_for_replay(&replay_root, targets, dry_run, engine)?;
 
     Ok(ObservationReplayReport {
         engine: synthesized.engine,
@@ -95,6 +96,7 @@ pub fn replay_local_conversations(
         synthesis_skipped: synthesized.skipped,
         drafts: synthesized.drafts,
         candidate_drafts: synthesized.candidate_drafts,
+        candidate_previews: synthesized.candidate_previews,
         dry_run,
     })
 }

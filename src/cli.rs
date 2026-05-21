@@ -104,6 +104,45 @@ pub(crate) enum Commands {
         command: DraftCommands,
     },
 
+    /// Evaluate real local projects with reference cards and blind LLM judging.
+    Eval {
+        /// Project root that receives run artifacts.
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+
+        /// Run Golden Set regression instead of LLM project eval. By default this is deterministic; pass --provider to also verify provider-induced evidence quotes.
+        #[arg(long)]
+        golden_set: bool,
+
+        /// Score a saved PipelineReport JSON as a RunQAReport.
+        #[arg(long)]
+        score_run: Option<PathBuf>,
+
+        /// Append seen-memory signatures for cards in --score-run using this outcome label.
+        #[arg(long)]
+        write_seen: Option<String>,
+
+        /// Explicit project paths to evaluate. Repeatable.
+        #[arg(long = "projects")]
+        projects: Vec<PathBuf>,
+
+        /// Maximum number of projects to evaluate when discovering from registry.
+        #[arg(long, default_value_t = 3)]
+        max_projects: usize,
+
+        /// Provider name to use for reference generation and judging.
+        #[arg(long)]
+        provider: Option<String>,
+
+        /// Timeout in seconds for CLI providers during eval.
+        #[arg(long, default_value_t = 20)]
+        timeout_secs: u64,
+
+        /// Print machine-readable JSON instead of a text summary.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Extract Draft Inbox candidates from text or a file.
     Extract {
         /// Inline text to extract from.
@@ -186,6 +225,61 @@ pub(crate) enum Commands {
         /// Project root.
         #[arg(long, default_value = ".")]
         project: PathBuf,
+    },
+
+    /// Run the five-layer extraction pipeline against imported observations.
+    Pipeline {
+        /// Project root.
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+
+        /// Skip Layer 4 (INDUCE) and Layer 5 (CRYSTALLIZE). Useful for cluster diagnostics without LLM cost.
+        #[arg(long)]
+        skip_induce: bool,
+
+        /// Force jaccard similarity instead of fastembed (offline / debug).
+        #[arg(long)]
+        force_jaccard: bool,
+
+        /// Drop single-message clusters before INDUCE.
+        #[arg(long)]
+        drop_singletons: bool,
+
+        /// Override provider for Layer 4 INDUCE (for example: codex-cli, claude-cli).
+        #[arg(long)]
+        provider: Option<String>,
+
+        /// Timeout in seconds for CLI providers used by Layer 4 INDUCE.
+        #[arg(long)]
+        timeout_secs: Option<u64>,
+
+        /// Override cluster long-message threshold (fastembed cosine).
+        #[arg(long)]
+        long_threshold: Option<f32>,
+
+        /// Override cluster short-message threshold (fastembed cosine).
+        #[arg(long)]
+        short_threshold: Option<f32>,
+
+        /// Override jaccard long-message threshold (when --force-jaccard or fastembed unavailable).
+        #[arg(long)]
+        jaccard_long: Option<f32>,
+
+        /// Override jaccard short-message threshold.
+        #[arg(long)]
+        jaccard_short: Option<f32>,
+
+        /// Print full PipelineReport JSON instead of summary.
+        #[arg(long)]
+        json: bool,
+
+        /// Persist accepted CrystallizedCards as drafts under .agent-kernel/drafts/.
+        #[arg(long)]
+        save: bool,
+
+        /// Write the full PipelineReport JSON to docs/runs/pipeline-<timestamp>.json.
+        #[arg(long)]
+        save_report: bool,
     },
 
     /// Review pending drafts, mirror status, Rule CI, and build preview.
@@ -339,6 +433,13 @@ pub(crate) enum MemoryCardCommands {
 
     /// Show a Memory Card by Agent target matrix.
     Matrix {
+        /// Project root.
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+
+    /// Verify Memory Card lineage, evidence quotes, and activation consistency.
+    Verify {
         /// Project root.
         #[arg(long, default_value = ".")]
         project: PathBuf,

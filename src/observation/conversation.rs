@@ -152,6 +152,51 @@ mod tests {
     }
 
     #[test]
+    fn extract_jsonl_messages_keeps_confirmed_visual_planning_offer_context() {
+        let input = concat!(
+            r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"有些内容可能用浏览器里的可视化更容易讨论，比如设置页布局和架构图。我可以边聊边做轻量 mockup、对比图或流程图给你看。要试试吗？"}]}}"#,
+            "\n",
+            r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"我同意，此外有可以借鉴的开源项目或者任何内容也可以借鉴。"}]}}"#
+        );
+
+        let extracted = extract_jsonl_messages(input).expect("extracted");
+
+        assert!(extracted.contains("可视化更容易讨论"), "{extracted}");
+        assert!(extracted.contains("轻量 mockup"), "{extracted}");
+        assert!(extracted.contains("用户同意使用这个方式"), "{extracted}");
+        assert!(extracted.contains("开源项目"), "{extracted}");
+    }
+
+    #[test]
+    fn extract_jsonl_messages_keeps_confirmed_reference_research_offer_context() {
+        let input = concat!(
+            r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"我建议先搜索同类开源项目和成熟产品，整理可借鉴的结构，再拆成项目启动规划。"}]}}"#,
+            "\n",
+            r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"我同意，按这个方式规划。"}]}}"#
+        );
+
+        let extracted = extract_jsonl_messages(input).expect("extracted");
+
+        assert!(extracted.contains("同类开源项目"), "{extracted}");
+        assert!(extracted.contains("用户同意使用这个方式"), "{extracted}");
+    }
+
+    #[test]
+    fn extract_jsonl_messages_keeps_confirmed_validation_cadence_offer_context() {
+        let input = concat!(
+            r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"为了推进速度，可以小改只做必要检查，大改或完成前再跑一次完整测试。"}]}}"#,
+            "\n",
+            r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"可以，就按这个节奏。"}]}}"#
+        );
+
+        let extracted = extract_jsonl_messages(input).expect("extracted");
+
+        assert!(extracted.contains("小改只做必要检查"), "{extracted}");
+        assert!(extracted.contains("完成前再跑一次完整测试"), "{extracted}");
+        assert!(extracted.contains("用户同意使用这个方式"), "{extracted}");
+    }
+
+    #[test]
     fn extract_jsonl_messages_skips_generated_session_instruction_blocks() {
         let input = r#"{"type":"user","message":{"role":"user","content":"[Assistant Rules - You MUST follow these instructions]\n[Available Skills]\nTo use a skill, read its SKILL.md file when needed.\n\n## Team Mode\nOnly bring up Team in either of these cases."}}"#;
 
@@ -182,6 +227,20 @@ mod tests {
     #[test]
     fn extract_jsonl_messages_skips_chinese_ui_agent_task_briefs() {
         let input = r#"{"type":"user","message":{"role":"user","content":"你是这个项目的 UI 优化代理。请直接修改前端文件，遵守现有中文 Apple-like 风格，不要改 Rust 后端。\n\n当前项目：Agent Memory Kernel Tauri app，工作目录 C:\\Users\\15893\\Documents\\New project。\n需要实现：\n1. app/src/ui-helpers.ts 增加 DesktopTaskStatus 类型。"}} "#;
+
+        assert!(extract_jsonl_messages(input).is_none());
+    }
+
+    #[test]
+    fn extract_jsonl_messages_skips_readonly_history_scan_agent_briefs() {
+        let input = r#"{"type":"user","message":{"role":"user","content":"只读任务。你在 C:\\Users\\15893\\Documents\\New project 仓库中，目标是全量扫描该项目相关的本地历史对话，找出“每段对话开头”更偏长期/规划/启动方式、项目启动偏好、方案规划偏好的内容，作为本地目标测试集候选。不要修改任何文件，不要写入仓库，不要上传任何真实对话数据。可以读取本地 Codex/Claude conversation jsonl 和项目 .agent-kernel 观察记录。输出：1) 你扫描了哪些来源类别和数量；2) 值得计入记忆卡片的候选。"}} "#;
+
+        assert!(extract_jsonl_messages(input).is_none());
+    }
+
+    #[test]
+    fn extract_jsonl_messages_skips_subagent_notification_blobs() {
+        let input = r#"{"type":"user","message":{"role":"user","content":"<subagent_notification>\n{\"agent_path\":\"agent\",\"status\":{\"completed\":\"扫描完成。\\n\\n**值得计入记忆卡片的候选**\\n- 交付验收时，绿色测试只是证据之一。\"}}\n</subagent_notification>"}}"#;
 
         assert!(extract_jsonl_messages(input).is_none());
     }
@@ -285,14 +344,31 @@ pub(super) fn normalize_observation_body(input: &str, file: &Path, source_kind: 
 
 pub(super) fn extract_jsonl_messages(input: &str) -> Option<String> {
     let mut parts = Vec::new();
+    let mut pending_confirmable_offer: Option<String> = None;
     for line in input.lines().map(str::trim).filter(|line| !line.is_empty()) {
         let Ok(value) = serde_json::from_str::<Value>(line) else {
             continue;
         };
         if !is_relevant_conversation_line(&value) {
+            let mut assistant_parts = Vec::new();
+            collect_assistant_authored_text(&value, &mut assistant_parts);
+            if let Some(offer) = assistant_parts
+                .into_iter()
+                .find(|text| looks_like_confirmable_methodology_offer(text))
+            {
+                pending_confirmable_offer = Some(offer);
+            }
             continue;
         }
+        let before_len = parts.len();
         collect_user_authored_text(&value, &mut parts);
+        if let Some(offer) = pending_confirmable_offer.take()
+            && parts[before_len..]
+                .iter()
+                .any(|part| looks_like_user_acceptance_with_optional_references(part))
+        {
+            parts.push(confirmed_methodology_context(&offer));
+        }
     }
     if parts.is_empty() {
         None
@@ -388,6 +464,110 @@ pub(super) fn collect_user_authored_text(value: &Value, parts: &mut Vec<String>)
     }
 }
 
+fn collect_assistant_authored_text(value: &Value, parts: &mut Vec<String>) {
+    match value {
+        Value::Object(map) => {
+            if map.get("role").and_then(Value::as_str) == Some("assistant") {
+                if let Some(content) = map.get("content") {
+                    collect_assistant_text_blocks(content, parts);
+                }
+                if let Some(text) = map.get("text") {
+                    collect_assistant_text_blocks(text, parts);
+                }
+            }
+            if map.get("type").and_then(Value::as_str) == Some("assistant")
+                && let Some(content) = map.get("content")
+            {
+                collect_assistant_text_blocks(content, parts);
+            }
+            if let Some(message) = map.get("message") {
+                collect_assistant_authored_text(message, parts);
+            }
+            if let Some(payload) = map.get("payload") {
+                collect_assistant_authored_text(payload, parts);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_assistant_authored_text(item, parts);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_assistant_text_blocks(value: &Value, parts: &mut Vec<String>) {
+    match value {
+        Value::String(text) => push_clean_text(parts, text),
+        Value::Array(items) => {
+            for item in items {
+                collect_assistant_text_blocks(item, parts);
+            }
+        }
+        Value::Object(map) => match map.get("type").and_then(Value::as_str) {
+            Some("text" | "input_text" | "output_text") => {
+                if let Some(Value::String(text)) = map.get("text") {
+                    push_clean_text(parts, text);
+                }
+            }
+            Some("tool_result" | "tool_use" | "thinking" | "reasoning") => {}
+            _ => {
+                if let Some(Value::String(text)) = map.get("text") {
+                    push_clean_text(parts, text);
+                } else if let Some(content) = map.get("content") {
+                    collect_assistant_text_blocks(content, parts);
+                }
+            }
+        },
+        _ => {}
+    }
+}
+
+fn looks_like_confirmable_methodology_offer(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    let visual_planning = (lower.contains("可视化")
+        || lower.contains("mockup")
+        || lower.contains("对比图")
+        || lower.contains("流程图")
+        || lower.contains("架构图")
+        || lower.contains("浏览器"))
+        && (lower.contains("讨论") || lower.contains("给你看") || lower.contains("要试试"));
+    let reference_research = (lower.contains("借鉴")
+        || lower.contains("参考")
+        || lower.contains("开源项目")
+        || lower.contains("同类产品")
+        || lower.contains("成熟产品")
+        || lower.contains("相关内容"))
+        && (lower.contains("规划") || lower.contains("方案") || lower.contains("启动"));
+    let validation_cadence = (lower.contains("小改")
+        || lower.contains("快速")
+        || lower.contains("推进速度")
+        || lower.contains("完整测试")
+        || lower.contains("总的测试"))
+        && (lower.contains("检查")
+            || lower.contains("测试")
+            || lower.contains("验证")
+            || lower.contains("完成前"));
+    visual_planning || reference_research || validation_cadence
+}
+
+fn looks_like_user_acceptance_with_optional_references(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("我同意")
+        || lower.contains("同意")
+        || lower.contains("可以")
+        || lower.contains("试试")
+        || lower.contains("ok")
+}
+
+fn confirmed_methodology_context(offer: &str) -> String {
+    let mut text = offer.trim().to_string();
+    if text.chars().count() > 220 {
+        text = text.chars().take(220).collect();
+    }
+    format!("{text}\n用户同意使用这个方式。")
+}
+
 fn collect_text_blocks(value: &Value, parts: &mut Vec<String>) {
     match value {
         Value::String(text) => push_clean_text(parts, text),
@@ -460,10 +640,17 @@ fn sanitize_extracted_messages(input: &str) -> String {
 
 fn should_skip_message_blob(text: &str) -> bool {
     looks_like_generated_session_instructions(text)
+        || looks_like_subagent_notification_blob(text)
         || looks_like_dispatched_task_brief(text)
         || looks_like_context_continuation_summary(text)
         || looks_like_controller_worker_brief(text)
+        || looks_like_readonly_history_scan_brief(text)
         || looks_like_file_scoped_task_prompt(text)
+}
+
+fn looks_like_subagent_notification_blob(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("<subagent_notification>") && lower.contains("</subagent_notification>")
 }
 
 fn looks_like_generated_session_instructions(text: &str) -> bool {
@@ -534,6 +721,24 @@ fn looks_like_controller_worker_brief(text: &str) -> bool {
         .filter(|marker| lower.contains(**marker))
         .count()
         >= 2
+}
+
+fn looks_like_readonly_history_scan_brief(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    let readonly = lower.contains("只读任务")
+        || lower.contains("不要修改任何文件")
+        || lower.contains("do not modify any files");
+    let history_scan = (lower.contains("全量扫描") || lower.contains("扫描"))
+        && (lower.contains("历史对话")
+            || lower.contains("conversation jsonl")
+            || lower.contains("观察记录")
+            || lower.contains("目标测试集"));
+    let reporting_shape = lower.contains("输出：")
+        || lower.contains("output:")
+        || lower.contains("候选")
+        || lower.contains("噪声类型");
+
+    readonly && history_scan && reporting_shape
 }
 
 fn looks_like_file_scoped_task_prompt(text: &str) -> bool {

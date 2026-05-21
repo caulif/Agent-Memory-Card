@@ -21,7 +21,7 @@ export function useProjectSelection({
   setPreviewMode: (value: boolean) => void;
   selectedProjectRef: React.MutableRefObject<string>;
   setMessage: (message: string) => void;
-  onProjectActivated: (projectPath: string, page: PageId) => void;
+  onProjectActivated: (projectPath: string, page: PageId, options?: { previewMode?: boolean }) => void;
   onProjectCleared: () => void;
 }) {
   const [state, setState] = React.useState<DesktopAppState | null>(null);
@@ -41,7 +41,7 @@ export function useProjectSelection({
     setSelectedProject(first);
     selectedProjectRef.current = first;
     if (first) {
-      onProjectActivated(first, page);
+      onProjectActivated(first, page, { previewMode: true });
     } else {
       onProjectCleared();
     }
@@ -52,7 +52,7 @@ export function useProjectSelection({
     setState(next);
     const current = selectedProjectRef.current;
     const stillExists = current && next.registry.projects.some((project) => project.path === current);
-    const projectPath = stillExists ? current : "";
+    const projectPath = stillExists ? current : next.registry.projects[0]?.path ?? "";
     setSelectedProject(projectPath);
     selectedProjectRef.current = projectPath;
     if (projectPath) {

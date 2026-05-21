@@ -1,7 +1,7 @@
 ﻿import type React from "react";
 
 // ===== 页面标识 =====
-export type PageId = "drafts" | "memory-cards" | "agents" | "settings";
+export type PageId = "drafts" | "memory-cards" | "skills" | "agents" | "settings";
 
 // ===== 项目注册 =====
 export type RegisteredProject = {
@@ -71,6 +71,7 @@ export type MemoryCardRecord = {
   brief?: string;
   tags?: string[];
   language?: string;
+  activation?: string;
   source_project?: string;
   extraction?: ExtractionMetadata | null;
   approved_from?: string | null;
@@ -100,7 +101,7 @@ export type ProjectSnapshot = {
   catalog_status: { items: CatalogItem[] };
   target_matrix: { agents: string[]; rows: Array<{ memory_card_id: string; title: string; scope?: string; targets: Record<string, boolean> }> };
   rule_ci: { passed: number; failed: number };
-  build_preview: { actions: string[]; warnings: string[] };
+  build_preview: BuildPreview;
   status: { warnings: string[] };
 };
 
@@ -133,6 +134,26 @@ export type ProjectMemoryCardLibrary = {
   catalog_status: { items: CatalogItem[] };
 };
 
+export type ProjectSkillView = {
+  id: string;
+  name: string;
+  description: string;
+  source_path: string;
+  source_kind: string;
+  source_hash: string;
+  warnings: string[];
+  mirror_targets: string[];
+  linked_memory_cards: MemoryCardRecord[];
+  recommended_memory_cards: MemoryCardRecord[];
+};
+
+export type ProjectSkillLibrary = {
+  project_path: string;
+  generated_at: string;
+  source_counts: Record<string, number>;
+  skills: ProjectSkillView[];
+};
+
 export type ProjectAssignmentView = {
   project_path: string;
   enabled_agents: string[];
@@ -142,15 +163,99 @@ export type ProjectAssignmentView = {
 export type ProjectQualityView = {
   project_path: string;
   rule_ci: { passed: number; failed: number };
-  build_preview: { actions: string[]; warnings: string[] };
-  status: { warnings: string[] };
+  build_preview: BuildPreview;
+  status: { warnings: string[]; last_sync?: SyncCheckpoint | null };
+};
+
+export type SyncCheckpoint = {
+  id: string;
+  created_at: string;
+  artifact_count: number;
+  artifacts: Array<{ path: string; kind: string; hash: string }>;
+  memory_card_ids: string[];
+  rollback_instructions: string[];
+};
+
+export type ProjectEvalMetricView = {
+  label: string;
+  percent?: number | null;
+  count: number;
+  total: number;
+  status: "pass" | "fail" | string;
+};
+
+export type ProjectEvalRunView = {
+  project_path: string;
+  status: "missing" | "passing" | "attention" | string;
+  provider?: string | null;
+  pipeline_version?: number | null;
+  timestamp?: string | null;
+  recall?: ProjectEvalMetricView | null;
+  precision?: ProjectEvalMetricView | null;
+  one_off_false_positive?: ProjectEvalMetricView | null;
+  duplicate_cluster_risk?: ProjectEvalMetricView | null;
+  evidence_validity?: ProjectEvalMetricView | null;
+  provider_evidence_validity?: ProjectEvalMetricView | null;
+  recommendations: string[];
+};
+
+export type BuildPreview = {
+  actions: string[];
+  warnings: string[];
+  artifact_previews?: ArtifactPreviewRow[];
+  verification?: SyncVerificationReport | null;
+};
+
+export type SyncVerificationReport = {
+  rule_ci: { passed: number; failed: number; rows: Array<{ name: string; status: string; details: string[] }> };
+  status: "pass" | "fail" | string;
+  next_actions: string[];
+  reload_prompt: string;
+};
+
+export type ArtifactPreviewRow = {
+  agent: string;
+  kind: string;
+  path: string;
+  status: "create" | "update" | "unchanged" | "drifted" | string;
+  current_hash?: string | null;
+  expected_hash: string;
+  diff_preview: string[];
+  diff_lines?: string[];
+  diff_truncated?: boolean;
 };
 
 export type CustomProviderConfig = {
   enabled: boolean;
+  protocol: "openai-compatible" | "anthropic-compatible";
   base_url: string;
   model: string;
   api_key_env: string;
+  api_key?: string;
+};
+
+export type SetupChecklistItem = {
+  label: string;
+  status: "pass" | "warn" | "fail" | string;
+  detail: string;
+  next_action?: string | null;
+};
+
+export type SetupChecklistReport = {
+  runtime_mode: "installer" | "dev" | string;
+  items: SetupChecklistItem[];
+};
+
+export type ProviderStatusReport = {
+  status: "pass" | "warn" | "fail" | string;
+  provider: string;
+  protocol: string;
+  base_url: string;
+  model: string;
+  api_key_env: string;
+  proxy?: string | null;
+  checks: SetupChecklistItem[];
+  next_actions: string[];
 };
 
 // ===== 任务相关 =====
@@ -236,11 +341,57 @@ export type ExtractionMetadata = {
   matched_signal?: string;
   reason?: string;
   source_observations?: string[];
+  evidence_bundle?: EvidenceBundle | null;
   score_breakdown?: Record<string, number>;
   similar_record?: string | null;
   classification?: KnowledgeClassification | null;
   tags?: string[];
   suggested_action?: ExtractionAction | null;
+  card_function?: "library" | "skill_targeted" | "workflow" | "merge" | string | null;
+  value_claim?: string | null;
+  value_delta?: ValueDelta | null;
+  target_context?: TargetContext | null;
+  skill_usefulness?: SkillUsefulnessEvaluation | null;
+  synthesis_trace?: SynthesisTraceEntry[];
+  synthesis_action?: string | null;
+  synthesis_stop_reason?: string | null;
+};
+
+export type ValueDelta = {
+  existing_behavior?: string;
+  missing_part?: string;
+  new_behavior?: string;
+  why_not_duplicate?: string;
+};
+
+export type TargetContext = {
+  target_type?: string;
+  target_id?: string | null;
+  why_this_target?: string;
+};
+
+export type SkillUsefulnessEvaluation = {
+  target_skill_id: string;
+  before_behavior: string;
+  after_behavior: string;
+  improved_axes?: string[];
+  missing_axes?: string[];
+  verdict: string;
+  score: number;
+};
+
+export type SynthesisTraceEntry = {
+  step: string;
+  summary: string;
+  item_ids?: string[];
+};
+
+export type EvidenceBundle = {
+  source_observation_ids?: string[];
+  quotes?: Array<{ observation_id: string; text: string; role?: string; created_at?: string }>;
+  context?: Array<{ observation_id: string; before?: string[]; after?: string[] }>;
+  source_trust?: "user_direct" | "user_feedback" | "assistant_summary" | "tool_output" | "artifact" | "unknown";
+  validity?: "valid" | "weak" | "invalid";
 };
 
 export type ExtractionAction = {

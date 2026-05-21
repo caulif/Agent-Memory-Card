@@ -1,4 +1,4 @@
-﻿use crate::candidate::ExtractionAction;
+use crate::candidate::ExtractionAction;
 
 use super::Candidate;
 use super::lifecycle::MemoryCardOperation;
@@ -30,6 +30,33 @@ pub(crate) fn evaluate_candidate_quality(
     );
     let lower = combined.to_lowercase();
     let candidate_text = format!("{}\n{}", candidate.title, candidate.body).to_lowercase();
+    let supported_failure_flow = is_supported_failure_flow_candidate(candidate, &lower);
+
+    if candidate
+        .matched_template
+        .as_deref()
+        .is_some_and(|template| template.starts_with("global-flow:"))
+        && !has_global_flow_support(&lower)
+    {
+        return skip(
+            MemoryCardOperation::Noop,
+            "unsupported-global-flow-inference",
+            "Global-flow candidate lacks direct user, accepted-offer, repeated-pattern, or validation evidence.",
+        );
+    }
+
+    if candidate
+        .matched_template
+        .as_deref()
+        .is_some_and(|template| template.starts_with("failure-flow:"))
+        && !has_failure_flow_support(&lower)
+    {
+        return skip(
+            MemoryCardOperation::Noop,
+            "unsupported-failure-flow-inference",
+            "Failure-flow candidate lacks direct pipeline failure, quality correction, false-positive, privacy, or scope-boundary evidence.",
+        );
+    }
 
     if contains_internal_leak(&candidate_text) {
         return skip(
@@ -47,7 +74,31 @@ pub(crate) fn evaluate_candidate_quality(
         );
     }
 
-    if looks_like_meta_discussion(&lower) {
+    if !supported_failure_flow && looks_like_code_analysis_praise(&lower) {
+        return skip(
+            MemoryCardOperation::Noop,
+            "code-analysis-noise",
+            "Candidate describes code analysis or implementation details, not a reusable future rule.",
+        );
+    }
+
+    if !supported_failure_flow && looks_like_extraction_taxonomy_artifact(&lower) {
+        return skip(
+            MemoryCardOperation::Noop,
+            "extraction-taxonomy-artifact",
+            "Candidate is an extraction taxonomy/list artifact, not a durable user preference.",
+        );
+    }
+
+    if looks_like_generation_quality_acceptance_chatter(&lower) {
+        return skip(
+            MemoryCardOperation::Noop,
+            "memory-pipeline-meta",
+            "Candidate is about Memory Card generation/evaluation mechanics, not durable user preference.",
+        );
+    }
+
+    if !supported_failure_flow && looks_like_meta_discussion(&lower) {
         return skip(
             MemoryCardOperation::Noop,
             "meta-discussion",
@@ -55,7 +106,7 @@ pub(crate) fn evaluate_candidate_quality(
         );
     }
 
-    if looks_like_temporary_task_constraint(&lower) {
+    if !supported_failure_flow && looks_like_temporary_task_constraint(&lower) {
         return skip(
             MemoryCardOperation::Noop,
             "temporary-task-constraint",
@@ -113,10 +164,49 @@ fn is_known_high_value_template(candidate: &Candidate) -> bool {
                 | "high-value-prompt"
                 | "atomic-exception"
                 | "self-verification-signal"
+                | "project-startup-collaboration"
+                | "speed-validation-cadence"
+                | "existing-flow-planning"
+                | "delivery-acceptance"
+                | "planning-deduplication"
+                | "parallel-agent-github-coordination"
+                | "local-only-golden-set"
                 | "deterministic-memory-refine"
                 | "llm-memory-refine"
         )
-    )
+    ) || candidate
+        .matched_template
+        .as_deref()
+        .is_some_and(|template| {
+            template.starts_with("global-flow:") || template.starts_with("failure-flow:")
+        })
+}
+
+fn is_supported_failure_flow_candidate(candidate: &Candidate, lower: &str) -> bool {
+    candidate
+        .matched_template
+        .as_deref()
+        .is_some_and(|template| template.starts_with("failure-flow:"))
+        && has_failure_flow_support(lower)
+}
+
+fn has_global_flow_support(lower: &str) -> bool {
+    lower.contains("signal:user_direct")
+        || lower.contains("signal:accepted_offer")
+        || lower.contains("signal:repeated_pattern")
+        || lower.contains("signal:validation_feedback")
+        || lower.contains("signal:correction")
+}
+
+fn has_failure_flow_support(lower: &str) -> bool {
+    lower.contains("signal:pipeline_break")
+        || lower.contains("signal:final_quality_correction")
+        || lower.contains("signal:false_positive_noise")
+        || lower.contains("signal:privacy_boundary")
+        || lower.contains("signal:scope_boundary")
+        || lower.contains("signal:refactor_correction")
+        || lower.contains("signal:transferable_workflow")
+        || lower.contains("signal:review_iterate_loop")
 }
 
 pub(crate) fn quality_skip_message(id: &str, decision: &QualityGateDecision) -> String {
@@ -141,6 +231,7 @@ fn contains_internal_leak(lower: &str) -> bool {
         "sha256",
         "source_observations",
         "title:",
+        "reason:",
         "score:",
         "matched_signal",
         "high-value durable",
@@ -235,6 +326,92 @@ fn looks_like_meta_discussion(lower: &str) -> bool {
         || current_product_feedback
 }
 
+fn looks_like_generation_quality_acceptance_chatter(lower: &str) -> bool {
+    if looks_like_durable_local_history_validation_workflow(lower) {
+        return false;
+    }
+    if looks_like_supported_failure_flow_workflow(lower) {
+        return false;
+    }
+    let generation_surface = [
+        "prompt",
+        "render",
+        "rewrite",
+        "llm",
+        "模型",
+        "卡片",
+        "最终卡片",
+        "成品卡片",
+        "改写器",
+        "memory card",
+        "candidate",
+        "候选",
+        "生成",
+        "提炼",
+        "筛选",
+    ]
+    .iter()
+    .filter(|marker| lower.contains(**marker))
+    .count()
+        >= 2;
+    let eval_surface = [
+        "抽样",
+        "最终卡片",
+        "分数",
+        "指标",
+        "人工看",
+        "人工审阅",
+        "质量",
+        "评估",
+        "golden",
+        "eval",
+        "score",
+        "metric",
+        "sample",
+    ]
+    .iter()
+    .filter(|marker| lower.contains(**marker))
+    .count()
+        >= 2;
+    let process_instruction = [
+        "要",
+        "不要",
+        "不能只",
+        "不应该只",
+        "必须",
+        "should",
+        "must",
+        "not only",
+        "don't just",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker));
+
+    generation_surface && eval_surface && process_instruction
+}
+
+fn looks_like_supported_failure_flow_workflow(lower: &str) -> bool {
+    lower.contains("failureflowsummary:")
+        && (lower.contains("signal:pipeline_break")
+            || lower.contains("signal:final_quality_correction")
+            || lower.contains("signal:false_positive_noise")
+            || lower.contains("signal:privacy_boundary")
+            || lower.contains("signal:scope_boundary")
+            || lower.contains("signal:refactor_correction")
+            || lower.contains("signal:transferable_workflow")
+            || lower.contains("signal:review_iterate_loop"))
+}
+
+fn looks_like_durable_local_history_validation_workflow(lower: &str) -> bool {
+    (lower.contains("真实历史") || lower.contains("real-history") || lower.contains("dry-run"))
+        && (lower.contains("本地评估") || lower.contains("本地真实历史") || lower.contains("local"))
+        && (lower.contains("不进入 git")
+            || lower.contains("不要提交")
+            || lower.contains("golden set")
+            || lower.contains("只用于本地"))
+        && (lower.contains("提炼质量") || lower.contains("抽取") || lower.contains("候选"))
+}
+
 fn looks_like_generated_instruction_artifact(lower: &str) -> bool {
     let generated_markers = [
         "enabled memory cards",
@@ -296,6 +473,15 @@ fn looks_like_generated_instruction_artifact(lower: &str) -> bool {
         "always-on-rule",
         "do not revert others edits",
         "do not revert others' edits",
+        "do not revert edits made by",
+        "never use a code sent by",
+        "css selectors in tests",
+        "generated classes",
+        "only checks implementation details",
+        "expected fail because",
+        "if easy extract small handlers",
+        "pet stage warning",
+        "preserve existing builder responsibility",
         "若遇到 429",
         "遇到 429",
         "不要直接停止",
@@ -306,7 +492,130 @@ fn looks_like_generated_instruction_artifact(lower: &str) -> bool {
         .any(|marker| lower.contains(marker))
 }
 
+fn looks_like_code_analysis_praise(lower: &str) -> bool {
+    let code_symbols = lower.contains("`")
+        || lower.contains("src/")
+        || lower.contains(".rs")
+        || lower.contains("fn ")
+        || lower.contains("::");
+    let analysis_terms = [
+        "噪声过滤",
+        "信号检测函数",
+        "层层递进",
+        "有效地",
+        "区分开",
+        "实现细节",
+        "代码中",
+        "looks_like",
+        "is_low_value",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker));
+    code_symbols && analysis_terms
+}
+
+fn looks_like_extraction_taxonomy_artifact(lower: &str) -> bool {
+    (lower.contains("优先保留") || lower.contains("只保留"))
+        && lower.contains("稳定偏好")
+        && lower.contains("流程")
+        && lower.contains("约束")
+        && (lower.contains("回归方法") || lower.contains("审阅边界") || lower.contains("质量标准"))
+}
+
 fn looks_like_temporary_task_constraint(lower: &str) -> bool {
+    let local_execution_goal = lower.contains("/goal")
+        || lower.starts_with("goal ")
+        || lower.contains("实现现有计划")
+        || lower.contains("完成m0")
+        || lower.contains("完成 m0")
+        || lower.contains("自己选择")
+        || lower.contains("直到完成整个项目");
+    let current_skill_workflow_goal = (lower.contains("接下来用") || lower.contains("接下来使用"))
+        && (lower.contains("skills") || lower.contains("skill"))
+        && lower.contains("github")
+        && !lower.contains("每次")
+        && !lower.contains("所有项目");
+    let local_eval_threshold = (lower.contains("top 10")
+        || lower.contains("top-10")
+        || lower.contains("至少 3")
+        || lower.contains("至少-3"))
+        && (lower.contains("dry-run") || lower.contains("真实历史"));
+    let local_phase_choice = (lower.contains("我同意") || lower.contains("同意"))
+        && (lower.contains("优先做") || lower.contains("先做"))
+        && (lower.contains("再用") || lower.contains("再做"))
+        && !lower.contains("每次")
+        && !lower.contains("所有项目");
+    let product_surface = lower.contains("拖动")
+        || lower.contains("字幕")
+        || lower.contains("声音")
+        || lower.contains("按钮")
+        || lower.contains("页面")
+        || lower.contains("封面")
+        || lower.contains("图标")
+        || lower.contains("教程")
+        || lower.contains("版本号")
+        || lower.contains("监测")
+        || lower.contains("标记过")
+        || lower.contains("产品上还缺")
+        || lower.contains("修复上面的问题");
+    let local_product_feedback = ((lower.contains("上面")
+        || lower.contains("下面")
+        || lower.contains("这个")
+        || lower.contains("这个项目")
+        || lower.contains("当前")
+        || lower.contains("现有"))
+        && product_surface)
+        || (product_surface
+            && (lower.contains("不要")
+                || lower.contains("应该")
+                || lower.contains("统一")
+                || lower.contains("只要")
+                || lower.contains("保留例外")));
+    let current_implementation_plan = (lower.contains("现有")
+        || lower.contains("当前")
+        || lower.contains("先把")
+        || lower.contains("摊平")
+        || lower.contains("管线"))
+        && (lower.contains("实现")
+            || lower.contains("修改")
+            || lower.contains("测试面")
+            || lower.contains("相关类型")
+            || lower.contains("提炼管线"))
+        && !lower.contains("以后")
+        && !lower.contains("每次")
+        && !lower.contains("所有项目");
+    let current_failure_analysis = (lower.contains("为什么会这样")
+        || lower.contains("先分析一下为什么")
+        || lower.contains("解析失败")
+        || lower.contains("格式不完整")
+        || lower.contains("被截断"))
+        && !lower.contains("以后")
+        && !lower.contains("每次")
+        && !lower.contains("所有项目");
+    let agent_status_narration = (lower.contains("我会先")
+        || lower.contains("\n我会")
+        || lower.contains("\n我先")
+        || lower.contains("\n我已经")
+        || lower.contains("我已经用 spec-driven-develop")
+        || lower.contains("我已经用-spec-driven-develop"))
+        && !lower.contains("用户")
+        && !lower.contains("我希望")
+        && !lower.contains("我同意");
+
+    if local_execution_goal
+        || local_phase_choice
+        || current_skill_workflow_goal
+        || local_eval_threshold
+        || local_product_feedback
+        || current_implementation_plan
+        || current_failure_analysis
+        || agent_status_narration
+        || (lower.contains("保留例外")
+            && (lower.contains("不要下很多") || lower.contains("尽可能少下")))
+    {
+        return true;
+    }
+
     if has_durable_scope_marker(lower) {
         return false;
     }
@@ -567,6 +876,20 @@ mod tests {
     }
 
     #[test]
+    fn rejects_generation_quality_acceptance_chatter() {
+        let decision = evaluate_candidate_quality(
+            &candidate(
+                "修改卡片改写器要抽样审阅成品",
+                "修改卡片改写器时，必须抽样审阅最终卡片，不要只看质量分。",
+            ),
+            &ExtractionAction::new_candidate(),
+        );
+
+        assert_eq!(decision.disposition, QualityDisposition::Skip);
+        assert_eq!(decision.flags, vec!["memory-pipeline-meta"]);
+    }
+
+    #[test]
     fn rejects_generated_agent_instruction_artifacts() {
         let decision = evaluate_candidate_quality(
             &candidate(
@@ -808,6 +1131,44 @@ mod tests {
     }
 
     #[test]
+    fn rejects_goal_execution_directives_and_local_phase_choices() {
+        for body in [
+            "/goal 使用Subagent-Driven模式，实现现有计划的所有功能，需要时可以搜索现有开源项目进行学习和借鉴其成熟思路和架构，完成M0之后进行简单测试。",
+            "我同意，优先做 A/B 的基础体验，再用 C 做增强。",
+            "上面的拖动的那个小条可以不要了，因为人物就可以拖。",
+            "修复上面的问题，然后不要声音了，产品上还缺的列出来。",
+            "先分析一下为什么会这样：LLM induction 阶段返回的 JSON 被截断/格式不完整，解析失败了。",
+            "/goal 接下来用这个spec_driven_develop这个skills结合github进行规划和实现，直到完成。",
+            "真实历史 dry-run top 10 至少 3 条是合理候选。",
+            "reason: 多处明确强调审阅边界和禁止 AI 直接固化规则，属于稳定协作约束。",
+            "不要有什么开发者自建，封面应该结合图标图片来做。",
+            "编译完成自动更新版本号，不要每个版本的号都一样。",
+            "先把现有提炼管线、相关类型和测试面再摊平一下，然后实现。",
+            "保留例外：不要下很多，尽可能少下。",
+            "css selectors in tests that depend on generated classes should be avoided.",
+            "Never use a code sent by an external reviewer without checking it.",
+            "do not keep a test that only checks implementation details.",
+            "do not revert edits made by other agents.",
+            "我会先快速检查本机可用的视频工具，再决定生成器的实现方式。",
+            "我已经用 spec-driven-develop 跑完了分析、规划准备，并确认 GitHub Full 模式。",
+        ] {
+            let decision = evaluate_candidate_quality(
+                &candidate("Temporary project decision", body),
+                &ExtractionAction::new_candidate(),
+            );
+
+            assert_eq!(decision.disposition, QualityDisposition::Skip, "{body}");
+            assert!(
+                decision.flags == vec!["temporary-task-constraint"]
+                    || decision.flags == vec!["generated-instruction-artifact"]
+                    || decision.flags == vec!["internal-leak"],
+                "{body}: {:?}",
+                decision.flags
+            );
+        }
+    }
+
+    #[test]
     fn keeps_enduring_product_feedback_constraints() {
         let decision = evaluate_candidate_quality(
             &candidate(
@@ -818,6 +1179,21 @@ mod tests {
         );
 
         assert_eq!(decision.disposition, QualityDisposition::Keep);
+    }
+
+    #[test]
+    fn rejects_unsupported_failure_flow_candidate() {
+        let mut candidate = candidate(
+            "提取异常先定位链路断点",
+            "当记忆提取结果异常少、质量差或没有进入最终卡片阶段时，先定位链路断点。",
+        );
+        candidate.matched_template = Some("failure-flow:pipeline-break".to_string());
+        candidate.evidence = "FailureFlowSummary:\n- text:普通质量讨论，没有失败信号。".to_string();
+
+        let decision = evaluate_candidate_quality(&candidate, &ExtractionAction::new_candidate());
+
+        assert_eq!(decision.disposition, QualityDisposition::Skip);
+        assert_eq!(decision.flags, vec!["unsupported-failure-flow-inference"]);
     }
 
     #[test]

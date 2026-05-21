@@ -7,6 +7,8 @@ use crate::candidate::MemoryTier;
 use crate::extract;
 
 use super::ObservationRecord;
+use super::failure_flow;
+use super::flow;
 
 pub(super) fn synthesis_material(observations: &[ObservationRecord], max_chars: usize) -> String {
     synthesis_material_chunks(observations, max_chars, max_chars)
@@ -15,7 +17,7 @@ pub(super) fn synthesis_material(observations: &[ObservationRecord], max_chars: 
         .unwrap_or_default()
 }
 
-pub(super) fn prefiltered_synthesis_material(
+pub(crate) fn prefiltered_synthesis_material(
     observations: &[ObservationRecord],
     max_chars: usize,
 ) -> String {
@@ -63,6 +65,28 @@ pub(super) fn extract_local_chunks_to_report(
         redacted: false,
     };
     let mut seen = BTreeSet::new();
+
+    merge_flow_candidates(
+        project_root,
+        observations,
+        targets.clone(),
+        source,
+        max_candidates,
+        "local".to_string(),
+        &mut merged,
+        &mut seen,
+    )?;
+
+    merge_failure_flow_candidates(
+        project_root,
+        observations,
+        targets.clone(),
+        source,
+        max_candidates,
+        Some("local".to_string()),
+        &mut merged,
+        &mut seen,
+    )?;
 
     for gold_line in global_methodology_lines(observations, 12) {
         let report = extract::extract_high_value_text_to_drafts(
@@ -305,6 +329,28 @@ pub(super) fn extract_llm_chunks_to_report(
     };
     let mut seen = BTreeSet::new();
 
+    merge_flow_candidates(
+        project_root,
+        observations,
+        targets.clone(),
+        source,
+        max_candidates,
+        "llm".to_string(),
+        &mut merged,
+        &mut seen,
+    )?;
+
+    merge_failure_flow_candidates(
+        project_root,
+        observations,
+        targets.clone(),
+        source,
+        max_candidates,
+        None,
+        &mut merged,
+        &mut seen,
+    )?;
+
     if let Some(gold_snippets) = global_methodology_snippets(observations, 12) {
         let report = extract::extract_high_value_text_to_drafts(
             project_root,
@@ -390,6 +436,89 @@ pub(super) fn extract_llm_chunks_to_report(
     Ok(merged)
 }
 
+#[allow(clippy::too_many_arguments)]
+fn merge_flow_candidates(
+    project_root: &Path,
+    observations: &[ObservationRecord],
+    targets: Vec<String>,
+    source: &str,
+    max_candidates: usize,
+    provider_name: String,
+    merged: &mut extract::ExtractReport,
+    seen: &mut BTreeSet<String>,
+) -> Result<()> {
+    let flow_summary = flow::summarize_conversation_flow(observations);
+    if flow_summary.is_empty() {
+        return Ok(());
+    }
+    let flow_material = flow_summary.to_extraction_material();
+    let chunk_source = format!("{source}, global flow prefilter");
+    let provider = if provider_name == "local" {
+        Some("local".to_string())
+    } else {
+        None
+    };
+    let report = extract::extract_high_value_text_to_drafts(
+        project_root,
+        &flow_material,
+        targets,
+        &chunk_source,
+        provider,
+        true,
+        max_candidates,
+    )?;
+    merged.redacted |= report.redacted;
+    merged.skipped.extend(report.skipped);
+    for candidate in report.candidates {
+        if is_rejected_preview(&candidate) {
+            continue;
+        }
+        if seen.insert(candidate.id.clone()) {
+            merged.candidates.push(candidate);
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn merge_failure_flow_candidates(
+    project_root: &Path,
+    observations: &[ObservationRecord],
+    targets: Vec<String>,
+    source: &str,
+    max_candidates: usize,
+    provider: Option<String>,
+    merged: &mut extract::ExtractReport,
+    seen: &mut BTreeSet<String>,
+) -> Result<()> {
+    let failure_summary = failure_flow::summarize_failure_flow(observations);
+    if failure_summary.is_empty() {
+        return Ok(());
+    }
+    let failure_material = failure_summary.to_extraction_material();
+    let chunk_source = format!("{source}, failure flow prefilter");
+    let report = extract::extract_high_value_text_to_drafts(
+        project_root,
+        &failure_material,
+        targets,
+        &chunk_source,
+        provider,
+        true,
+        max_candidates,
+    )?;
+    merged.redacted |= report.redacted;
+    merged.skipped.extend(report.skipped);
+    for candidate in report.candidates {
+        if is_rejected_preview(&candidate) {
+            continue;
+        }
+        if seen.insert(candidate.id.clone()) {
+            merged.candidates.push(candidate);
+        }
+    }
+    Ok(())
+}
+
 fn balanced_truncate_previews(
     candidates: &mut Vec<extract::ExtractCandidatePreview>,
     max_candidates: usize,
@@ -450,6 +579,27 @@ fn looks_like_preview_noise(candidate: &extract::ExtractCandidatePreview) -> boo
         || (combined.contains("现在的架构")
             && (combined.contains("功能也实现不了") || combined.contains("体验也")))
         || (combined.contains("优化架构") && combined.contains("体验也很不"))
+        || combined.contains("do-not-keep-a-test-that")
+        || combined.contains("never-use-a-code-sent-by")
+        || combined.contains("never use a code sent by")
+        || combined.contains("expected-fail-because")
+        || combined.contains("if-easy-extract-small-handlers")
+        || combined.contains("pet-stage-warning")
+        || combined.contains("settings-panel-target-actions")
+        || combined.contains("preserve-existing-builder-responsibility")
+        || combined.contains("only checks implementation details")
+        || combined.contains("generated classes")
+        || combined.contains("css selectors in tests")
+        || combined.contains("我会先快速检查")
+        || combined.contains("我已经用-spec-driven-develop")
+        || combined.contains("我已经用 spec-driven-develop")
+        || combined.contains("reason-多处明确")
+        || combined.contains("接下来使用这个skills")
+        || combined.contains("接下来用这个skills")
+        || ((combined.contains("top-10") || combined.contains("top 10"))
+            && combined.contains("真实历史"))
+        || ((combined.contains("现有项目") || combined.contains("当前项目"))
+            && (combined.contains("全面提升") || combined.contains("实现")))
 }
 
 fn sort_previews_by_confidence(candidates: &mut [extract::ExtractCandidatePreview]) {
@@ -494,6 +644,15 @@ fn methodology_signal_score(body: &str) -> usize {
         "真实结果",
         "推理引擎",
         "检查有没有问题",
+        "可视化",
+        "mockup",
+        "对比图",
+        "流程图",
+        "架构图",
+        "开源项目",
+        "同类产品",
+        "借鉴",
+        "参考",
         "质量高不高",
         "自检",
         "dry-run",
@@ -587,7 +746,8 @@ fn observation_entry(observation: &ObservationRecord) -> String {
         body = truncate_head_and_tail(&body, 2_000, 2_000);
     }
     format!(
-        "\n---\nsource: {}\nagent: {}\nevidence: {}\ntext:\n{}\n",
+        "\n--- {} ---\nsource: {}\nagent: {}\nevidence: {}\ntext:\n{}\n",
+        observation.id,
         observation.source_kind,
         observation.agent.as_deref().unwrap_or("unknown"),
         observation.evidence,
@@ -606,7 +766,8 @@ fn compact_observation_entry(observation: &ObservationRecord) -> String {
         body = truncate_head_and_tail(&body, 700, 500);
     }
     format!(
-        "\n---\nsource: {}\nagent: {}\nevidence: {}\ntext:\n{}\n",
+        "\n--- {} ---\nsource: {}\nagent: {}\nevidence: {}\ntext:\n{}\n",
+        observation.id,
         observation.source_kind,
         observation.agent.as_deref().unwrap_or("unknown"),
         observation.evidence,
@@ -666,6 +827,15 @@ fn looks_methodology_rich(body: &str) -> bool {
         "真实结果",
         "推理引擎",
         "检查有没有问题",
+        "可视化",
+        "mockup",
+        "对比图",
+        "流程图",
+        "架构图",
+        "开源项目",
+        "同类产品",
+        "借鉴",
+        "参考",
         "质量高不高",
         "自检",
         "dry-run",
@@ -991,6 +1161,99 @@ mod tests {
             }),
             "{:?}",
             report.candidates
+        );
+    }
+
+    #[test]
+    fn local_chunk_extraction_surfaces_global_flow_candidates() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let observations = vec![
+            observation(
+                "startup",
+                "2026-01-01T00:00:00Z",
+                "我同意，此外有可以借鉴的开源项目或者任何内容也可以借鉴。",
+            ),
+            observation(
+                "middle",
+                "2026-01-01T01:00:00Z",
+                "不是只看指标，最终质量你也要自己看一下。",
+            ),
+            observation(
+                "end",
+                "2026-01-01T02:00:00Z",
+                "最后用真实历史 dry-run 测试，并从用户视角验收。",
+            ),
+        ];
+
+        let report = extract_local_chunks_to_report(
+            temp.path(),
+            &observations,
+            vec!["codex".to_string()],
+            "test",
+            8,
+        )
+        .expect("report");
+
+        assert!(
+            report.candidates.iter().any(|candidate| {
+                candidate
+                    .matched_template
+                    .as_deref()
+                    .is_some_and(|template| template == "global-flow:reference-research")
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report.candidates.iter().any(|candidate| {
+                candidate
+                    .matched_template
+                    .as_deref()
+                    .is_some_and(|template| template == "global-flow:real-history-validation")
+            }),
+            "{report:#?}"
+        );
+    }
+
+    #[test]
+    fn local_chunk_extraction_surfaces_failure_flow_candidates() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let observations = vec![
+            observation(
+                "pipeline-break",
+                "2026-01-01T00:00:00Z",
+                "LLM induction 阶段返回的 JSON 被截断/格式不完整，解析失败了，所以没有进入最终 crystallize 卡片阶段。",
+            ),
+            observation(
+                "quality-correction",
+                "2026-01-01T01:00:00Z",
+                "不能只看指标，要自己看最终卡片质量。",
+            ),
+        ];
+
+        let report = extract_local_chunks_to_report(
+            temp.path(),
+            &observations,
+            vec!["codex".to_string()],
+            "test",
+            8,
+        )
+        .expect("report");
+
+        assert!(
+            report.candidates.iter().any(|candidate| {
+                candidate
+                    .matched_template
+                    .as_deref()
+                    .is_some_and(|template| template == "failure-flow:pipeline-break")
+            }),
+            "{report:#?}"
+        );
+        assert!(
+            report
+                .candidates
+                .iter()
+                .any(|candidate| candidate.body.contains("先定位链路断点")),
+            "{report:#?}"
         );
     }
 }

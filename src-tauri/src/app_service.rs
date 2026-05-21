@@ -1,14 +1,16 @@
-﻿use std::path::{Path, PathBuf};
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 use std::thread;
 
 use agent_kernel::{
-    build, candidate, catalog, config, draft, fsutil, kernel, observation, project_registry,
-    rule_test, scanner, memory_card,
+    build, candidate, catalog, config, draft, eval, fsutil, kernel, memory_card, observation,
+    project_registry, provider, rule_test, scanner,
 };
+use chrono::Utc;
 use serde::Serialize;
 
 use crate::{
-    DesktopJobReplay, DesktopJobStart, DesktopTaskStore, DraftMergeInput, DraftUpdateInput,
+    CandidateUpdateInput, DesktopJobReplay, DesktopJobStart, DesktopTaskStore, DraftMergeInput, DraftUpdateInput,
     MemoryCardMergeInput, MemoryCardUpdateInput,
 };
 
@@ -45,6 +47,28 @@ pub struct ProjectMemoryCardLibrary {
 }
 
 #[derive(Debug, Serialize)]
+pub struct ProjectSkillLibrary {
+    pub project_path: String,
+    pub generated_at: String,
+    pub source_counts: BTreeMap<String, usize>,
+    pub skills: Vec<ProjectSkillView>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProjectSkillView {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub source_path: String,
+    pub source_kind: String,
+    pub source_hash: String,
+    pub warnings: Vec<String>,
+    pub mirror_targets: Vec<String>,
+    pub linked_memory_cards: Vec<memory_card::MemoryCardRecord>,
+    pub recommended_memory_cards: Vec<memory_card::MemoryCardRecord>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ProjectAssignmentView {
     pub project_path: String,
     pub enabled_agents: Vec<String>,
@@ -57,6 +81,31 @@ pub struct ProjectQualityView {
     pub rule_ci: rule_test::RuleTestReport,
     pub build_preview: build::BuildReport,
     pub status: build::StatusReport,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProjectEvalMetricView {
+    pub label: String,
+    pub percent: Option<f32>,
+    pub count: usize,
+    pub total: usize,
+    pub status: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProjectEvalRunView {
+    pub project_path: String,
+    pub status: String,
+    pub provider: Option<String>,
+    pub pipeline_version: Option<u32>,
+    pub timestamp: Option<String>,
+    pub recall: Option<ProjectEvalMetricView>,
+    pub precision: Option<ProjectEvalMetricView>,
+    pub one_off_false_positive: Option<ProjectEvalMetricView>,
+    pub duplicate_cluster_risk: Option<ProjectEvalMetricView>,
+    pub evidence_validity: Option<ProjectEvalMetricView>,
+    pub provider_evidence_validity: Option<ProjectEvalMetricView>,
+    pub recommendations: Vec<String>,
 }
 
 pub fn load_project_dashboard(
@@ -96,7 +145,7 @@ pub fn load_project_candidate_inbox(project_root: &Path) -> anyhow::Result<Proje
     let root = fsutil::normalize_project_root(project_root)?;
     Ok(ProjectCandidateInbox {
         project_path: fsutil::path_to_slash(&root),
-        candidates: candidate::list_visible_candidates(&root)?,
+        candidates: candidate::list_visible_candidates_with_synthesis_preview(&root)?,
     })
 }
 
@@ -123,6 +172,15 @@ pub fn reject_candidate(
 ) -> anyhow::Result<candidate::CandidateRecord> {
     let root = fsutil::normalize_project_root(project_root)?;
     candidate::reject_candidate(&root, id, reason)
+}
+
+pub fn update_candidate(
+    project_root: &Path,
+    id: &str,
+    input: CandidateUpdateInput,
+) -> anyhow::Result<candidate::CandidateRecord> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    candidate::update_candidate(&root, id, candidate_update_from_input(input))
 }
 
 pub fn gc_candidates(project_root: &Path) -> anyhow::Result<candidate::CandidateGcReport> {
@@ -220,9 +278,14 @@ pub fn attach_memory_card_to_skill(
     project_root: &Path,
     memory_card_id: &str,
     skill_id: &str,
+    fusion_mode: Option<&str>,
 ) -> anyhow::Result<()> {
     let root = fsutil::normalize_project_root(project_root)?;
-    config::add_skill_supplement(&root, skill_id, memory_card_id)
+    if fusion_mode == Some("auto") {
+        attach_memory_card_to_skill_with_fusion(&root, memory_card_id, skill_id)
+    } else {
+        config::add_skill_supplement(&root, skill_id, memory_card_id)
+    }
 }
 
 pub fn install_catalog_package(
@@ -242,6 +305,44 @@ pub fn import_project(project_root: &Path, scan_home: bool) -> anyhow::Result<sc
 pub fn import_artifact_drifts(project_root: &Path) -> anyhow::Result<build::ArtifactImportReport> {
     let root = fsutil::normalize_project_root(project_root)?;
     build::import_artifact_drifts(&root)
+}
+
+pub fn import_artifact_drift_path(
+    project_root: &Path,
+    artifact_path: &str,
+) -> anyhow::Result<build::ArtifactImportReport> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    build::import_artifact_drift_path(&root, artifact_path)
+}
+
+pub fn keep_artifact_drifts(
+    project_root: &Path,
+) -> anyhow::Result<build::ArtifactDriftResolutionReport> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    build::keep_artifact_drifts(&root)
+}
+
+pub fn keep_artifact_drift_path(
+    project_root: &Path,
+    artifact_path: &str,
+) -> anyhow::Result<build::ArtifactDriftResolutionReport> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    build::keep_artifact_drift_path(&root, artifact_path)
+}
+
+pub fn discard_artifact_drifts(
+    project_root: &Path,
+) -> anyhow::Result<build::ArtifactDriftResolutionReport> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    build::discard_artifact_drifts(&root)
+}
+
+pub fn discard_artifact_drift_path(
+    project_root: &Path,
+    artifact_path: &str,
+) -> anyhow::Result<build::ArtifactDriftResolutionReport> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    build::discard_artifact_drift_path(&root, artifact_path)
 }
 
 pub fn build_preview(project_root: &Path) -> anyhow::Result<build::BuildReport> {
@@ -266,6 +367,19 @@ pub fn sync_project_importing_artifact_drifts(
 
 fn draft_update_from_input(input: DraftUpdateInput) -> draft::DraftUpdate {
     draft::DraftUpdate {
+        title: input.title,
+        body: input.body,
+        brief: input.brief,
+        tags: input.tags,
+        language: input.language,
+        kind: input.kind,
+        scope: input.scope,
+        targets: input.targets,
+    }
+}
+
+fn candidate_update_from_input(input: CandidateUpdateInput) -> candidate::CandidateUpdate {
+    candidate::CandidateUpdate {
         title: input.title,
         body: input.body,
         brief: input.brief,
@@ -302,6 +416,204 @@ pub fn load_project_memory_card_library(
     })
 }
 
+pub fn load_project_skill_library(project_root: &Path) -> anyhow::Result<ProjectSkillLibrary> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    let project = config::load_or_default_project_config(&root)?;
+    let index = config::load_skill_index(&root)?;
+    let memory_cards = memory_card::load_memory_cards(&root)?;
+    let mut source_counts = BTreeMap::new();
+    for skill in &index.skills {
+        *source_counts.entry(skill.source_kind.clone()).or_insert(0) += 1;
+    }
+
+    let skills = index
+        .skills
+        .into_iter()
+        .map(|skill| {
+            let supplement_decl = project
+                .skills
+                .supplements
+                .iter()
+                .find(|supplement| supplement.skill == skill.id);
+            let linked_ids = supplement_decl
+                .map(|supplement| supplement.memory_cards.iter().cloned().collect::<BTreeSet<_>>())
+                .unwrap_or_default();
+            let mirror_targets = project
+                .skills
+                .mirrors
+                .iter()
+                .find(|mirror| mirror.reference == skill.id)
+                .map(|mirror| mirror.targets.clone())
+                .unwrap_or_default();
+            let linked_memory_cards = memory_cards
+                .iter()
+                .filter(|record| linked_ids.contains(&record.id))
+                .map(|record| {
+                    let mut linked = record.clone();
+                    if let Some(entry) = supplement_decl.and_then(|decl| {
+                        decl.entries
+                            .iter()
+                            .find(|entry| entry.memory_card == record.id)
+                    }) {
+                        linked.title = entry.title.clone();
+                        linked.body = entry.body.clone();
+                        linked.brief = format!("Mounted Memory Card ({})：{}", entry.mode, entry.body);
+                    }
+                    linked
+                })
+                .collect::<Vec<_>>();
+            let recommended_memory_cards = memory_cards
+                .iter()
+                .filter(|record| !linked_ids.contains(&record.id))
+                .filter(|record| memory_card_recommends_for_skill(record))
+                .cloned()
+                .collect::<Vec<_>>();
+
+            ProjectSkillView {
+                id: skill.id,
+                name: skill.name,
+                description: skill.description,
+                source_path: skill.source_path,
+                source_kind: skill.source_kind,
+                source_hash: skill.source_hash,
+                warnings: skill.warnings,
+                mirror_targets,
+                linked_memory_cards,
+                recommended_memory_cards,
+            }
+        })
+        .collect();
+
+    Ok(ProjectSkillLibrary {
+        project_path: fsutil::path_to_slash(&root),
+        generated_at: index.generated_at,
+        source_counts,
+        skills,
+    })
+}
+
+fn attach_memory_card_to_skill_with_fusion(
+    project_root: &Path,
+    memory_card_id: &str,
+    skill_id: &str,
+) -> anyhow::Result<()> {
+    let index = config::load_skill_index(project_root)?;
+    let skill = index
+        .skills
+        .iter()
+        .find(|skill| skill.id == skill_id)
+        .ok_or_else(|| anyhow::anyhow!("skill `{skill_id}` was not found in skill index"))?;
+    let memory_card = memory_card::load_memory_cards(project_root)?
+        .into_iter()
+        .find(|record| record.id == memory_card_id)
+        .ok_or_else(|| anyhow::anyhow!("memory_card `{memory_card_id}` does not exist"))?;
+
+    let body = fuse_memory_card_for_skill_with_provider(project_root, skill, &memory_card)
+        .unwrap_or_else(|| fuse_memory_card_for_skill_deterministic(skill, &memory_card));
+    let entry = config::SkillSupplementEntry {
+        memory_card: memory_card_id.to_string(),
+        title: format!("{} · Skill-targeted Memory Card", memory_card.title),
+        body,
+        mode: "auto-fused".to_string(),
+        updated_at: Utc::now().to_rfc3339(),
+    };
+    config::add_skill_supplement_entry(project_root, skill_id, entry)
+}
+
+#[derive(serde::Deserialize)]
+struct SkillFusionResponse {
+    body: String,
+}
+
+fn fuse_memory_card_for_skill_with_provider(
+    project_root: &Path,
+    skill: &config::SkillRecord,
+    memory_card: &memory_card::MemoryCardRecord,
+) -> Option<String> {
+    let cfg = provider::load_or_default_provider_config(project_root).ok()?;
+    let request = provider::ProviderRequest {
+        system_prompt: r#"你是 Skill-targeted Memory Card 编辑器。
+
+目标：把一条 Memory Card 转写成当前 Skill 可使用的上下文，而不是引入第二个产品概念或简单拼接。
+
+规则：
+- 输出必须能直接写入 AGENT_KERNEL_MEMORY_CARDS.md。
+- 参考成熟 SKILL.md 的风格，用 Use when / Instructions / Boundaries 组织；中文内容可写成“适用场景 / 操作指令 / 边界”。
+- 保留 Memory Card 的真实意图，但只写与该 Skill 使用场景相关的部分。
+- 说明这张 Memory Card 让该 Skill 下次多做对什么，避免重复已有 Skill 文本。
+- 把口语请求改写为可执行的流程或约束，不要保留聊天原话。
+- 不要编造工具、路径、API 或用户没有确认的规则。
+- 如果原 Memory Card 与 Skill 无关，写成“仅在相关任务中参考”的弱补充边界。
+- 只返回 JSON。"#
+            .to_string(),
+        user_prompt: serde_json::json!({
+            "skill": {
+                "id": skill.id,
+                "name": skill.name,
+                "description": skill.description,
+                "source_kind": skill.source_kind,
+            },
+            "memory_card": {
+                "id": memory_card.id,
+                "title": memory_card.title,
+                "kind": memory_card.kind,
+                "scope": memory_card.scope,
+                "body": memory_card.body,
+                "brief": memory_card.brief,
+                "tags": memory_card.tags,
+            }
+        })
+        .to_string(),
+        json_schema: Some(provider::ProviderJsonSchema {
+            name: "SkillSupplementFusion".to_string(),
+            strict: true,
+            schema: serde_json::json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "body": { "type": "string" }
+                },
+                "required": ["body"]
+            }),
+        }),
+    };
+    let output = provider::call_provider_for_role(
+        &cfg,
+        provider::ProviderRole::Refine,
+        &request,
+        2048,
+    )
+    .ok()?;
+    let parsed: SkillFusionResponse = serde_json::from_str(output.trim()).ok()?;
+    let body = parsed.body.trim().to_string();
+    (body.chars().count() >= 24 && body.chars().count() <= 1200).then_some(body)
+}
+
+fn fuse_memory_card_for_skill_deterministic(
+    skill: &config::SkillRecord,
+    memory_card: &memory_card::MemoryCardRecord,
+) -> String {
+    if memory_card.language == "zh" {
+        format!(
+            "适用场景：当 `{}` 被用于处理 `{}` 相关任务时。\n\n操作指令：挂载 Memory Card「{}」作为该 Skill 的定向上下文：{}\n\n边界：仅在该规则与当前 Skill 的职责相符时应用；若证据不足、与已有 Skill 文本重复，或会改变用户意图，先保留人工审阅边界。",
+            skill.name, memory_card.kind, memory_card.title, memory_card.body
+        )
+    } else {
+        format!(
+            "Use when: `{}` is invoked for work related to `{}`.\n\nInstructions: Mount Memory Card \"{}\" as targeted Skill context: {}\n\nBoundaries: Apply only when it fits this Skill's responsibility; keep human review when evidence is weak, duplicates existing Skill text, or would change user intent.",
+            skill.name, memory_card.kind, memory_card.title, memory_card.body
+        )
+    }
+}
+
+fn memory_card_recommends_for_skill(record: &memory_card::MemoryCardRecord) -> bool {
+    matches!(record.activation.as_str(), "skill")
+        || matches!(
+            record.kind.as_str(),
+            "procedure" | "workflow" | "template" | "supplement"
+        )
+}
+
 pub fn load_project_assignment_view(project_root: &Path) -> anyhow::Result<ProjectAssignmentView> {
     let root = fsutil::normalize_project_root(project_root)?;
     let config = config::load_or_default_project_config(&root)?;
@@ -327,6 +639,150 @@ pub fn load_project_quality_view(project_root: &Path) -> anyhow::Result<ProjectQ
         build_preview: build::build_project(&root, true)?,
         status: build::status_project(&root)?,
     })
+}
+
+pub fn load_project_eval_run_view(project_root: &Path) -> anyhow::Result<ProjectEvalRunView> {
+    let root = fsutil::normalize_project_root(project_root)?;
+    let Some(run) = eval::load_latest_golden_set_eval_run(&root)? else {
+        return Ok(ProjectEvalRunView {
+            project_path: fsutil::path_to_slash(&root),
+            status: "missing".to_string(),
+            provider: None,
+            pipeline_version: None,
+            timestamp: None,
+            recall: None,
+            precision: None,
+            one_off_false_positive: None,
+            duplicate_cluster_risk: None,
+            evidence_validity: None,
+            provider_evidence_validity: None,
+            recommendations: vec![
+                "Run `cargo run --quiet -- eval --golden-set --project . --json` to create the first eval baseline.".to_string(),
+            ],
+        });
+    };
+    let report = run.report;
+    let provider_evidence_validity = match (
+        report.provider_evidence_valid_count,
+        report.provider_evidence_valid_percent,
+    ) {
+        (Some(count), Some(percent)) => Some(metric(
+            "Provider evidence validity",
+            Some(percent),
+            count,
+            report.positive_total,
+            percent >= 80.0,
+        )),
+        _ => None,
+    };
+    let recall = metric(
+        "Recall",
+        Some(report.positive_recall_percent),
+        report.positive_hits,
+        report.positive_total,
+        report.positive_recall_percent >= 85.0,
+    );
+    let precision = metric(
+        "Precision",
+        Some(report.negative_precision_percent),
+        report.negative_rejected,
+        report.negative_total,
+        report.negative_precision_percent >= 90.0,
+    );
+    let one_off_false_positive = metric(
+        "One-off false positives",
+        Some(report.one_off_false_positive_percent),
+        report.one_off_false_positive_count,
+        report.negative_total,
+        report.one_off_false_positive_count == 0,
+    );
+    let duplicate_cluster_risk = metric(
+        "Duplicate risk",
+        Some(report.duplicate_cluster_risk_percent),
+        report.duplicate_cluster_risk_count,
+        report.positive_total,
+        report.duplicate_cluster_risk_count == 0,
+    );
+    let evidence_validity = metric(
+        "Evidence validity",
+        Some(report.evidence_valid_percent),
+        report.evidence_valid_count,
+        report.positive_total,
+        report.evidence_valid_percent >= 95.0,
+    );
+    let recommendations = eval_recommendations(
+        &recall,
+        &precision,
+        &one_off_false_positive,
+        &duplicate_cluster_risk,
+        &evidence_validity,
+        provider_evidence_validity.as_ref(),
+    );
+    let status = if recommendations.is_empty() {
+        "passing"
+    } else {
+        "attention"
+    };
+    Ok(ProjectEvalRunView {
+        project_path: fsutil::path_to_slash(&root),
+        status: status.to_string(),
+        provider: Some(run.provider),
+        pipeline_version: Some(run.pipeline_version),
+        timestamp: Some(run.timestamp),
+        recall: Some(recall),
+        precision: Some(precision),
+        one_off_false_positive: Some(one_off_false_positive),
+        duplicate_cluster_risk: Some(duplicate_cluster_risk),
+        evidence_validity: Some(evidence_validity),
+        provider_evidence_validity,
+        recommendations,
+    })
+}
+
+fn metric(
+    label: &str,
+    percent: Option<f32>,
+    count: usize,
+    total: usize,
+    passed: bool,
+) -> ProjectEvalMetricView {
+    ProjectEvalMetricView {
+        label: label.to_string(),
+        percent,
+        count,
+        total,
+        status: if passed { "pass" } else { "fail" }.to_string(),
+    }
+}
+
+fn eval_recommendations(
+    recall: &ProjectEvalMetricView,
+    precision: &ProjectEvalMetricView,
+    one_off_false_positive: &ProjectEvalMetricView,
+    duplicate_cluster_risk: &ProjectEvalMetricView,
+    evidence_validity: &ProjectEvalMetricView,
+    provider_evidence_validity: Option<&ProjectEvalMetricView>,
+) -> Vec<String> {
+    let mut recommendations = Vec::new();
+    if recall.status == "fail" {
+        recommendations.push("Review missed positive golden cases before trusting new extraction changes.".to_string());
+    }
+    if precision.status == "fail" {
+        recommendations.push("Tighten rejection rules for negative golden cases to reduce noisy suggestions.".to_string());
+    }
+    if one_off_false_positive.status == "fail" {
+        recommendations.push("Inspect one-off leaks and raise recurrence requirements for temporary preferences.".to_string());
+    }
+    if duplicate_cluster_risk.status == "fail" {
+        recommendations.push("Tune clustering/deduplication before approving duplicate-looking Memory Cards.".to_string());
+    }
+    if evidence_validity.status == "fail" {
+        recommendations.push("Fix final evidence quote grounding before showing suggestions as review-ready.".to_string());
+    }
+    if provider_evidence_validity.is_some_and(|metric| metric.status == "fail") {
+        recommendations.push("Rerun with provider evidence checks and inspect hallucinated or weak provider quotes.".to_string());
+    }
+    recommendations
 }
 
 pub fn start_evolve_project_job(
@@ -542,13 +998,36 @@ pub fn start_sync_project_job(
         );
         match sync_project_importing_artifact_drifts(Path::new(&background_project_path)) {
             Ok(report) => {
+                let checkpoint = build::load_last_sync_checkpoint(Path::new(&background_project_path))
+                    .ok()
+                    .flatten();
+                let rule_ci = rule_test::run_rule_tests(Path::new(&background_project_path)).ok();
+                let verification_note = rule_ci
+                    .map(|report| format!("Rule CI {} passed / {} failed", report.passed, report.failed))
+                    .unwrap_or_else(|| "Rule CI 状态待刷新".to_string());
                 if report.created > 0 {
                     background_store.finish_job(
                         &job_id,
-                        &format!("已导入 {} 条漂移草稿并同步生成产物", report.created),
+                        &format!(
+                            "已导入 {} 条漂移草稿并同步生成产物；{}；checkpoint {}",
+                            report.created,
+                            verification_note,
+                            checkpoint
+                                .map(|item| item.id)
+                                .unwrap_or_else(|| "未记录".to_string())
+                        ),
                     );
                 } else {
-                    background_store.finish_job(&job_id, "已同步生成产物");
+                    background_store.finish_job(
+                        &job_id,
+                        &format!(
+                            "已同步生成产物；{}；checkpoint {}",
+                            verification_note,
+                            checkpoint
+                                .map(|item| item.id)
+                                .unwrap_or_else(|| "未记录".to_string())
+                        ),
+                    );
                 }
             }
             Err(error) => background_store.finish_job(&job_id, &format!("同步失败：{error}")),
@@ -619,380 +1098,5 @@ pub fn start_fuse_memory_cards_to_draft_job(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn seed_draft(project_root: &Path, id: &str) {
-        draft::add_draft(
-            project_root,
-            draft::NewDraft {
-                id: id.to_string(),
-                title: "Prefer Bun".to_string(),
-                body: "Use Bun for JavaScript package management and scripts.".to_string(),
-                kind: "preference".to_string(),
-                scope: "project".to_string(),
-                targets: vec!["codex".to_string()],
-                evidence: "service test".to_string(),
-                confidence: Some(0.9),
-                reason: Some("Repeated correction".to_string()),
-                matched_template: None,
-                extraction: agent_kernel::candidate::ExtractionMetadata::default(),
-            },
-        )
-        .expect("seed draft");
-    }
-
-    fn seed_memory_card(project_root: &Path, id: &str) {
-        memory_card::add_memory_card(
-            project_root,
-            id,
-            "Use Axios",
-            "Use Axios for frontend HTTP requests.",
-            "preference",
-            "project",
-            vec!["codex".to_string()],
-        )
-        .expect("seed memory_card");
-    }
-
-    #[test]
-    fn approve_draft_promotes_to_memory_card_and_removes_from_inbox() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        seed_draft(temp.path(), "project:prefer-bun");
-
-        approve_draft(temp.path(), "project:prefer-bun").expect("approve draft");
-        let memory_cards = memory_card::load_memory_cards(temp.path()).expect("memory_cards");
-
-        assert_eq!(memory_cards[0].id, "project:prefer-bun");
-        assert_eq!(load_project_review_inbox(temp.path()).expect("inbox").drafts.len(), 0);
-        assert_eq!(memory_cards.len(), 1);
-    }
-
-    #[test]
-    fn reject_draft_removes_draft_without_creating_memory_card() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        seed_draft(temp.path(), "project:reject-me");
-
-        reject_draft(temp.path(), "project:reject-me").expect("reject draft");
-
-        assert_eq!(load_project_review_inbox(temp.path()).expect("inbox").drafts.len(), 0);
-        assert_eq!(memory_card::load_memory_cards(temp.path()).expect("memory_cards").len(), 0);
-    }
-
-    #[test]
-    fn update_draft_maps_editor_input_and_persists_fields() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        seed_draft(temp.path(), "project:editable");
-
-        let updated = update_draft(
-            temp.path(),
-            "project:editable",
-            DraftUpdateInput {
-                title: Some("Prefer Bun".to_string()),
-                body: Some("Use Bun for JavaScript package management.".to_string()),
-                brief: Some("Use Bun".to_string()),
-                tags: Some(vec!["tooling".to_string()]),
-                language: Some("en".to_string()),
-                kind: Some("preference".to_string()),
-                scope: Some("project".to_string()),
-                targets: Some(Vec::new()),
-            },
-        )
-        .expect("update draft");
-
-        assert_eq!(updated.title, "Prefer Bun");
-        assert_eq!(updated.brief, "Use Bun");
-        assert_eq!(updated.tags, vec!["tooling"]);
-        assert_eq!(updated.targets, Vec::<String>::new());
-    }
-
-    #[test]
-    fn merge_drafts_creates_combined_draft_and_removes_sources() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        seed_draft(temp.path(), "project:first");
-        seed_draft(temp.path(), "project:second");
-
-        merge_drafts(
-            temp.path(),
-            DraftMergeInput {
-                id: "project:merged".to_string(),
-                title: "Merged".to_string(),
-                sources: vec!["project:first".to_string(), "project:second".to_string()],
-                targets: vec!["codex".to_string()],
-            },
-        )
-        .expect("merge drafts");
-
-        let drafts = draft::load_drafts(temp.path()).expect("drafts");
-        assert_eq!(drafts.len(), 1);
-        let merged = drafts
-            .iter()
-            .find(|draft| draft.id == "project:merged")
-            .expect("merged draft");
-        assert!(merged.body.contains("Use Bun"));
-        assert!(!drafts.iter().any(|draft| draft.id == "project:first"));
-        assert!(!drafts.iter().any(|draft| draft.id == "project:second"));
-    }
-
-    #[test]
-    fn assignment_services_update_agent_and_memory_card_targets() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        seed_memory_card(temp.path(), "project:use-axios");
-
-        set_agent_enabled(temp.path(), "claude-code", false).expect("disable agent");
-        set_memory_card_targets(
-            temp.path(),
-            "project:use-axios",
-            vec!["claude-code".to_string()],
-        )
-        .expect("set targets");
-
-        let assignment = load_project_assignment_view(temp.path()).expect("assignment");
-        assert!(!assignment.enabled_agents.contains(&"claude-code".to_string()));
-        let row = assignment
-            .target_matrix
-            .rows
-            .iter()
-            .find(|row| row.memory_card_id == "project:use-axios")
-            .expect("memory_card row");
-        assert_eq!(row.targets.get("claude-code"), Some(&true));
-    }
-
-    #[test]
-    fn update_memory_card_maps_editor_input_and_persists_fields() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        seed_memory_card(temp.path(), "project:editable");
-
-        let updated = update_memory_card(
-            temp.path(),
-            "project:editable",
-            MemoryCardUpdateInput {
-                title: Some("Use Axios Everywhere".to_string()),
-                body: Some("Use Axios for every frontend HTTP request.".to_string()),
-                brief: Some("Axios standard".to_string()),
-                tags: Some(vec!["frontend".to_string()]),
-                language: Some("en".to_string()),
-                kind: Some("preference".to_string()),
-                scope: Some("project".to_string()),
-            },
-        )
-        .expect("update memory_card");
-
-        assert_eq!(updated.title, "Use Axios Everywhere");
-        assert_eq!(updated.brief, "Axios standard");
-        assert_eq!(updated.tags, vec!["frontend"]);
-    }
-
-    #[test]
-    fn global_memory_card_services_promote_and_install_with_targets() {
-        let source = tempfile::tempdir().expect("source");
-        let target = tempfile::tempdir().expect("target");
-        let home = tempfile::tempdir().expect("home");
-        seed_memory_card(source.path(), "project:review-before-sync");
-
-        let global = promote_memory_card_to_global(source.path(), home.path(), "project:review-before-sync")
-            .expect("promote global");
-        let installed = install_global_memory_card_to_project(
-            target.path(),
-            home.path(),
-            &global.id,
-            vec!["codex".to_string()],
-        )
-        .expect("install global");
-
-        assert_eq!(global.id, "global:review-before-sync");
-        assert_eq!(installed.id, "global:review-before-sync");
-        assert_eq!(memory_card::load_memory_cards(target.path()).expect("memory_cards").len(), 1);
-        let config = config::load_or_default_project_config(target.path()).expect("config");
-        assert_eq!(config.memory_cards.include[0].targets, vec!["codex"]);
-    }
-
-    #[test]
-    fn merge_memory_cards_service_creates_combined_memory_card() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        seed_memory_card(temp.path(), "project:ui-a");
-        seed_memory_card(temp.path(), "project:ui-b");
-
-        merge_memory_cards(
-            temp.path(),
-            MemoryCardMergeInput {
-                id: "project:ui-merged".to_string(),
-                title: "Merged UI".to_string(),
-                sources: vec!["project:ui-a".to_string(), "project:ui-b".to_string()],
-                targets: vec!["codex".to_string()],
-            },
-        )
-        .expect("merge memory_cards");
-
-        let merged = memory_card::load_memory_cards(temp.path())
-            .expect("memory_cards")
-            .into_iter()
-            .find(|record| record.id == "project:ui-merged")
-            .expect("merged memory_card");
-        assert_eq!(merged.id, "project:ui-merged");
-        assert!(merged.body.contains("Use Axios"));
-    }
-
-    #[test]
-    fn attach_memory_card_service_updates_skill_supplements() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        seed_memory_card(temp.path(), "project:use-axios");
-        config::save_skill_index(
-            temp.path(),
-            &config::SkillIndex {
-                generated_at: "test".to_string(),
-                skills: vec![config::SkillRecord {
-                    id: "skill:frontend".to_string(),
-                    name: "Frontend".to_string(),
-                    description: "Frontend workflow".to_string(),
-                    source_path: ".agents/skills/frontend".to_string(),
-                    source_kind: "project".to_string(),
-                    source_hash: "hash".to_string(),
-                    warnings: Vec::new(),
-                }],
-            },
-        )
-        .expect("skill index");
-
-        attach_memory_card_to_skill(temp.path(), "project:use-axios", "skill:frontend")
-            .expect("attach memory_card");
-
-        let config = config::load_or_default_project_config(temp.path()).expect("config");
-        assert_eq!(config.skills.supplements[0].skill, "skill:frontend");
-        assert_eq!(config.skills.supplements[0].memory_cards[0], "project:use-axios");
-    }
-
-    #[test]
-    fn install_catalog_package_service_installs_memory_card_with_targets() {
-        let temp = tempfile::tempdir().expect("tempdir");
-
-        let package = install_catalog_package(
-            temp.path(),
-            "core:rust-quality-gate",
-            vec!["codex".to_string()],
-        )
-        .expect("install catalog package");
-
-        assert_eq!(package.id, "core:rust-quality-gate");
-        let memory_cards = memory_card::load_memory_cards(temp.path()).expect("memory_cards");
-        assert_eq!(memory_cards[0].id, "core:rust-quality-gate");
-        let config = config::load_or_default_project_config(temp.path()).expect("config");
-        assert_eq!(config.memory_cards.include[0].targets, vec!["codex"]);
-    }
-
-    #[test]
-    fn sync_job_service_records_replayable_background_job_ticket() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let store = crate::DesktopTaskStore::default();
-
-        let start = start_sync_project_job(store.clone(), fsutil::path_to_slash(temp.path()));
-
-        let status = store.snapshot();
-        let replay = status.replay.expect("replay payload");
-        assert!(start.accepted);
-        assert_eq!(start.key, "同步");
-        assert_eq!(status.job_id, start.job_id);
-        assert_eq!(replay.command, "sync_project");
-        assert_eq!(replay.args["projectPath"], fsutil::path_to_slash(temp.path()));
-    }
-
-    #[test]
-    fn evolve_job_service_records_engine_targets_and_home_in_replay() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let home = tempfile::tempdir().expect("home");
-        let store = crate::DesktopTaskStore::default();
-
-        let start = start_evolve_project_job(
-            store.clone(),
-            fsutil::path_to_slash(temp.path()),
-            home.path().to_path_buf(),
-            vec!["codex".to_string()],
-            true,
-            "local".to_string(),
-        );
-
-        let status = store.snapshot();
-        let replay = status.replay.expect("replay payload");
-        assert!(start.accepted);
-        assert_eq!(start.key, "整理历史");
-        assert_eq!(status.job_id, start.job_id);
-        assert_eq!(replay.command, "evolve_project");
-        assert_eq!(replay.args["home"], fsutil::path_to_slash(home.path()));
-        assert_eq!(replay.args["targets"][0], "codex");
-        assert_eq!(replay.args["dryRun"], true);
-        assert_eq!(replay.args["engine"], "local");
-    }
-
-    #[test]
-    fn scan_job_service_records_roots_depth_and_home_in_replay() {
-        let root = tempfile::tempdir().expect("root");
-        let home = tempfile::tempdir().expect("home");
-        let store = crate::DesktopTaskStore::default();
-
-        let start = start_scan_projects_job(
-            store.clone(),
-            home.path().to_path_buf(),
-            vec![root.path().to_path_buf()],
-            3,
-        );
-
-        let status = store.snapshot();
-        let replay = status.replay.expect("replay payload");
-        assert!(start.accepted);
-        assert_eq!(start.key, "扫描");
-        assert_eq!(status.job_id, start.job_id);
-        assert_eq!(replay.command, "scan_projects");
-        assert_eq!(replay.args["home"], fsutil::path_to_slash(home.path()));
-        assert_eq!(replay.args["roots"][0], fsutil::path_to_slash(root.path()));
-        assert_eq!(replay.args["maxDepth"], 3);
-    }
-
-    #[test]
-    fn fuse_job_service_records_precise_input_in_replay() {
-        let project = tempfile::tempdir().expect("project");
-        let store = crate::DesktopTaskStore::default();
-        let input = MemoryCardMergeInput {
-            id: "draft:fused-ui".to_string(),
-            title: "融合 UI 规则".to_string(),
-            sources: vec!["project:ui-a".to_string(), "project:ui-b".to_string()],
-            targets: vec!["codex".to_string()],
-        };
-
-        let start = start_fuse_memory_cards_to_draft_job(
-            store.clone(),
-            fsutil::path_to_slash(project.path()),
-            input,
-        );
-
-        let status = store.snapshot();
-        let replay = status.replay.expect("replay payload");
-        assert!(start.accepted);
-        assert_eq!(start.key, "融合 Memory Card");
-        assert_eq!(status.job_id, start.job_id);
-        assert_eq!(replay.command, "fuse_memory_cards_to_draft");
-        assert_eq!(replay.args["input"]["id"], "draft:fused-ui");
-        assert_eq!(replay.args["input"]["sources"][1], "project:ui-b");
-        assert_eq!(replay.args["input"]["targets"][0], "codex");
-    }
-
-    #[test]
-    fn import_project_service_initializes_project_metadata() {
-        let temp = tempfile::tempdir().expect("tempdir");
-
-        import_project(temp.path(), false).expect("import project");
-
-        let config = config::load_or_default_project_config(temp.path()).expect("config");
-        assert_eq!(config.version, 1);
-    }
-
-    #[test]
-    fn quality_mutation_services_return_build_reports() {
-        let temp = tempfile::tempdir().expect("tempdir");
-
-        let preview = build_preview(temp.path()).expect("build preview");
-        import_artifact_drifts(temp.path()).expect("import drifts");
-        compile_project(temp.path()).expect("compile project");
-
-        assert!(preview.render().contains("AGENTS.md"));
-    }
-}
+#[path = "app_service_tests.rs"]
+mod tests;

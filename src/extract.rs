@@ -15,14 +15,18 @@ mod atomic;
 mod candidate_factory;
 pub mod chunk;
 pub mod classify;
+pub mod cluster;
+pub mod crystallize;
 mod dedupe;
 pub(crate) mod embedding;
 mod feedback_gate;
 pub mod gate;
+pub mod induce;
 pub mod lifecycle;
 mod llm;
 mod llm_pipeline_impl;
 pub(crate) mod memory_gate;
+pub mod pipeline;
 mod preference;
 pub mod quality;
 mod quality_gate;
@@ -33,26 +37,34 @@ mod report;
 pub mod scoring;
 mod shared_impl;
 mod signals;
+pub mod strip;
+pub mod truncate;
 
 pub use preference::{
     PreferenceRegistryValidationReport, PreferenceTemplatePreview, PreferenceTestMatch,
     PreferenceTestReport, init_preference_registry, preference_templates, test_preference_text,
     validate_preference_registry,
 };
-pub use quality::{QualityReport, QualityTextCase, quality_report_for_text_cases};
+pub use quality::{
+    CardQualityFailure, CardQualityInput, CardQualityReport, CardQualityScores, QualityReport,
+    QualityTextCase, quality_report_for_card, quality_report_for_crystallized_card,
+    quality_report_for_text_cases,
+};
 
 use atomic::split_atomic_sentences;
 use candidate_factory::{
-    atomic_exception_candidate, classify_kind, draft_id, extraction_metadata_for_chunk,
-    high_value_prompt_candidate, infer_scope, looks_like_memory_card_signal, looks_like_rule,
-    normalize_body, normalize_project_improvement_body, principle_candidates,
-    scored_signal_candidate, self_verification_candidate, title_from_body,
+    atomic_exception_candidate, classify_kind, delivery_acceptance_candidate, draft_id,
+    existing_flow_planning_candidate, extraction_metadata_for_chunk, failure_flow_candidates,
+    global_flow_candidates, high_value_prompt_candidate, infer_scope,
+    local_only_golden_set_candidate, looks_like_memory_card_signal, looks_like_rule,
+    normalize_body, normalize_project_improvement_body,
+    parallel_agent_github_coordination_candidate, planning_deduplication_candidate,
+    principle_candidates, project_startup_collaboration_candidate, scored_signal_candidate,
+    self_verification_candidate, speed_validation_cadence_candidate, title_from_body,
     title_from_project_improvement,
 };
 use dedupe::dedupe_candidates;
 use llm_pipeline_impl::extract_llm_text_to_drafts;
-#[cfg(test)]
-use preference::built_in_preferences;
 use preference::{KnownPreference, load_known_preferences, normalize_known_preference};
 use quality_gate::{QualityDisposition, evaluate_candidate_quality, quality_skip_message};
 use shared_impl::*;
@@ -719,21 +731,53 @@ fn route_action(action: candidate::ExtractionAction, route: &str) -> candidate::
     }
 }
 
-#[cfg(test)]
-fn extract_candidates(input: &str) -> Vec<Candidate> {
-    let preferences = built_in_preferences();
-    extract_candidates_with_preferences(input, &preferences, false)
-}
-
 fn extract_candidates_with_preferences(
     input: &str,
     preferences: &[KnownPreference],
     fallback_methodology_templates: bool,
 ) -> Vec<Candidate> {
     let mut candidates = Vec::new();
+    candidates.extend(failure_flow_candidates(input));
+    candidates.extend(global_flow_candidates(input));
+    if is_structured_flow_material(input) {
+        return dedupe_candidates(candidates);
+    }
+    if should_try_whole_input_candidate(input)
+        && let Some(candidate) = project_startup_collaboration_candidate(input)
+    {
+        candidates.push(candidate);
+    }
     for raw_sentence in split_sentences(input) {
         for sentence in split_atomic_sentences(raw_sentence) {
             let sentence = sentence.as_str();
+            if let Some(candidate) = project_startup_collaboration_candidate(sentence) {
+                candidates.push(candidate);
+                continue;
+            }
+            if let Some(candidate) = speed_validation_cadence_candidate(sentence) {
+                candidates.push(candidate);
+                continue;
+            }
+            if let Some(candidate) = existing_flow_planning_candidate(sentence) {
+                candidates.push(candidate);
+                continue;
+            }
+            if let Some(candidate) = delivery_acceptance_candidate(sentence) {
+                candidates.push(candidate);
+                continue;
+            }
+            if let Some(candidate) = planning_deduplication_candidate(sentence) {
+                candidates.push(candidate);
+                continue;
+            }
+            if let Some(candidate) = parallel_agent_github_coordination_candidate(sentence) {
+                candidates.push(candidate);
+                continue;
+            }
+            if let Some(candidate) = local_only_golden_set_candidate(sentence) {
+                candidates.push(candidate);
+                continue;
+            }
             if let Some(candidate) = self_verification_candidate(sentence) {
                 candidates.push(candidate);
                 continue;
@@ -823,12 +867,61 @@ fn extract_high_value_candidates_with_preferences(
     fallback_methodology_templates: bool,
 ) -> Vec<Candidate> {
     let mut candidates = Vec::new();
+    candidates.extend(failure_flow_candidates(input));
+    candidates.extend(global_flow_candidates(input));
+    if is_structured_flow_material(input) {
+        let deduped = dedupe_candidates(candidates);
+        let selected = ranking::select_balanced_candidates(
+            &deduped,
+            max_candidates,
+            candidate_selection_score,
+            ranking::candidate_cluster_key,
+            |candidate| candidate.memory_tier.clone(),
+        );
+        return selected
+            .into_iter()
+            .filter_map(|index| deduped.get(index).cloned())
+            .collect();
+    }
+    if should_try_whole_input_candidate(input)
+        && let Some(candidate) = project_startup_collaboration_candidate(input)
+    {
+        candidates.push(candidate);
+    }
     let mut weak_counts = std::collections::BTreeMap::<String, usize>::new();
     let mut weak_candidates = std::collections::BTreeMap::<String, Candidate>::new();
 
     for raw_sentence in split_sentences(input) {
         for sentence in split_atomic_sentences(raw_sentence) {
             let sentence = sentence.as_str();
+            if let Some(candidate) = project_startup_collaboration_candidate(sentence) {
+                candidates.push(candidate);
+                continue;
+            }
+            if let Some(candidate) = speed_validation_cadence_candidate(sentence) {
+                candidates.push(candidate);
+                continue;
+            }
+            if let Some(candidate) = existing_flow_planning_candidate(sentence) {
+                candidates.push(candidate);
+                continue;
+            }
+            if let Some(candidate) = delivery_acceptance_candidate(sentence) {
+                candidates.push(candidate);
+                continue;
+            }
+            if let Some(candidate) = planning_deduplication_candidate(sentence) {
+                candidates.push(candidate);
+                continue;
+            }
+            if let Some(candidate) = parallel_agent_github_coordination_candidate(sentence) {
+                candidates.push(candidate);
+                continue;
+            }
+            if let Some(candidate) = local_only_golden_set_candidate(sentence) {
+                candidates.push(candidate);
+                continue;
+            }
             if let Some(candidate) = self_verification_candidate(sentence) {
                 candidates.push(candidate);
                 continue;
@@ -939,4 +1032,434 @@ fn extract_high_value_candidates_with_preferences(
         .into_iter()
         .filter_map(|index| deduped.get(index).cloned())
         .collect()
+}
+
+fn should_try_whole_input_candidate(input: &str) -> bool {
+    input.lines().filter(|line| !line.trim().is_empty()).count() <= 2 && input.len() <= 700
+}
+
+fn is_structured_flow_material(input: &str) -> bool {
+    input.contains("ConversationFlowSummary:") || input.contains("FailureFlowSummary:")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn high_value_extraction_rejects_one_off_copy_release_and_generic_ux_requests() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let report = extract_high_value_text_to_drafts(
+                temp.path(),
+                "请给这个开源项目写一篇社区宣传帖，不要太长，去除 AI 味道，不要写得太生硬，有人的味道和情绪表达一点。\nREADME 里删掉当前范围、技术栈和路线提醒，重新组织内容，然后打 v0.1.0 release。\n全面分析一下现有项目的功能上还有什么不足或者可以优化用户体验的地方，告诉我。",
+                vec!["codex".to_string()],
+                "observation synthesis, chunk 1/1",
+                Some("local".to_string()),
+                true,
+                8,
+            )
+            .expect("extract");
+
+        assert!(
+            report.candidates.is_empty(),
+            "one-off copywriting, release, README, and generic UX analysis requests should not become MemoryCard drafts: {:?}",
+            report.candidates
+        );
+    }
+
+    #[test]
+    fn high_value_extraction_rejects_isolated_aesthetic_fragments() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            "保留例外：不要太丑，极简也可以很美。",
+            vec!["codex".to_string()],
+            "observation synthesis, chunk 1/1",
+            Some("local".to_string()),
+            true,
+            8,
+        )
+        .expect("extract");
+
+        assert!(
+            report.candidates.is_empty(),
+            "isolated aesthetic fragments without an operational trigger should not become MemoryCard drafts: {:?}",
+            report.candidates
+        );
+    }
+
+    #[test]
+    fn high_value_extraction_keeps_project_startup_visual_collaboration_preference() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            "有些内容可能用浏览器里的可视化更容易讨论，比如弹窗、标注、设置页布局和架构图。我可以边聊边做轻量 mockup、对比图或流程图给你看。用户同意使用这个方式。",
+            vec!["codex".to_string()],
+            "observation synthesis, chunk 1/1",
+            Some("local".to_string()),
+            true,
+            8,
+        )
+        .expect("extract");
+
+        assert!(
+            report.candidates.iter().any(|candidate| {
+                candidate.memory_tier == MemoryTier::CollaborationPreference
+                    && candidate.body.contains("可视化")
+                    && candidate.body.contains("mockup")
+                    && candidate.body.contains("流程图")
+            }),
+            "visual project-startup collaboration preference should survive as an actionable rule: {:?}; skipped={:?}",
+            report.candidates,
+            report.skipped
+        );
+    }
+
+    #[test]
+    fn high_value_extraction_keeps_project_startup_reference_research_preference() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            "项目启动规划时，如果有可以借鉴的开源项目、同类产品或者任何相关内容，也可以先参考借鉴，再规划方案。",
+            vec!["codex".to_string()],
+            "observation synthesis, chunk 1/1",
+            Some("local".to_string()),
+            true,
+            8,
+        )
+        .expect("extract");
+
+        assert!(
+            report.candidates.iter().any(|candidate| {
+                candidate.memory_tier == MemoryTier::CollaborationPreference
+                    && candidate.body.contains("开源项目")
+                    && candidate.body.contains("同类产品")
+                    && candidate.body.contains("规划")
+            }),
+            "reference-research planning preference should not be treated as one-off open-source publishing work: {:?}; skipped={:?}",
+            report.candidates,
+            report.skipped
+        );
+    }
+
+    #[test]
+    fn high_value_extraction_rewrites_speed_validation_cadence_preference() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            "我确认，同时我希望迅速开发，不要过多检查/测试浪费时间，必要时测试/检查就行，然后最后全部完成前进行一次总的测试/检查就行。",
+            vec!["codex".to_string()],
+            "observation synthesis, chunk 1/1",
+            Some("local".to_string()),
+            true,
+            8,
+        )
+        .expect("extract");
+
+        assert!(
+            report.candidates.iter().any(|candidate| {
+                candidate.memory_tier == MemoryTier::CollaborationPreference
+                    && candidate.body.contains("小改")
+                    && candidate.body.contains("必要检查")
+                    && candidate.body.contains("完整测试")
+                    && !candidate.body.contains("浪费时间")
+            }),
+            "speed/validation cadence should become a durable workflow preference, not a raw complaint: {:?}; skipped={:?}",
+            report.candidates,
+            report.skipped
+        );
+    }
+
+    #[test]
+    fn high_value_extraction_keeps_stage_shaped_workflow_preferences() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            "项目启动阶段：遇到大型或模糊任务，先调研可借鉴的开源项目和同类产品，明确定位和核心功能，再制定计划。\n开发中段：改提炼、Memory Card 或 UI 流程前，先理解现有项目和既有流程，再提出改动方案。\n交付阶段：绿色测试只是证据之一，最终还要从用户实际感知和需求覆盖判断质量。\n规划阶段：使用 GitHub 或计划文档时，注意已经规划了的内容就不要重复规划了。\n评估阶段：Golden Set 只用于本地测试，不要把我自己的对话数据上传 Git，链路里面不应该用真实数据。",
+            vec!["codex".to_string()],
+            "observation synthesis, chunk 1/1",
+            Some("local".to_string()),
+            true,
+            10,
+        )
+        .expect("extract");
+
+        assert!(
+            report.candidates.iter().any(|candidate| {
+                candidate.body.contains("开源项目") && candidate.body.contains("同类产品")
+            }),
+            "startup research preference should be extracted: {:?}; skipped={:?}",
+            report.candidates,
+            report.skipped
+        );
+        assert!(
+            report.candidates.iter().any(|candidate| {
+                candidate.body.contains("先理解现有项目") && candidate.body.contains("既有流程")
+            }),
+            "mid-development existing-flow preference should be extracted: {:?}; skipped={:?}",
+            report.candidates,
+            report.skipped
+        );
+        assert!(
+            report.candidates.iter().any(|candidate| {
+                candidate.body.contains("绿色测试") && candidate.body.contains("用户实际感知")
+            }),
+            "delivery acceptance preference should be extracted: {:?}; skipped={:?}",
+            report.candidates,
+            report.skipped
+        );
+        assert!(
+            report.candidates.iter().any(|candidate| {
+                candidate.body.contains("避免重复规划") && candidate.body.contains("已有规划")
+            }),
+            "planning deduplication preference should be normalized: {:?}; skipped={:?}",
+            report.candidates,
+            report.skipped
+        );
+        assert!(
+            report.candidates.iter().any(|candidate| {
+                candidate.body.contains("Golden Set")
+                    && candidate.body.contains("本地效果评估")
+                    && candidate.body.contains("不要把真实对话数据")
+            }),
+            "local-only Golden Set privacy boundary should be normalized: {:?}; skipped={:?}",
+            report.candidates,
+            report.skipped
+        );
+    }
+
+    #[test]
+    fn high_value_extraction_normalizes_parallel_agent_github_coordination() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            "我现在有另一个agent的github上进行修改，注意不要重复，此外你也可以用github，但是注意已经规划了的内容就不要重复规划了。",
+            vec!["codex".to_string()],
+            "observation synthesis, chunk 1/1",
+            Some("local".to_string()),
+            true,
+            8,
+        )
+        .expect("extract");
+
+        assert!(
+            report.candidates.iter().any(|candidate| {
+                candidate.body.contains("多 agent")
+                    && candidate.body.contains("Issue")
+                    && candidate.body.contains("避免重复规划")
+            }),
+            "parallel GitHub agent coordination should be normalized: {:?}; skipped={:?}",
+            report.candidates,
+            report.skipped
+        );
+        assert!(
+            report
+                .candidates
+                .iter()
+                .all(|candidate| !candidate.body.contains("我现在有另一个agent")),
+            "raw user fragment should not be emitted as the card body: {:?}",
+            report.candidates
+        );
+    }
+
+    #[test]
+    fn high_value_extraction_rejects_goal_execution_and_phase_choice_noise() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            "/goal 使用Subagent-Driven模式，实现现有计划的所有功能，需要时可以搜索现有开源项目进行学习和借鉴其成熟思路和架构，完成M0之后进行简单测试，同时给出命令，让我自己运行测试一下。\n我同意，优先做 A/B 的基础体验，再用 C 做增强。\n/goal 接下来用这个spec_driven_develop这个skills结合github进行规划和实现，直到完成。\n真实历史 dry-run top 10 至少 3 条是合理候选。",
+            vec!["codex".to_string()],
+            "observation synthesis, chunk 1/1",
+            Some("local".to_string()),
+            true,
+            8,
+        )
+        .expect("extract");
+
+        assert!(
+            report.candidates.is_empty(),
+            "one-off /goal execution directives and local phase choices should not become global cards: {:?}; skipped={:?}",
+            report.candidates,
+            report.skipped
+        );
+    }
+
+    #[test]
+    fn high_value_extraction_rejects_code_analysis_noise() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            "**噪声过滤细致** — `extract.rs` 中的信号检测函数（`looks_like_rule`、`looks_like_skilllet_signal`）层层递进，有效地把一次性请求和持久规则区分开。",
+            vec!["codex".to_string()],
+            "observation synthesis, chunk 1/1",
+            Some("local".to_string()),
+            true,
+            8,
+        )
+        .expect("extract");
+
+        assert!(
+            report.candidates.is_empty(),
+            "code analysis praise should not become a project-improvement card: {report:#?}"
+        );
+    }
+
+    #[test]
+    fn high_value_extraction_rejects_code_analysis_validation_signal() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            "**噪声过滤细致** — `extract.rs` 中的信号检测函数（`looks_like_rule`、`looks_like_skilllet_signal`、`is_low_value_task_sentence`、`looks_like_unresolved_user_request`）层层递进，有效地把\"继续优化UI\"这种一次性求和\"所有Rust项目必须运行cargo test\"这种持久规则区分开",
+            vec!["codex".to_string()],
+            "observation synthesis, chunk 1/1",
+            Some("local".to_string()),
+            true,
+            8,
+        )
+        .expect("extract");
+
+        assert!(
+            report.candidates.is_empty(),
+            "code analysis validation signal should be filtered: {report:#?}"
+        );
+    }
+
+    #[test]
+    fn high_value_extraction_rejects_extraction_taxonomy_artifacts() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            "- 优先保留稳定偏好、流程、约束、质量标准、回归方法、审阅边界",
+            vec!["codex".to_string()],
+            "observation synthesis, chunk 1/1",
+            Some("local".to_string()),
+            true,
+            8,
+        )
+        .expect("extract");
+
+        assert!(
+            report.candidates.is_empty(),
+            "extraction taxonomy bullet should be filtered: {report:#?}"
+        );
+    }
+
+    #[test]
+    fn high_value_extraction_surfaces_failure_flow_pipeline_break_rule() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let input = "FailureFlowSummary:\n- signal:pipeline_break obs:a text:LLM induction JSON 被截断，解析失败，所以没有进入最终 crystallize 卡片阶段。\n- signal:final_quality_correction obs:b text:不能只看指标，要自己看最终卡片质量。\n";
+
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            input,
+            vec!["codex".to_string()],
+            "failure flow prefilter",
+            Some("local".to_string()),
+            true,
+            8,
+        )
+        .expect("extract");
+
+        assert!(
+            report
+                .candidates
+                .iter()
+                .any(|candidate| candidate.matched_template.as_deref()
+                    == Some("failure-flow:pipeline-break")),
+            "{report:#?}"
+        );
+        assert!(
+            report
+                .candidates
+                .iter()
+                .any(|candidate| candidate.body.contains("先定位链路断点")),
+            "{report:#?}"
+        );
+    }
+
+    #[test]
+    fn high_value_extraction_surfaces_failure_flow_boundary_rules() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let input = "FailureFlowSummary:\n- signal:false_positive_noise obs:a text:代码分析和抽取 taxonomy 不应该计入长期记忆。\n- signal:privacy_boundary obs:b text:真实历史 dry-run 只用于本地评估，不进入 Git 或 Golden Set。\n- signal:scope_boundary obs:c text:项目记忆和全局记忆要分层，避免局部流程污染全局记忆。\n";
+
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            input,
+            vec!["codex".to_string()],
+            "failure flow prefilter",
+            Some("local".to_string()),
+            true,
+            8,
+        )
+        .expect("extract");
+
+        for template in [
+            "failure-flow:false-positive-abstraction",
+            "failure-flow:local-only-regression",
+            "failure-flow:scope-boundary",
+        ] {
+            assert!(
+                report
+                    .candidates
+                    .iter()
+                    .any(|candidate| candidate.matched_template.as_deref() == Some(template)),
+                "{template}: {report:#?}"
+            );
+        }
+    }
+
+    #[test]
+    fn high_value_extraction_canonicalizes_design_stage_shorthand() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            "设计阶段：先提问、先澄清目标、先规划、从用户视角看。",
+            vec!["codex".to_string()],
+            "test",
+            Some("local".to_string()),
+            true,
+            8,
+        )
+        .expect("extract");
+
+        assert!(
+            report.candidates.iter().any(|candidate| {
+                candidate.scope == "global"
+                    && candidate.body
+                        == "设计阶段先提问、先澄清目标、先规划，并从用户视角检查方案。"
+            }),
+            "{report:#?}"
+        );
+    }
+
+    #[test]
+    fn high_value_extraction_surfaces_transferable_failure_lessons() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let input = "FailureFlowSummary:\n- signal:refactor_correction obs:a text:我有几次重构和纠偏，这些都可以吸取经验，形成高质量工作流里的模块。\n- signal:transferable_workflow obs:b text:项目特殊偏好也可以提取或修改为全局偏好，迁移到其他项目或放进自己的工作流。\n- signal:review_iterate_loop obs:c text:测试时必须看真实数据生成了什么记忆卡片，结合目标审核，分析问题和解决方案，修改优化直到符合预期。\n";
+
+        let report = extract_high_value_text_to_drafts(
+            temp.path(),
+            input,
+            vec!["codex".to_string()],
+            "failure flow prefilter",
+            Some("local".to_string()),
+            true,
+            8,
+        )
+        .expect("extract");
+
+        for template in [
+            "failure-flow:refactor-lessons",
+            "failure-flow:transferable-workflow",
+            "failure-flow:review-iterate-loop",
+        ] {
+            assert!(
+                report
+                    .candidates
+                    .iter()
+                    .any(|candidate| candidate.matched_template.as_deref() == Some(template)),
+                "{template}: {report:#?}"
+            );
+        }
+    }
 }

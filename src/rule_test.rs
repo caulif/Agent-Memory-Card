@@ -25,14 +25,14 @@ pub struct RuleExpect {
     pub exclude: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct RuleTestReport {
     pub passed: usize,
     pub failed: usize,
     pub rows: Vec<RuleTestRow>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct RuleTestRow {
     pub name: String,
     pub status: String,

@@ -5,7 +5,9 @@
   ProjectReviewInbox,
   ProjectCandidateInbox,
   ProjectMemoryCardLibrary,
+  ProjectSkillLibrary,
   ProjectAssignmentView,
+  ProjectEvalRunView,
   ProjectQualityView,
   RegisteredProject,
 } from "../types/domain";
@@ -51,7 +53,7 @@ export function createDemoProjectSnapshot(projectPath: string): ProjectSnapshot 
         brief: "前端需在无原生运行时自动降级为演示模式",
         kind: "rule",
         scope: "project",
-        body: "当桌面运行时不可用时，前端进入演示模式，继续展示项目、草稿、技能片段和分配矩阵。",
+        body: "当桌面运行时不可用时，前端进入演示模式，继续展示项目、草稿、Memory Card 和装填槽位。",
         targets: ["codex", "claude-code"],
         evidence: "来自当前预览会话的静态示例。",
         confidence: 0.91,
@@ -104,6 +106,35 @@ export function createDemoProjectSnapshot(projectPath: string): ProjectSnapshot 
         body: "检测到没有 Tauri 运行时后，加载静态项目快照，让页面可以继续导航和展示。",
         tags: ["ui-design", "preview"],
         language: "zh-CN",
+        activation: "skill",
+        extraction: {
+          card_function: "skill_targeted",
+          value_claim: "补强预览 Skill 的验收边界，让用户能先看到功能闭环是否真的可用。",
+          value_delta: {
+            existing_behavior: "预览 Skill 已能展示静态数据。",
+            missing_part: "缺少对真实用户路径和验收边界的说明。",
+            new_behavior: "下次使用预览 Skill 时先确认关键路径、证据展示和动作按钮是否完整。",
+            why_not_duplicate: "它不是重复描述预览模式，而是补上验收与使用边界。",
+          },
+          target_context: {
+            target_type: "project_skill",
+            target_id: "project:obsidian-markdown",
+            why_this_target: "该 Skill 负责项目预览与文档路径，最需要这张 Memory Card 的验收边界。",
+          },
+          skill_usefulness: {
+            target_skill_id: "project:obsidian-markdown",
+            before_behavior: "Before: Skill `obsidian-markdown` covers note editing and documentation paths.",
+            after_behavior: "After: proposal adds acceptance to the target Skill behavior.",
+            improved_axes: ["acceptance"],
+            missing_axes: ["boundary"],
+            verdict: "counterfactual_pass",
+            score: 0.48,
+          },
+          synthesis_trace: [
+            { step: "value_delta", summary: "Compared demo preview behavior against the Skill target.", item_ids: [] },
+            { step: "rewrite", summary: "Rendered as a Skill-targeted Memory Card.", item_ids: [] },
+          ],
+        },
       },
       {
         id: "safe-actions",
@@ -186,8 +217,8 @@ export function createDemoProjectSnapshot(projectPath: string): ProjectSnapshot 
     build_preview: {
       actions: [
         "将演示草稿同步到 Codex 预览目标",
-        "更新 Claude Code 目标的技能片段索引",
-        "生成本地技能片段状态预览",
+        "更新 Claude Code 目标的 Memory Card 索引",
+        "生成本地 Memory Card 状态预览",
       ],
       warnings: ["当前为演示数据；真实文件读取和写入需要通过 bun run app:dev 启动 Tauri。"],
     },
@@ -238,8 +269,122 @@ export function createDemoProjectCandidateInbox(projectPath: string): ProjectCan
       reason: draft.reason ?? "演示候选来自本地高价值过滤。",
       matched_template: draft.matched_template,
       source_observations: [`demo-observation-${index + 1}`],
+      extraction: createDemoCandidateSynthesis(draft.extraction, index),
       status: "candidate",
     })),
+  };
+}
+
+function createDemoCandidateSynthesis(base: ProjectSnapshot["drafts"][number]["extraction"], index: number) {
+  if (index === 1) {
+    return {
+      ...(base ?? {}),
+      card_function: "library",
+      synthesis_action: "already_covered",
+      synthesis_stop_reason: "already_covered",
+      value_claim: "这条安全边界已由既有 Memory Card 覆盖，正确动作是归档候选而不是新增重复卡。",
+      value_delta: {
+        existing_behavior: "既有 Memory Card「本地安全动作」已说明预览模式不访问真实文件系统。",
+        missing_part: "未发现新的触发、动作或边界，只是重复同一安全约束。",
+        new_behavior: "审阅时选择 No New Card，保持规则库和 Skill 上下文精简。",
+        why_not_duplicate: "重复卡会让 agent 在相同安全边界上读取两份相似说明，降低上下文清晰度。",
+      },
+      target_context: {
+        target_type: "memory_card",
+        target_id: "safe-actions",
+        why_this_target: "该既有 Memory Card 已充分覆盖演示模式写操作边界。",
+      },
+      suggested_action: {
+        action: "already_covered",
+        route: "memory_card",
+        target_record: "safe-actions",
+        record_id: "safe-actions",
+        similarity: 0.94,
+        reason: "既有 Memory Card 已覆盖同一行为边界。",
+        rationale: "No Card Is A Success: 保持规则库精简。",
+      },
+      synthesis_trace: [
+        {
+          step: "search_observations",
+          summary: "Read the direct evidence about preview write actions.",
+          item_ids: ["demo-observation-2"],
+        },
+        {
+          step: "search_memory_cards",
+          summary: "Compared 2 Memory Card matches; top `safe-actions` is `already_covered_candidate`.",
+          item_ids: ["safe-actions"],
+        },
+        {
+          step: "find_memory_duplicates",
+          summary: "Classified the candidate as already covered by the existing Memory Card.",
+          item_ids: ["safe-actions"],
+        },
+        {
+          step: "stop",
+          summary: "Stopped with already_covered after producing no-new-card decision.",
+          item_ids: [],
+        },
+      ],
+    };
+  }
+  return {
+    ...(base ?? {}),
+    card_function: "skill_targeted",
+    synthesis_action: "skill_targeted_card",
+    synthesis_stop_reason: "skill_gap_found",
+    value_claim: "补强目标 Skill 的预览验收边界，避免用户只能看到静态卡片却不知道是否可用。",
+    value_delta: {
+      existing_behavior: "现有预览流程能加载静态数据。",
+      missing_part: "缺少一眼可见的验收标准和未来行为改进。",
+      new_behavior: "审阅时展示 Value Delta，先判断卡片是否真的改善 Skill 或工作流。",
+      why_not_duplicate: "它补上 Skill 的验收边界，不是重复描述预览模式。",
+    },
+    target_context: {
+      target_type: "project_skill",
+      target_id: "project:obsidian-markdown",
+      why_this_target: "这是一个 Skill-targeted Memory Card 示例，展示如何把提炼结果转成可挂载的 Skill 上下文。",
+    },
+    skill_usefulness: {
+      target_skill_id: "project:obsidian-markdown",
+      before_behavior: "Before: Skill `obsidian-markdown` covers note editing and documentation paths.",
+      after_behavior: "After: proposal adds boundary and acceptance to the target Skill behavior.",
+      improved_axes: ["boundary", "acceptance"],
+      missing_axes: [],
+      verdict: "counterfactual_pass",
+      score: 0.72,
+    },
+    synthesis_trace: [
+      {
+        step: "search_observations",
+        summary: "Read demo review evidence for the first-run preview gap.",
+        item_ids: ["demo-observation-1"],
+      },
+      {
+        step: "search_memory_cards",
+        summary: "Compared existing Memory Cards; none fully covers the Skill acceptance boundary.",
+        item_ids: ["preview-mode", "safe-actions"],
+      },
+      {
+        step: "search_skills",
+        summary: "Matched a project-level Skill target for preview and documentation work.",
+        item_ids: ["project:obsidian-markdown"],
+      },
+      {
+        step: "compare_with_skill",
+        summary: "Found a concrete Skill gap: the Skill lacks first-run acceptance checks.",
+        item_ids: ["project:obsidian-markdown"],
+      },
+      {
+        step: "evaluate_skill_usefulness",
+        summary: "Counterfactual pass: after proposal adds boundary and acceptance checks to the target Skill.",
+        item_ids: ["project:obsidian-markdown"],
+      },
+      {
+        step: "stop",
+        summary: "Stopped with skill_gap_found after producing a targeted card.",
+        item_ids: [],
+      },
+    ],
   };
 }
 
@@ -250,6 +395,41 @@ export function createDemoProjectMemoryCardLibrary(projectPath: string): Project
     memory_cards: [...snapshot.memory_cards],
     global_memory_cards: [...(snapshot.global_memory_cards ?? [])],
     catalog_status: snapshot.catalog_status,
+  };
+}
+
+export function createDemoProjectSkillLibrary(projectPath: string): ProjectSkillLibrary {
+  const snapshot = createDemoProjectSnapshot(projectPath);
+  return {
+    project_path: snapshot.project_path,
+    generated_at: "demo",
+    source_counts: { project: 2 },
+    skills: [
+      {
+        id: "project:obsidian-markdown",
+        name: "obsidian-markdown",
+        description: "Use when editing Obsidian notes with wikilinks, callouts, embeds, and frontmatter.",
+        source_path: `${snapshot.project_path}/.github/obsidian-skills/skills/obsidian-markdown`,
+        source_kind: "project",
+        source_hash: "demo-hash-obsidian-markdown",
+        warnings: [],
+        mirror_targets: ["codex", "claude-code"],
+        linked_memory_cards: [snapshot.memory_cards[0]!],
+        recommended_memory_cards: [snapshot.memory_cards[1]!],
+      },
+      {
+        id: "project:json-canvas",
+        name: "json-canvas",
+        description: "Use when creating or editing JSON Canvas files.",
+        source_path: `${snapshot.project_path}/.github/obsidian-skills/skills/json-canvas`,
+        source_kind: "project",
+        source_hash: "demo-hash-json-canvas",
+        warnings: ["description is short; agents may not dispatch it reliably"],
+        mirror_targets: ["codex"],
+        linked_memory_cards: [],
+        recommended_memory_cards: snapshot.memory_cards,
+      },
+    ],
   };
 }
 
@@ -269,5 +449,24 @@ export function createDemoProjectQualityView(projectPath: string): ProjectQualit
     rule_ci: snapshot.rule_ci,
     build_preview: snapshot.build_preview,
     status: snapshot.status,
+  };
+}
+
+export function createDemoProjectEvalRunView(projectPath: string): ProjectEvalRunView {
+  return {
+    project_path: projectPath,
+    status: "attention",
+    provider: "deterministic",
+    pipeline_version: 1,
+    timestamp: "2026-05-18T12:00:00+08:00",
+    recall: { label: "Recall", percent: 86, count: 12, total: 14, status: "pass" },
+    precision: { label: "Precision", percent: 94, count: 15, total: 16, status: "pass" },
+    one_off_false_positive: { label: "One-off false positives", percent: 6, count: 1, total: 16, status: "fail" },
+    duplicate_cluster_risk: { label: "Duplicate risk", percent: 0, count: 0, total: 14, status: "pass" },
+    evidence_validity: { label: "Evidence validity", percent: 100, count: 14, total: 14, status: "pass" },
+    provider_evidence_validity: null,
+    recommendations: [
+      "Inspect one-off leaks and raise recurrence requirements for temporary preferences.",
+    ],
   };
 }

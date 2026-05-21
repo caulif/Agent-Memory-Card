@@ -151,12 +151,21 @@ export function useProjectActions({
       // 所有会改变 memory_card/draft/assignment 数据的命令成功执行后刷新读模型
       const mutationCommands = [
         "promote_candidate", "hide_candidate", "reject_candidate", "gc_candidates",
+        "update_candidate",
         "approve_draft", "reject_draft",
         "set_memory_card_targets", "clear_memory_card_targets", "update_memory_card", "delete_memory_card",
         "set_agent_enabled", "merge_drafts", "merge_memory_cards",
         "fuse_memory_cards_to_draft",
+        "attach_memory_card_to_skill",
         "promote_memory_card_to_global", "install_global_memory_card_to_project",
+        "import_project",
         "sync_project",
+        "import_artifact_drifts",
+        "import_artifact_drift_path",
+        "keep_artifact_drifts",
+        "keep_artifact_drift_path",
+        "discard_artifact_drifts",
+        "discard_artifact_drift_path",
         "clear_project_history",
       ];
       if (mutationCommands.includes(command)) {

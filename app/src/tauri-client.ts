@@ -8,14 +8,18 @@ import type {
   KernelPlanRequest,
   KernelPolicyPayload,
   CustomProviderConfig,
+  ProviderStatusReport,
   ProjectAssignmentView,
   ProjectCandidateInbox,
   ProjectDashboard,
+  ProjectEvalRunView,
   ProjectQualityView,
   ProjectReviewInbox,
   ProjectMemoryCardLibrary,
+  ProjectSkillLibrary,
   ProjectSnapshot,
   MemoryCardRecord,
+  SetupChecklistReport,
 } from "./ui-helpers";
 
 export type ProjectMutationAck = {
@@ -42,12 +46,29 @@ export function getProjectMemoryCardLibrary(projectPath: string) {
   return invoke<ProjectMemoryCardLibrary>("get_project_memory_card_library", { projectPath });
 }
 
+export function getProjectSkillLibrary(projectPath: string) {
+  return invoke<ProjectSkillLibrary>("get_project_skill_library", { projectPath });
+}
+
+export function importProject(args: {
+  projectPath: string;
+  scanHome: boolean;
+  confirmedPolicy: KernelPolicyPayload;
+  decisionToken?: string;
+}) {
+  return invoke<ProjectMutationAck>("import_project", args);
+}
+
 export function getProjectAssignmentView(projectPath: string) {
   return invoke<ProjectAssignmentView>("get_project_assignment_view", { projectPath });
 }
 
 export function getProjectQualityView(projectPath: string) {
   return invoke<ProjectQualityView>("get_project_quality_view", { projectPath });
+}
+
+export function getProjectEvalRun(projectPath: string) {
+  return invoke<ProjectEvalRunView>("get_project_eval_run", { projectPath });
 }
 
 export function getCustomProviderConfig(projectPath: string) {
@@ -61,6 +82,14 @@ export function saveCustomProviderConfig(args: {
   decisionToken?: string;
 }) {
   return invoke<CustomProviderConfig>("save_custom_provider_config", args);
+}
+
+export function getSetupChecklist(projectPath: string) {
+  return invoke<SetupChecklistReport>("get_setup_checklist", { projectPath });
+}
+
+export function testProviderStatus(projectPath: string, liveRequest = true) {
+  return invoke<ProviderStatusReport>("test_provider_status", { projectPath, liveRequest });
 }
 
 export function getProjectSnapshot(projectPath: string) {
@@ -103,6 +132,16 @@ export function updateDraft(args: {
   decisionToken?: string;
 }) {
   return invoke<DraftRecord>("update_draft", args);
+}
+
+export function updateCandidate(args: {
+  projectPath: string;
+  id: string;
+  input: Record<string, unknown>;
+  confirmedPolicy: KernelPolicyPayload;
+  decisionToken?: string;
+}) {
+  return invoke<CandidateRecord>("update_candidate", args);
 }
 
 export function updateMemoryCard(args: {

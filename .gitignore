@@ -6,6 +6,8 @@
 /src-tauri/target/
 /.playwright-cli/
 /output/
+/.fastembed_cache/
+/docs/runs/
 /.agent-kernel/
 /.claude/skills/
 /.codex/
@@ -37,3 +39,16 @@
 /src/**/tests.rs
 /src/**/*_tests.rs
 /src/**/*_regression.rs
+
+# Tracked regression tests for current product-loop work
+!/tests/
+!/tests/eval_golden_report.rs
+!/app/src/utils/review-workbench.test.ts
+!/app/src/utils/memory-governance.test.ts
+!/app/src/utils/kernel-plan.test.ts
+!/src/build/tests.rs
+!/src/candidate/tests.rs
+!/src/eval/tests.rs
+!/src/extract/induce/batch_tests.rs
+!/src/provider/tests.rs
+!/src/synthesis_agent/tests.rs

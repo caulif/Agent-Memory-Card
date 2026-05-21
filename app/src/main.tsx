@@ -1,6 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import {
+  getCustomProviderConfig,
   planKernelCommand,
   scanProjectsJob,
   updateDraft,
@@ -11,7 +12,7 @@ import { useProjectActions } from "./hooks/useProjectActions";
 import { useProjectReadModels } from "./hooks/useProjectReadModels";
 import { useProjectSelection } from "./hooks/useProjectSelection";
 import { JobCenter } from "./components/JobCenter";
-import { Agents, Drafts, ProjectOverviewStrip, Settings, MemoryCards } from "./components/project-pages";
+import { Agents, Drafts, ProjectOverviewStrip, Settings, MemoryCards, Skills } from "./components/project-pages";
 import { ActionButton, EmptyState, Panel, StatusList, TaskProgressBar } from "./components/common";
 import {
   AppWindow,
@@ -20,6 +21,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Circle,
   CloudCog,
   GitBranch,
@@ -39,12 +41,14 @@ import {
 import "./styles.css";
 import "./styles/jobs-progress.css";
 import "./styles/project-detail.css";
+import "./styles/settings.css";
 import "./styles/themes.css";
 import {
   buildEditFormFromDraft,
   buildEditFormFromMemoryCard,
   buildKernelPlanForEditor,
   confirmedAgentManagedPolicy,
+  createDemoProjectDashboard,
   createDemoProjectSnapshot,
   deriveMemoryCardEvolution,
   describeDraftForReview,
@@ -93,6 +97,7 @@ const tauriRuntimeHint = "未连接到 Tauri 运行时。请在项目根目录�
 const PAGE_DISPLAY: Record<PageId, { label: string; enLabel: string }> = {
   drafts: { label: "审阅", enLabel: "Draft Review" },
   "memory-cards": { label: "记忆卡", enLabel: "Memory Card Library" },
+  skills: { label: "技能", enLabel: "Skills Library" },
   agents: { label: "分配", enLabel: "Memory Card Loadout" },
   settings: { label: "设置", enLabel: "Settings" },
 };
@@ -105,6 +110,7 @@ function App() {
   const [synthesisEngine, setSynthesisEngine] = React.useState<"claude-code" | "codex" | "local" | "llm">("claude-code");
   const [theme, setTheme] = React.useState<"light" | "dark" | "system">("system");
   const [projectMenuOpen, setProjectMenuOpen] = React.useState(false);
+  const projectMenuListRef = React.useRef<HTMLDivElement | null>(null);
   const selectedProjectRef = React.useRef("");
   const readModels = useProjectReadModels({ page, previewMode, selectedProjectRef, setMessage });
   const {
@@ -115,22 +121,31 @@ function App() {
     reviewInbox,
     setReviewInbox,
     memory_cardLibrary,
+    skillLibrary,
     assignmentView,
     qualityView,
+    evalRunView,
     clearProjectReadModels,
+    hydrateReadModelsFromDemo,
     loadDashboard,
     loadReadModelsForPage,
   } = readModels;
 
-  const activateProject = React.useCallback((projectPath: string, targetPage: PageId) => {
+  const activateProject = React.useCallback((projectPath: string, targetPage: PageId, options?: { previewMode?: boolean }) => {
     setDashboard(null);
     clearProjectReadModels();
+    if (options?.previewMode) {
+      setDashboard(createDemoProjectDashboard(projectPath));
+      hydrateReadModelsFromDemo(projectPath, targetPage);
+      setMessage("浏览器预览模式：已加载静态演示工作台。");
+      return;
+    }
     setMessage("项目已打开，正在后台加载工作台数据。");
     window.setTimeout(() => {
       void loadDashboard(projectPath);
       void loadReadModelsForPage(projectPath, targetPage);
     }, 0);
-  }, [clearProjectReadModels, loadDashboard, loadReadModelsForPage, setDashboard, setMessage]);
+  }, [clearProjectReadModels, hydrateReadModelsFromDemo, loadDashboard, loadReadModelsForPage, setDashboard, setMessage]);
 
   const clearProject = React.useCallback(() => {
     setDashboard(null);
@@ -200,6 +215,21 @@ function App() {
     void loadReadModelsForPage(selectedProject, page);
   }, [page, selectedProject, previewMode, loadReadModelsForPage]);
 
+  React.useEffect(() => {
+    if (!selectedProject || previewMode) return;
+    let cancelled = false;
+    void getCustomProviderConfig(selectedProject)
+      .then((config) => {
+        if (!cancelled && config.enabled) setSynthesisEngine("llm");
+      })
+      .catch(() => {
+        if (!cancelled) setSynthesisEngine("claude-code");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [previewMode, selectedProject]);
+
   const projects = state?.registry.projects ?? [];
   const activeProject = projects.find((project) => project.path === selectedProject);
   const snapshot = React.useMemo(
@@ -247,6 +277,8 @@ function App() {
     setPage(targetPage);
     setProjectMenuOpen(false);
   }
+
+  const isFocusedPage = ["drafts", "memory-cards", "skills", "agents"].includes(page);
 
   return (
     <main className="shell">
@@ -296,7 +328,7 @@ function App() {
         <header className="topbar">
           <div className="topbar-left">
             <div className="title-block">
-              <h1>{activeProject ? PAGE_DISPLAY[page]?.enLabel ?? "工作台" : "Agent Memory Kernel"}</h1>
+              <h1>{activeProject ? PAGE_DISPLAY[page]?.label ?? "工作台" : "Agent Memory Kernel"}</h1>
               {activeProject ? (
                 <span className="path">{activeProject.path}</span>
               ) : null}
@@ -329,19 +361,37 @@ function App() {
                   {projects.length === 0 ? (
                     <p className="empty">还没有发现项目。扫描后会读取常用目录。</p>
                   ) : (
-                    projects.map((project) => (
+                    <>
                       <button
-                        key={project.path}
-                        className={`project-item ${project.path === selectedProject ? "active" : ""}`}
-                        onClick={() => {
-                          void chooseProject(project.path);
-                          setProjectMenuOpen(false);
-                        }}
+                        className="project-menu-scroll"
+                        aria-label="向上滚动项目列表"
+                        onClick={() => projectMenuListRef.current?.scrollBy({ top: -220, behavior: "smooth" })}
                       >
-                        <span>{project.name}</span>
-                        <small>{formatAgents(project.agents)}</small>
+                        <ChevronUp size={14} />
                       </button>
-                    ))
+                      <div className="project-select-list" ref={projectMenuListRef}>
+                        {projects.map((project) => (
+                          <button
+                            key={project.path}
+                            className={`project-item ${project.path === selectedProject ? "active" : ""}`}
+                            onClick={() => {
+                              void chooseProject(project.path);
+                              setProjectMenuOpen(false);
+                            }}
+                          >
+                            <span>{project.name}</span>
+                            <small>{formatAgents(project.agents)}</small>
+                          </button>
+                        ))}
+                      </div>
+                      <button
+                        className="project-menu-scroll"
+                        aria-label="向下滚动项目列表"
+                        onClick={() => projectMenuListRef.current?.scrollBy({ top: 220, behavior: "smooth" })}
+                      >
+                        <ChevronDown size={14} />
+                      </button>
+                    </>
                   )}
                 </div>
               ) : null}
@@ -379,14 +429,39 @@ function App() {
           </div>
         </header>
 
-        {/* 概览指标条 — 仅审阅页显示 */}
-        {page === "drafts" ? (
-          <ProjectOverviewStrip snapshot={snapshot} dashboard={dashboard} installedCount={installedCount} />
+        {/* 概览指标条 */}
+        {selectedProject && !isFocusedPage ? (
+          <ProjectOverviewStrip
+            snapshot={snapshot}
+            dashboard={dashboard}
+            installedCount={installedCount}
+            runningJobCount={actionableJobCount}
+            onNavigate={handleNavClick}
+          />
         ) : null}
 
         {/* 内容区 */}
         <section className="content">
-          <div className="workspace-layout">
+          {!selectedProject && projects.length === 0 ? (
+            <section className="first-run-panel" aria-label="首次使用引导">
+              <div>
+                <span>首次使用</span>
+                <h2>先扫描本地项目，建立你的 Agent Memory 工作台</h2>
+                <p>扫描会读取常见 Codex / Claude Code 项目索引。找到项目后，再运行提炼建议、审阅证据、批准 Memory Card，并同步到 Agent 文件。</p>
+              </div>
+              <div className="first-run-actions">
+                <button className="primary-action" type="button" onClick={() => void scanProjects()}>
+                  <ScanLine size={14} />
+                  扫描项目
+                </button>
+                <button className="secondary-action" type="button" onClick={() => enterPreviewMode()}>
+                  <AppWindow size={14} />
+                  查看演示
+                </button>
+              </div>
+            </section>
+          ) : null}
+          <div className={isFocusedPage ? "workspace-focused" : "workspace-layout"}>
             <section className="primary-pane">
               {appStateError ? (
                 <EmptyState title="无法读取桌面运行时" description={appStateError} />
@@ -397,10 +472,11 @@ function App() {
                       snapshot={snapshot}
                       candidates={candidateInbox}
                       inbox={reviewInbox}
+                      assignment={assignmentView}
+                      library={memory_cardLibrary}
                       pendingAction={pendingAction}
                       disabled={!candidateInbox && !reviewInbox && !snapshot}
                       onAction={projectAction}
-                      onBatchCandidateAction={batchCandidateAction}
                       previewMode={previewMode}
                       projectPath={selectedProject}
                       synthesisEngine={synthesisEngine}
@@ -414,6 +490,7 @@ function App() {
                     <MemoryCards
                       snapshot={snapshot}
                       library={memory_cardLibrary}
+                      assignment={assignmentView}
                       pendingAction={pendingAction}
                       disabled={!memory_cardLibrary && !snapshot}
                       onAction={projectAction}
@@ -424,6 +501,14 @@ function App() {
                       }}
                     />
                   )}
+                  {page === "skills" && (
+                    <Skills
+                      skillLibrary={skillLibrary}
+                      actionState={pendingAction}
+                      disabled={!skillLibrary}
+                      dispatchAction={projectAction}
+                    />
+                  )}
                   {page === "agents" && (
                     <Agents
                       snapshot={snapshot}
@@ -432,85 +517,86 @@ function App() {
                       pendingAction={pendingAction}
                       disabled={!assignmentView && !snapshot}
                       onAction={projectAction}
-                      projects={projects}
                     />
                   )}
-                  {page === "settings" && <Settings state={state} snapshot={snapshot} projectPath={selectedProject} previewMode={previewMode} synthesisEngine={synthesisEngine} theme={theme} onThemeChange={setTheme} />}
+                  {page === "settings" && <Settings state={state} snapshot={snapshot} projectPath={selectedProject} previewMode={previewMode} synthesisEngine={synthesisEngine} theme={theme} onThemeChange={setTheme} onSynthesisEngineChange={setSynthesisEngine} />}
                 </>
               )}
             </section>
 
             {/* 右侧检查器 — 按页面显示不同内容 */}
-            <div className="inspector">
-              {page === "drafts" ? (
-                <Panel title="质量状态" icon={ShieldCheck}>
-                  <div className="quality">
-                    <span>通过 {qualityView?.rule_ci.passed ?? snapshot?.rule_ci.passed ?? 0}</span>
-                    <span>失败 {qualityView?.rule_ci.failed ?? snapshot?.rule_ci.failed ?? 0}</span>
-                  </div>
-                  <StatusList
-                    empty="暂无质量警告。"
-                    items={[
-                      ...(qualityView?.status.warnings ?? snapshot?.status.warnings ?? []),
-                      ...(qualityView?.build_preview.warnings ?? snapshot?.build_preview.warnings ?? []),
-                    ]}
-                    tone="warning"
-                  />
-                </Panel>
-              ) : page === "agents" ? (
-                <Panel title="分配影响力" icon={GitBranch}>
-                  <div className="assignment-impact">
-                    <div className="impact-ring-wrap">
-                      <svg width="100" height="100" viewBox="0 0 100 100">
-                        <circle cx="50" cy="50" r="42" fill="none" stroke="var(--color-border)" strokeWidth="6" />
-                        <circle
-                          cx="50"
-                          cy="50"
-                          r="42"
-                          fill="none"
-                          stroke="var(--color-accent)"
-                          strokeWidth="6"
-                          strokeDasharray={`${(coveragePct / 100) * 263.9} 263.9`}
-                          strokeLinecap="round"
-                          transform="rotate(-90 50 50)"
-                        />
-                      </svg>
-                      <div className="impact-ring-text">
-                        <strong>{coveragePct}%</strong>
-                        <span>覆盖率</span>
-                      </div>
+            {!isFocusedPage && (
+              <div className="inspector">
+                {page === "drafts" ? (
+                  <Panel title="质量状态" icon={ShieldCheck}>
+                    <div className="quality">
+                      <span>通过 {qualityView?.rule_ci.passed ?? snapshot?.rule_ci.passed ?? 0}</span>
+                      <span>失败 {qualityView?.rule_ci.failed ?? snapshot?.rule_ci.failed ?? 0}</span>
                     </div>
-                    <div className="impact-stats">
-                      <div className="impact-stat">
-                        <strong>{missingCount}</strong>
-                        <span>未分配</span>
+                    <StatusList
+                      empty="暂无质量警告。"
+                      items={[
+                        ...(qualityView?.status.warnings ?? snapshot?.status.warnings ?? []),
+                        ...(qualityView?.build_preview.warnings ?? snapshot?.build_preview.warnings ?? []),
+                      ]}
+                      tone="warning"
+                    />
+                  </Panel>
+                ) : page === "agents" ? (
+                  <Panel title="分配影响力" icon={GitBranch}>
+                    <div className="assignment-impact">
+                      <div className="impact-ring-wrap">
+                        <svg width="100" height="100" viewBox="0 0 100 100">
+                          <circle cx="50" cy="50" r="42" fill="none" stroke="var(--color-border)" strokeWidth="6" />
+                          <circle
+                            cx="50"
+                            cy="50"
+                            r="42"
+                            fill="none"
+                            stroke="var(--color-accent)"
+                            strokeWidth="6"
+                            strokeDasharray={`${(coveragePct / 100) * 263.9} 263.9`}
+                            strokeLinecap="round"
+                            transform="rotate(-90 50 50)"
+                          />
+                        </svg>
+                        <div className="impact-ring-text">
+                          <strong>{coveragePct}%</strong>
+                          <span>覆盖率</span>
+                        </div>
                       </div>
-                      <div className="impact-stat">
-                        <strong>{conflictCount}</strong>
-                        <span>冲突</span>
+                      <div className="impact-stats">
+                        <div className="impact-stat">
+                          <strong>{missingCount}</strong>
+                          <span>未分配</span>
+                        </div>
+                        <div className="impact-stat">
+                          <strong>{conflictCount}</strong>
+                          <span>冲突</span>
+                        </div>
                       </div>
+                      <button className="secondary-action" style={{ width: "100%" }} disabled>
+                        查看详情
+                      </button>
                     </div>
-                    <button className="secondary-action" style={{ width: "100%" }} disabled>
-                      查看详情
-                    </button>
-                  </div>
-                </Panel>
-              ) : page === "memory-cards" ? (
-                <Panel title="演化摘要" icon={Boxes}>
-                  <div className="quality">
-                    <span>片段 {memory_cardCount}</span>
-                    <span>已装 {installedCount}</span>
-                  </div>
-                  <StatusList
-                    empty="暂无演化信号。"
-                    items={[
-                      ...(qualityView?.status.warnings ?? snapshot?.status.warnings ?? []).slice(0, 4),
-                    ]}
-                    tone="warning"
-                  />
-                </Panel>
-              ) : null}
-            </div>
+                  </Panel>
+                ) : page === "memory-cards" ? (
+                  <Panel title="演化摘要" icon={Boxes}>
+                    <div className="quality">
+                      <span>片段 {memory_cardCount}</span>
+                      <span>已装 {installedCount}</span>
+                    </div>
+                    <StatusList
+                      empty="暂无演化信号。"
+                      items={[
+                        ...(qualityView?.status.warnings ?? snapshot?.status.warnings ?? []).slice(0, 4),
+                      ]}
+                      tone="warning"
+                    />
+                  </Panel>
+                ) : null}
+              </div>
+            )}
           </div>
         </section>
       </section>
