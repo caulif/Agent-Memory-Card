@@ -121,6 +121,15 @@ export function createDemoProjectSnapshot(projectPath: string): ProjectSnapshot 
             target_id: "project:obsidian-markdown",
             why_this_target: "该 Skill 负责项目预览与文档路径，最需要这张 Memory Card 的验收边界。",
           },
+          skill_usefulness: {
+            target_skill_id: "project:obsidian-markdown",
+            before_behavior: "Before: Skill `obsidian-markdown` covers note editing and documentation paths.",
+            after_behavior: "After: proposal adds acceptance to the target Skill behavior.",
+            improved_axes: ["acceptance"],
+            missing_axes: ["boundary"],
+            verdict: "counterfactual_pass",
+            score: 0.48,
+          },
           synthesis_trace: [
             { step: "value_delta", summary: "Compared demo preview behavior against the Skill target.", item_ids: [] },
             { step: "rewrite", summary: "Rendered as a Skill-targeted Memory Card.", item_ids: [] },
@@ -340,6 +349,15 @@ function createDemoCandidateSynthesis(base: ProjectSnapshot["drafts"][number]["e
       target_id: "project:obsidian-markdown",
       why_this_target: "这是一个 Skill-targeted Memory Card 示例，展示如何把提炼结果转成可挂载的 Skill 上下文。",
     },
+    skill_usefulness: {
+      target_skill_id: "project:obsidian-markdown",
+      before_behavior: "Before: Skill `obsidian-markdown` covers note editing and documentation paths.",
+      after_behavior: "After: proposal adds boundary and acceptance to the target Skill behavior.",
+      improved_axes: ["boundary", "acceptance"],
+      missing_axes: [],
+      verdict: "counterfactual_pass",
+      score: 0.72,
+    },
     synthesis_trace: [
       {
         step: "search_observations",
@@ -369,6 +387,11 @@ function createDemoCandidateSynthesis(base: ProjectSnapshot["drafts"][number]["e
       {
         step: "compare_with_skill",
         summary: "Found a concrete Skill gap: the Skill lacks first-run acceptance checks.",
+        item_ids: ["project:obsidian-markdown"],
+      },
+      {
+        step: "evaluate_skill_usefulness",
+        summary: "Counterfactual pass: after proposal adds boundary and acceptance checks to the target Skill.",
         item_ids: ["project:obsidian-markdown"],
       },
       {

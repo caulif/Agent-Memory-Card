@@ -351,6 +351,7 @@ export type ExtractionMetadata = {
   value_claim?: string | null;
   value_delta?: ValueDelta | null;
   target_context?: TargetContext | null;
+  skill_usefulness?: SkillUsefulnessEvaluation | null;
   synthesis_trace?: SynthesisTraceEntry[];
   synthesis_action?: string | null;
   synthesis_stop_reason?: string | null;
@@ -367,6 +368,16 @@ export type TargetContext = {
   target_type?: string;
   target_id?: string | null;
   why_this_target?: string;
+};
+
+export type SkillUsefulnessEvaluation = {
+  target_skill_id: string;
+  before_behavior: string;
+  after_behavior: string;
+  improved_axes?: string[];
+  missing_axes?: string[];
+  verdict: string;
+  score: number;
 };
 
 export type SynthesisTraceEntry = {

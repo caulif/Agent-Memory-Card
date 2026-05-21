@@ -541,7 +541,7 @@ function groupTraceEntries(trace: SynthesisTraceEntry[]): TraceGroup[] {
       key: "skill-comparison",
       title: "Skill 对照",
       helper: "目标 Skill 与缺口",
-      steps: ["search_skills", "compare_with_skill"],
+      steps: ["search_skills", "compare_with_skill", "evaluate_skill_usefulness"],
     },
     {
       key: "decision",
@@ -592,6 +592,7 @@ function traceStepLabel(value: string) {
     read_writing_guide: "已读写作规范",
     find_memory_duplicates: "已判重",
     compare_with_skill: "已比对 Skill",
+    evaluate_skill_usefulness: "已评估 Skill 有用性",
     stop: "已停止",
   };
   return labels[value] ?? value;

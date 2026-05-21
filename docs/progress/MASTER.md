@@ -369,3 +369,25 @@
     *   `cargo test --test extract_quality_v2 --quiet` -> PASS, 21 passed / 1 ignored.
     *   `cargo test --test golden_set_regression --quiet` -> PASS, 3 passed.
     *   Playwright trial on `http://127.0.0.1:1420`: desktop and mobile show Synthesis Trace, direct evidence, broader history, workflow failure, Memory Card comparison, Skill comparison, referenced ids; no horizontal overflow; no console errors; no chain-of-thought.
+
+---
+
+## 18. 2026-05-21 Skill-targeted Memory Card 反事实有用性评估
+*   **Issue**: GitHub #44 tracks the implementation.
+*   **Intent**: 避免 Skill-targeted Memory Card 只复述已有 Skill；只有能补上触发、指令、边界或验收轴的提案才作为可批准建议进入 Review Inbox。
+*   **Production Changes**:
+    *   `src/synthesis_agent/skill_eval.rs`: 新增项目级 Skill counterfactual evaluation，生成 before/after、improved axes、missing axes、verdict 和 score。
+    *   `src/synthesis_agent.rs`: `SynthesisProposal` 新增 `skill_usefulness`；`SynthesisReview` 新增高级 metrics；trace 新增 `evaluate_skill_usefulness`。
+    *   `src/synthesis_agent.rs`: 无法证明有用性增量的 Skill-targeted proposal 会降级为 `needs_human`，不会作为 approval-ready Memory Card。
+    *   `src/candidate.rs` / `app/src/types/domain.ts`: 提炼元数据保留 `skill_usefulness`，后续高级/eval 视图可读取，但默认审阅页不增加指标噪音。
+    *   `app/src/demo/demo-data.ts` / `Drafts.tsx`: demo trace 展示 counterfactual pass，Review Inbox trace 可归入 Skill 对照分组。
+*   **Verification So Far**:
+    *   `bun run --cwd app verify-ui` -> PASS.
+    *   `bun run --cwd app build` -> PASS.
+    *   `cargo fmt --check` -> PASS.
+    *   `cargo test --manifest-path Cargo.toml synthesis_agent --lib` -> PASS, 9 passed.
+    *   `cargo test --manifest-path Cargo.toml candidate::tests::visible_candidate_inbox --lib` -> PASS, 2 passed.
+    *   `cargo test --manifest-path Cargo.toml --lib` -> PASS, 317 passed.
+    *   `cargo clippy -- -D warnings` -> PASS.
+    *   `cargo test --test extract_quality_v2 --quiet` -> PASS, 21 passed / 1 ignored.
+    *   `cargo test --test golden_set_regression --quiet` -> PASS, 3 passed.

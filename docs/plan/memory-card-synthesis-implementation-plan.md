@@ -240,8 +240,17 @@ Tracking: GitHub issue #44
 
 Goal: verify that Skill-targeted Memory Cards improve a target Skill instead of restating it.
 
+Implemented scope:
+
+- Add `SkillUsefulnessEvaluation` to the synthesis proposal / extraction metadata contract.
+- Evaluate project-level Skill proposals across trigger, instruction, boundary, and acceptance axes.
+- Add `evaluate_skill_usefulness` trace event with counterfactual pass / no-meaningful-change wording.
+- Add `SynthesisReviewMetrics` for advanced/dev surfaces: no-card decision, merge recommendation, approval candidate, duplicate suppression, counterfactual pass, and needs-human.
+- Route Skill-targeted proposals without a proven value delta to `needs_human` rather than presenting them as approval-ready cards.
+
 Acceptance:
 
 - Before/after checks reject proposals without meaningful future behavior change.
 - Duplicate Skill content routes to `already_covered`, `merge`, `ignore`, or `needs_human`.
 - Metrics stay in advanced/eval surfaces, not the default review flow.
+- Focused tests cover both counterfactual pass and no-meaningful-change cases.

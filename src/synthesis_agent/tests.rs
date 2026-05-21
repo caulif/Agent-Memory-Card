@@ -53,11 +53,82 @@ fn synthesis_targets_project_skill_and_keeps_global_reference_only() {
     let review = run_memory_card_synthesis(root, &candidate, "procedure").expect("review");
 
     assert_eq!(review.proposal.card_function, "skill_targeted");
+    assert_eq!(review.proposal.action, "skill_targeted_card");
     assert_eq!(
         review.proposal.target_context.target_id.as_deref(),
         Some("project:ux-quality")
     );
+    let usefulness = review
+        .proposal
+        .skill_usefulness
+        .as_ref()
+        .expect("skill usefulness");
+    assert_eq!(usefulness.verdict, "counterfactual_pass");
+    assert!(
+        usefulness
+            .improved_axes
+            .contains(&"instruction".to_string())
+    );
+    assert!(review.metrics.counterfactual_pass);
+    assert!(review.metrics.approval_candidate);
     assert_eq!(review.stop_reason, SynthesisStopReason::SkillGapFound);
+}
+
+#[test]
+fn synthesis_requires_counterfactual_skill_improvement() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    save_skill_index(
+        root,
+        &SkillIndex {
+            generated_at: "now".to_string(),
+            skills: vec![SkillRecord {
+                id: "project:ux-quality".to_string(),
+                name: "agent-kernel-ux-quality-pass".to_string(),
+                description: "Use when checking product UX quality.".to_string(),
+                source_path: ".agents/skills/agent-kernel-ux-quality-pass".to_string(),
+                source_kind: "project".to_string(),
+                source_hash: "hash".to_string(),
+                warnings: Vec::new(),
+            }],
+        },
+    )
+    .expect("skill index");
+    observation::import_observation_text(
+        root,
+        &root.join("session.jsonl"),
+        "manual-note",
+        Some("codex"),
+        "agent-kernel-ux-quality-pass: Use when checking product UX quality.",
+    )
+    .expect("observation");
+    let candidate = candidate(
+        "skill-restatement",
+        "agent-kernel-ux-quality-pass",
+        "Use when checking product UX quality.",
+    );
+
+    let review = run_memory_card_synthesis(root, &candidate, "procedure").expect("review");
+
+    assert_eq!(review.proposal.card_function, "skill_targeted");
+    assert_eq!(review.proposal.action, "needs_human");
+    assert_eq!(review.stop_reason, SynthesisStopReason::NeedsHuman);
+    let usefulness = review
+        .proposal
+        .skill_usefulness
+        .as_ref()
+        .expect("skill usefulness");
+    assert_eq!(usefulness.verdict, "no_meaningful_change");
+    assert!(usefulness.improved_axes.is_empty());
+    assert!(!review.metrics.counterfactual_pass);
+    assert!(review.metrics.needs_human);
+    assert!(review.metrics.no_card_decision);
+    assert!(
+        review
+            .events
+            .iter()
+            .any(|event| event.tool == SynthesisToolName::EvaluateSkillUsefulness)
+    );
 }
 
 #[test]
@@ -138,6 +209,8 @@ fn synthesis_marks_exact_existing_card_as_already_covered() {
     let review = run_memory_card_synthesis(root, &candidate, "procedure").expect("review");
 
     assert_eq!(review.proposal.action, "already_covered");
+    assert!(review.metrics.no_card_decision);
+    assert!(review.metrics.duplicate_suppressed);
     assert!(
         review
             .context

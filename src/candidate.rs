@@ -15,7 +15,7 @@ use crate::feedback;
 use crate::fsutil;
 use crate::memory_card::{self, MemoryCardRecord, MemoryCardUpdate};
 use crate::provider::{self, ProviderJsonSchema, ProviderRequest};
-use crate::synthesis_agent::{self, SynthesisReview};
+use crate::synthesis_agent::{self, SkillUsefulnessEvaluation, SynthesisReview};
 use crate::textutil;
 
 mod action;
@@ -76,6 +76,8 @@ pub struct ExtractionMetadata {
     pub value_delta: Option<ValueDelta>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_context: Option<TargetContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill_usefulness: Option<SkillUsefulnessEvaluation>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub synthesis_trace: Vec<SynthesisTraceEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -745,6 +747,7 @@ struct MatureMemoryCardText {
     value_claim: String,
     value_delta: ValueDelta,
     target_context: TargetContext,
+    skill_usefulness: Option<SkillUsefulnessEvaluation>,
     synthesis_trace: Vec<SynthesisTraceEntry>,
 }
 
@@ -914,6 +917,7 @@ fn mature_candidate_with_provider(
         });
     let target_context =
         normalize_target_context(parsed.target_context, candidate, &card_function, synthesis);
+    let skill_usefulness = synthesis.and_then(|review| review.proposal.skill_usefulness.clone());
     Some(MatureMemoryCardText {
         title,
         body,
@@ -926,6 +930,7 @@ fn mature_candidate_with_provider(
         value_claim,
         value_delta,
         target_context,
+        skill_usefulness,
         synthesis_trace: synthesis_trace_for_candidate(candidate, true, synthesis),
     })
 }
@@ -953,6 +958,7 @@ fn mature_candidate_deterministic(
     let value_delta = normalize_value_delta(None, candidate, &body, &card_function, synthesis);
     let value_claim = synthesize_value_claim(candidate, &value_delta, &card_function, synthesis);
     let target_context = normalize_target_context(None, candidate, &card_function, synthesis);
+    let skill_usefulness = synthesis.and_then(|review| review.proposal.skill_usefulness.clone());
     MatureMemoryCardText {
         title,
         body,
@@ -969,6 +975,7 @@ fn mature_candidate_deterministic(
         value_claim,
         value_delta,
         target_context,
+        skill_usefulness,
         synthesis_trace: synthesis_trace_for_candidate(candidate, false, synthesis),
     }
 }
@@ -981,6 +988,7 @@ fn extraction_with_synthesis_metadata(
     extraction.value_claim = Some(matured.value_claim.clone());
     extraction.value_delta = Some(matured.value_delta.clone());
     extraction.target_context = Some(matured.target_context.clone());
+    extraction.skill_usefulness = matured.skill_usefulness.clone();
     extraction.synthesis_trace = matured.synthesis_trace.clone();
     extraction.synthesis_action = extraction
         .synthesis_action
@@ -1018,6 +1026,7 @@ fn apply_synthesis_review_to_extraction(
     extraction.value_claim = Some(review.proposal.value_claim.clone());
     extraction.value_delta = Some(review.proposal.value_delta.clone());
     extraction.target_context = Some(review.proposal.target_context.clone());
+    extraction.skill_usefulness = review.proposal.skill_usefulness.clone();
     extraction.synthesis_trace = synthesis_agent::review_to_trace(review);
     extraction.synthesis_action = Some(review.proposal.action.clone());
     extraction.synthesis_stop_reason = Some(review.stop_reason.as_str().to_string());

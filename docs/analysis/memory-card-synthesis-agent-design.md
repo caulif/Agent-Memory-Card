@@ -317,6 +317,16 @@ Required checks:
 
 If validation fails, the system can run a repair pass or return `needs_human`. Repair should preserve the same evidence and target rather than inventing a new rationale.
 
+### Skill-Targeted Counterfactual Check
+
+For `skill_targeted_card`, validation must ask a narrower question before the card becomes approval-ready:
+
+- Before: what does the target project Skill already cover?
+- After: what trigger, instruction, boundary, or acceptance check would the Memory Card add?
+- Verdict: if the proposal only restates the Skill description, route it to `needs_human`, `already_covered`, or merge instead of generating another card.
+
+The check is deterministic in the current runtime slice. It stores `skill_usefulness` and advanced metrics for self-feedback, but does not add a default UI metrics panel.
+
 ## Built-In Writing Guide
 
 Create an in-repo guide such as `docs/analysis/memory-card-writing-guide.md` or a runtime resource under `prompts/`.

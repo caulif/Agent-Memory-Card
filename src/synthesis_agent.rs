@@ -12,6 +12,7 @@ use crate::observation::{self, ObservationRecord};
 use crate::textutil;
 
 mod explain;
+mod skill_eval;
 
 const WRITING_GUIDE: &str = include_str!("../prompts/memory-card-writing-guide.md");
 const MAX_OBSERVATION_SNIPPETS: usize = 5;
@@ -57,6 +58,7 @@ pub enum SynthesisToolName {
     ReadWritingGuide,
     FindMemoryDuplicates,
     CompareWithSkill,
+    EvaluateSkillUsefulness,
     SummarizeWorkflowFailures,
 }
 
@@ -70,6 +72,7 @@ impl SynthesisToolName {
             Self::ReadWritingGuide => "read_writing_guide",
             Self::FindMemoryDuplicates => "find_memory_duplicates",
             Self::CompareWithSkill => "compare_with_skill",
+            Self::EvaluateSkillUsefulness => "evaluate_skill_usefulness",
             Self::SummarizeWorkflowFailures => "summarize_workflow_failures",
         }
     }
@@ -126,6 +129,19 @@ pub struct SkillMatch {
     pub target_role: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SkillUsefulnessEvaluation {
+    pub target_skill_id: String,
+    pub before_behavior: String,
+    pub after_behavior: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub improved_axes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing_axes: Vec<String>,
+    pub verdict: String,
+    pub score: f32,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct SynthesisContextPack {
     #[serde(default)]
@@ -152,7 +168,19 @@ pub struct SynthesisProposal {
     pub merge_target_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_skill_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill_usefulness: Option<SkillUsefulnessEvaluation>,
     pub confidence: f32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SynthesisReviewMetrics {
+    pub no_card_decision: bool,
+    pub merge_recommended: bool,
+    pub approval_candidate: bool,
+    pub duplicate_suppressed: bool,
+    pub counterfactual_pass: bool,
+    pub needs_human: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -163,6 +191,7 @@ pub struct SynthesisReview {
     pub context: SynthesisContextPack,
     pub proposal: SynthesisProposal,
     pub events: Vec<SynthesisEvent>,
+    pub metrics: SynthesisReviewMetrics,
 }
 
 pub fn run_memory_card_synthesis(
@@ -273,12 +302,26 @@ pub fn run_memory_card_synthesis(
         }
     }
     if let Some(target) = proposal.target_skill_id.as_ref() {
+        let summary = if proposal.action == "skill_targeted_card" {
+            format!(
+                "Recommended Skill-targeted Memory Card because project Skill `{target}` has a concrete gap."
+            )
+        } else {
+            format!(
+                "Checked project Skill `{target}`, but the proposal still needs a stronger counterfactual value delta."
+            )
+        };
         events.push(SynthesisEvent {
             tool: SynthesisToolName::CompareWithSkill,
-            summary: format!(
-                "Recommended Skill-targeted Memory Card because project Skill `{target}` has a concrete gap."
-            ),
+            summary,
             item_ids: vec![target.clone()],
+        });
+    }
+    if let Some(evaluation) = proposal.skill_usefulness.as_ref() {
+        events.push(SynthesisEvent {
+            tool: SynthesisToolName::EvaluateSkillUsefulness,
+            summary: skill_eval::event_summary(evaluation),
+            item_ids: vec![evaluation.target_skill_id.clone()],
         });
     }
 
@@ -288,6 +331,7 @@ pub fn run_memory_card_synthesis(
         &related_observations,
         &workflow_failures,
     );
+    let metrics = metrics_for(&proposal, &stop_reason);
     Ok(SynthesisReview {
         session_id: session_id(candidate, &query),
         candidate_id: candidate.id.clone(),
@@ -302,6 +346,7 @@ pub fn run_memory_card_synthesis(
         },
         proposal,
         events,
+        metrics,
     })
 }
 
@@ -360,6 +405,7 @@ fn propose(
         .iter()
         .find(|skill| skill.project_level)
         .cloned();
+    let skill_usefulness = skill_eval::evaluate(candidate, project_skill.as_ref());
 
     let inferred_function = if covered_match.is_some() {
         "library"
@@ -424,6 +470,10 @@ fn propose(
     );
     let action = if covered_match.is_some() {
         "already_covered"
+    } else if inferred_function == "skill_targeted"
+        && !skill_eval::is_counterfactual_pass(skill_usefulness.as_ref())
+    {
+        "needs_human"
     } else {
         match inferred_function {
             "merge" => "merge_card",
@@ -451,6 +501,7 @@ fn propose(
         },
         merge_target_id: duplicate_match,
         target_skill_id: project_skill.map(|skill| skill.id),
+        skill_usefulness,
         confidence,
     }
 }
@@ -830,6 +881,9 @@ fn stop_reason_for(
     if proposal.confidence < 0.38 || !has_local_context {
         return SynthesisStopReason::NeedsHuman;
     }
+    if proposal.action == "needs_human" {
+        return SynthesisStopReason::NeedsHuman;
+    }
     if proposal.action == "already_covered" {
         return SynthesisStopReason::AlreadyCovered;
     }
@@ -838,6 +892,25 @@ fn stop_reason_for(
         "skill_targeted" => SynthesisStopReason::SkillGapFound,
         "workflow" => SynthesisStopReason::WorkflowGapFound,
         _ => SynthesisStopReason::NewCardGrounded,
+    }
+}
+
+fn metrics_for(
+    proposal: &SynthesisProposal,
+    stop_reason: &SynthesisStopReason,
+) -> SynthesisReviewMetrics {
+    let no_card_decision = matches!(proposal.action.as_str(), "already_covered" | "ignore")
+        || *stop_reason == SynthesisStopReason::NeedsHuman;
+    SynthesisReviewMetrics {
+        no_card_decision,
+        merge_recommended: proposal.action == "merge_card",
+        approval_candidate: matches!(
+            proposal.action.as_str(),
+            "new_card" | "workflow_card" | "skill_targeted_card" | "merge_card"
+        ),
+        duplicate_suppressed: proposal.action == "already_covered",
+        counterfactual_pass: skill_eval::is_counterfactual_pass(proposal.skill_usefulness.as_ref()),
+        needs_human: *stop_reason == SynthesisStopReason::NeedsHuman,
     }
 }
 

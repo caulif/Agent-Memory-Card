@@ -121,6 +121,8 @@ if (!fs.existsSync(demoPath)) {
     'synthesis_trace',
     'search_global_history',
     'summarize_workflow_failures',
+    'evaluate_skill_usefulness',
+    'counterfactual_pass',
     'item_ids'
   ];
   const missingDemoTerms = demoRequiredTerms.filter(term => !demoContent.includes(term));
@@ -166,7 +168,8 @@ if (!fs.existsSync(draftsPath)) {
     'Skill 对照',
     'item_ids',
     'search_global_history',
-    'summarize_workflow_failures'
+    'summarize_workflow_failures',
+    'evaluate_skill_usefulness'
   ];
   const missingTraceTerms = traceRequiredTerms.filter(term => !draftsContent.includes(term));
   if (missingTraceTerms.length > 0 || draftsContent.toLowerCase().includes('chain-of-thought')) {
