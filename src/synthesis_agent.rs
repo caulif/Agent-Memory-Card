@@ -13,9 +13,12 @@ use crate::textutil;
 
 const WRITING_GUIDE: &str = include_str!("../prompts/memory-card-writing-guide.md");
 const MAX_OBSERVATION_SNIPPETS: usize = 5;
+const MAX_RELATED_OBSERVATION_SNIPPETS: usize = 4;
+const MAX_WORKFLOW_FAILURE_INSIGHTS: usize = 4;
 const MAX_MEMORY_CARD_MATCHES: usize = 5;
 const MAX_SKILL_MATCHES: usize = 5;
 const DUPLICATE_THRESHOLD: f32 = 0.74;
+const DIRECT_OBSERVATION_THRESHOLD: f32 = 0.4;
 const RELATED_THRESHOLD: f32 = 0.18;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,22 +49,26 @@ impl SynthesisStopReason {
 #[serde(rename_all = "snake_case")]
 pub enum SynthesisToolName {
     SearchObservations,
+    SearchGlobalHistory,
     SearchMemoryCards,
     SearchSkills,
     ReadWritingGuide,
     FindMemoryDuplicates,
     CompareWithSkill,
+    SummarizeWorkflowFailures,
 }
 
 impl SynthesisToolName {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::SearchObservations => "search_observations",
+            Self::SearchGlobalHistory => "search_global_history",
             Self::SearchMemoryCards => "search_memory_cards",
             Self::SearchSkills => "search_skills",
             Self::ReadWritingGuide => "read_writing_guide",
             Self::FindMemoryDuplicates => "find_memory_duplicates",
             Self::CompareWithSkill => "compare_with_skill",
+            Self::SummarizeWorkflowFailures => "summarize_workflow_failures",
         }
     }
 }
@@ -80,6 +87,15 @@ pub struct ObservationSnippet {
     pub source_kind: String,
     pub quote: String,
     pub score: f32,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub relation: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WorkflowFailureInsight {
+    pub kind: String,
+    pub observation_id: String,
+    pub summary: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -106,6 +122,10 @@ pub struct SkillMatch {
 pub struct SynthesisContextPack {
     #[serde(default)]
     pub observations: Vec<ObservationSnippet>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub related_observations: Vec<ObservationSnippet>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workflow_failures: Vec<WorkflowFailureInsight>,
     #[serde(default)]
     pub memory_cards: Vec<MemoryCardMatch>,
     #[serde(default)]
@@ -153,6 +173,13 @@ pub fn run_memory_card_synthesis(
     let skills = config::load_skill_index(&root)?.skills;
 
     let observation_snippets = search_observations(candidate, &observations, &query);
+    let related_observations =
+        search_global_history(candidate, &observations, &query, &observation_snippets);
+    let history_window = observation_snippets
+        .iter()
+        .chain(related_observations.iter())
+        .collect::<Vec<_>>();
+    let workflow_failures = summarize_workflow_failures(&observations, &history_window);
     let memory_matches = search_memory_cards(&memory_cards, &global_memory_cards, &query);
     let skill_matches = search_skills(&skills, &query);
     let guide_summary = writing_guide_summary();
@@ -167,6 +194,28 @@ pub fn run_memory_card_synthesis(
             item_ids: observation_snippets
                 .iter()
                 .map(|snippet| snippet.id.clone())
+                .collect(),
+        },
+        SynthesisEvent {
+            tool: SynthesisToolName::SearchGlobalHistory,
+            summary: format!(
+                "Read {} broader history snippet(s) beyond direct evidence for repeated workflow context.",
+                related_observations.len()
+            ),
+            item_ids: related_observations
+                .iter()
+                .map(|snippet| snippet.id.clone())
+                .collect(),
+        },
+        SynthesisEvent {
+            tool: SynthesisToolName::SummarizeWorkflowFailures,
+            summary: format!(
+                "Summarized {} workflow failure signal(s) from the selected history window.",
+                workflow_failures.len()
+            ),
+            item_ids: workflow_failures
+                .iter()
+                .map(|failure| failure.observation_id.clone())
                 .collect(),
         },
         SynthesisEvent {
@@ -230,13 +279,20 @@ pub fn run_memory_card_synthesis(
         });
     }
 
-    let stop_reason = stop_reason_for(&proposal, &observation_snippets);
+    let stop_reason = stop_reason_for(
+        &proposal,
+        &observation_snippets,
+        &related_observations,
+        &workflow_failures,
+    );
     Ok(SynthesisReview {
         session_id: session_id(candidate, &query),
         candidate_id: candidate.id.clone(),
         stop_reason,
         context: SynthesisContextPack {
             observations: observation_snippets,
+            related_observations,
+            workflow_failures,
             memory_cards: memory_matches,
             skills: skill_matches,
             writing_guide_summary: guide_summary,
@@ -414,11 +470,18 @@ fn search_observations(
                 0.0
             };
             let score = source_boost + lexical_score(query, &observation.body);
-            (score >= RELATED_THRESHOLD || source_boost > 0.0).then(|| ObservationSnippet {
-                id: observation.id.clone(),
-                source_kind: observation.source_kind.clone(),
-                quote: snippet(&observation.body, 280),
-                score: cap_score(score),
+            (score >= DIRECT_OBSERVATION_THRESHOLD || source_boost > 0.0).then(|| {
+                ObservationSnippet {
+                    id: observation.id.clone(),
+                    source_kind: observation.source_kind.clone(),
+                    quote: snippet(&observation.body, 280),
+                    score: cap_score(score),
+                    relation: if source_boost > 0.0 {
+                        "direct_evidence".to_string()
+                    } else {
+                        "lexical_evidence".to_string()
+                    },
+                }
             })
         })
         .collect::<Vec<_>>();
@@ -430,9 +493,88 @@ fn search_observations(
             source_kind: "candidate_evidence".to_string(),
             quote: snippet(&candidate.evidence, 280),
             score: 0.45,
+            relation: "candidate_evidence".to_string(),
         });
     }
     scored
+}
+
+fn search_global_history(
+    candidate: &CandidateRecord,
+    observations: &[ObservationRecord],
+    query: &str,
+    direct_snippets: &[ObservationSnippet],
+) -> Vec<ObservationSnippet> {
+    let direct_ids = direct_snippets
+        .iter()
+        .map(|snippet| snippet.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let source_ids = candidate
+        .source_observations
+        .iter()
+        .chain(candidate.extraction.source_observations.iter())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    let source_paths = observations
+        .iter()
+        .filter(|observation| source_ids.contains(&observation.id))
+        .map(|observation| observation.source_path.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut scored = observations
+        .iter()
+        .filter(|observation| !direct_ids.contains(observation.id.as_str()))
+        .filter_map(|observation| {
+            let same_source = source_paths.contains(observation.source_path.as_str());
+            let failure_boost = if looks_like_synthesis_relevant_feedback(&observation.body) {
+                0.2
+            } else {
+                0.0
+            };
+            let source_boost = if same_source { 0.28 } else { 0.0 };
+            let score =
+                lexical_score(query, &observation.body) * 0.7 + source_boost + failure_boost;
+            (score >= RELATED_THRESHOLD).then(|| ObservationSnippet {
+                id: observation.id.clone(),
+                source_kind: observation.source_kind.clone(),
+                quote: snippet(&observation.body, 280),
+                score: cap_score(score),
+                relation: if same_source {
+                    "same_source_context".to_string()
+                } else {
+                    "related_history".to_string()
+                },
+            })
+        })
+        .collect::<Vec<_>>();
+    scored.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.id.cmp(&b.id)));
+    scored.truncate(MAX_RELATED_OBSERVATION_SNIPPETS);
+    scored
+}
+
+fn summarize_workflow_failures(
+    observations: &[ObservationRecord],
+    snippets: &[&ObservationSnippet],
+) -> Vec<WorkflowFailureInsight> {
+    let snippet_ids = snippets
+        .iter()
+        .map(|snippet| snippet.id.as_str())
+        .collect::<BTreeSet<_>>();
+    let selected = observations
+        .iter()
+        .filter(|observation| snippet_ids.contains(observation.id.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    let summary = observation::failure_flow::summarize_failure_flow(&selected);
+    summary
+        .signals
+        .into_iter()
+        .take(MAX_WORKFLOW_FAILURE_INSIGHTS)
+        .map(|signal| WorkflowFailureInsight {
+            kind: signal.kind.as_str().to_string(),
+            observation_id: signal.observation_id,
+            summary: signal.snippet,
+        })
+        .collect()
 }
 
 fn search_memory_cards(
@@ -651,8 +793,13 @@ fn confidence_for(
 fn stop_reason_for(
     proposal: &SynthesisProposal,
     observation_snippets: &[ObservationSnippet],
+    related_observations: &[ObservationSnippet],
+    workflow_failures: &[WorkflowFailureInsight],
 ) -> SynthesisStopReason {
-    if proposal.confidence < 0.38 || observation_snippets.is_empty() {
+    let has_local_context = !observation_snippets.is_empty()
+        || !related_observations.is_empty()
+        || !workflow_failures.is_empty();
+    if proposal.confidence < 0.38 || !has_local_context {
         return SynthesisStopReason::NeedsHuman;
     }
     if proposal.action == "already_covered" {
@@ -747,6 +894,21 @@ fn mentions_update_intent(candidate: &CandidateRecord) -> bool {
     .any(|marker| text.contains(marker))
 }
 
+fn looks_like_synthesis_relevant_feedback(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    contains_any(
+        &lower,
+        &[
+            "反馈", "问题", "不足", "缺少", "不要", "不能", "应该", "优化", "改进", "审核", "真实",
+            "测试", "failure", "missing", "should", "review", "quality",
+        ],
+    )
+}
+
+fn contains_any(text: &str, markers: &[&str]) -> bool {
+    markers.iter().any(|marker| text.contains(marker))
+}
+
 fn writing_guide_summary() -> String {
     WRITING_GUIDE
         .lines()
@@ -785,204 +947,4 @@ fn cap_score(score: f32) -> f32 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::candidate::{CandidateStatus, ExtractionMetadata};
-    use crate::config::{SkillIndex, SkillRecord, save_skill_index};
-    use crate::extract::lifecycle::MemoryCardOperation;
-    use crate::memory_card;
-    use crate::observation;
-
-    #[test]
-    fn synthesis_targets_project_skill_and_keeps_global_reference_only() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let root = temp.path();
-        save_skill_index(
-            root,
-            &SkillIndex {
-                generated_at: "now".to_string(),
-                skills: vec![
-                    SkillRecord {
-                        id: "project:ux-quality".to_string(),
-                        name: "agent-kernel-ux-quality-pass".to_string(),
-                        description: "Use when checking product UX quality.".to_string(),
-                        source_path: ".agents/skills/agent-kernel-ux-quality-pass".to_string(),
-                        source_kind: "project".to_string(),
-                        source_hash: "hash".to_string(),
-                        warnings: Vec::new(),
-                    },
-                    SkillRecord {
-                        id: "local:skill-creator".to_string(),
-                        name: "skill-creator".to_string(),
-                        description: "Create reusable skills.".to_string(),
-                        source_path: "C:/Users/example/.codex/skills/skill-creator".to_string(),
-                        source_kind: "referenced".to_string(),
-                        source_hash: "hash".to_string(),
-                        warnings: Vec::new(),
-                    },
-                ],
-            },
-        )
-        .expect("skill index");
-        observation::import_observation_text(
-            root,
-            &root.join("session.jsonl"),
-            "codex-session",
-            Some("codex"),
-            "用户反馈 Skills 页面应该帮助 agent-kernel-ux-quality-pass 做真实 UX 试用，而不是只展示只读字典。",
-        )
-        .expect("observation");
-        let candidate = candidate(
-            "skill-card",
-            "Skills 应支持 UX 试用闭环",
-            "补强 agent-kernel-ux-quality-pass skill 的真实试用流程",
-        );
-
-        let review = run_memory_card_synthesis(root, &candidate, "procedure").expect("review");
-
-        assert_eq!(review.proposal.card_function, "skill_targeted");
-        assert_eq!(
-            review.proposal.target_context.target_id.as_deref(),
-            Some("project:ux-quality")
-        );
-        assert_eq!(review.stop_reason, SynthesisStopReason::SkillGapFound);
-    }
-
-    #[test]
-    fn synthesis_recommends_merge_for_near_duplicate_project_card() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let root = temp.path();
-        memory_card::add_memory_card(
-            root,
-            "memory-card-existing",
-            "用真实试用验证 UX",
-            "触发：完成页面重构后。\n\n动作：按真实用户路径试用并记录问题。\n\n边界：不要只凭编译通过判断完成。",
-            "procedure",
-            "project",
-            vec![],
-        )
-        .expect("memory card");
-        observation::import_observation_text(
-            root,
-            &root.join("session.jsonl"),
-            "codex-session",
-            Some("codex"),
-            "页面重构后要按真实用户路径试用并记录问题，不要只看编译。",
-        )
-        .expect("observation");
-        let candidate = candidate(
-            "memory-card-new",
-            "补充用真实试用验证 UX",
-            "补充既有规则：页面重构后要按真实用户路径试用并记录问题，不要只看编译。",
-        );
-
-        let review = run_memory_card_synthesis(root, &candidate, "procedure").expect("review");
-
-        assert_eq!(review.proposal.card_function, "merge");
-        assert_eq!(
-            review.proposal.merge_target_id.as_deref(),
-            Some("memory-card-existing")
-        );
-        assert_eq!(review.stop_reason, SynthesisStopReason::MergeTargetFound);
-    }
-
-    #[test]
-    fn synthesis_marks_exact_existing_card_as_already_covered() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let root = temp.path();
-        memory_card::add_memory_card(
-            root,
-            "memory-card-existing",
-            "真实试用验证 UX",
-            "触发：完成页面重构后。\n\n动作：按真实用户路径试用并记录问题。\n\n边界：不要只凭编译通过判断完成。",
-            "procedure",
-            "project",
-            vec![],
-        )
-        .expect("memory card");
-        observation::import_observation_text(
-            root,
-            &root.join("session.jsonl"),
-            "codex-session",
-            Some("codex"),
-            "完成页面重构后，按真实用户路径试用并记录问题，不要只凭编译通过判断完成。",
-        )
-        .expect("observation");
-        let candidate = candidate(
-            "memory-card-covered",
-            "真实试用验证 UX",
-            "完成页面重构后，按真实用户路径试用并记录问题，不要只凭编译通过判断完成。",
-        );
-
-        let review = run_memory_card_synthesis(root, &candidate, "procedure").expect("review");
-
-        assert_eq!(review.proposal.action, "already_covered");
-        assert_eq!(
-            review.proposal.target_context.target_id.as_deref(),
-            Some("memory-card-existing")
-        );
-        assert_eq!(review.stop_reason, SynthesisStopReason::AlreadyCovered);
-    }
-
-    #[test]
-    fn trace_is_compact_and_reviewable() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let root = temp.path();
-        observation::import_observation_text(
-            root,
-            &root.join("session.jsonl"),
-            "codex-session",
-            Some("codex"),
-            "以后生成 Memory Card 时要说明价值增量和边界。",
-        )
-        .expect("observation");
-        let candidate = candidate(
-            "memory-card-value",
-            "说明 Memory Card 价值增量",
-            "生成 Memory Card 时要说明价值增量和边界。",
-        );
-        let review = run_memory_card_synthesis(root, &candidate, "procedure").expect("review");
-        let trace = review_to_trace(&review);
-
-        assert!(
-            trace
-                .iter()
-                .any(|entry| entry.step == "search_observations")
-        );
-        assert!(trace.iter().any(|entry| entry.step == "stop"));
-        assert!(
-            trace
-                .iter()
-                .all(|entry| !entry.summary.to_lowercase().contains("chain-of-thought"))
-        );
-    }
-
-    fn candidate(id: &str, title: &str, body: &str) -> CandidateRecord {
-        CandidateRecord {
-            schema_version: 1,
-            id: id.to_string(),
-            title: title.to_string(),
-            kind: "procedure".to_string(),
-            scope: "project".to_string(),
-            body: body.to_string(),
-            brief: body.to_string(),
-            tags: vec!["workflow".to_string()],
-            language: "zh".to_string(),
-            targets: Vec::new(),
-            evidence: body.to_string(),
-            confidence: Some(0.82),
-            reason: Some("test".to_string()),
-            matched_template: None,
-            source_observations: Vec::new(),
-            extraction: ExtractionMetadata::default(),
-            operation: MemoryCardOperation::Add,
-            duplicate_of: None,
-            conflict_with: Vec::new(),
-            quality_flags: Vec::new(),
-            status: CandidateStatus::Candidate,
-            rejected_reason: None,
-            created_at: "2026-05-20T00:00:00Z".to_string(),
-            updated_at: "2026-05-20T00:00:00Z".to_string(),
-        }
-    }
-}
+mod tests;

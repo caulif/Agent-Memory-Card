@@ -274,3 +274,28 @@
     *   `cargo fmt --check` -> PASS.
     *   `git diff --check` -> PASS.
     *   Browser trial on `http://127.0.0.1:1420`: Review Inbox 显示 `待审建议收件箱 (2)`、`LLM Provider`、`项目级 Skill 补强`、`Value Delta`；候选正文显示成熟 Memory Card shape；无“页面数据加载失败”；无横向溢出；不再出现“用于把”模板腔。
+
+---
+
+## 14. 2026-05-21 Synthesis Runtime 全局视野质量补强
+*   **Issue**: GitHub #39 continuation.
+*   **Intent**: 让只读 synthesis runtime 不只看当前候选附近的局部文本，而能解释它读过哪些更宽的历史 observations，并识别重复工作流失败模式。
+*   **Production Changes**:
+    *   `src/synthesis_agent.rs`: 将 observation context 分为 direct evidence 与 broader history；新增 `search_global_history` trace event。
+    *   `src/synthesis_agent.rs`: `SynthesisContextPack` 新增 `related_observations` 与 `workflow_failures`，用于给 provider prompt / Review Inbox 提供更可解释的全局视野。
+    *   `src/synthesis_agent.rs`: 复用既有 `observation::failure_flow`，新增 `summarize_workflow_failures` trace event，提炼 review-iterate loop、质量纠偏、scope boundary 等失败信号。
+    *   `src/synthesis_agent.rs`: 无直接证据且无更宽本地上下文时保持 `needs_human`，避免凭空高置信生成 Memory Card。
+    *   `src/synthesis_agent/tests.rs`: 将 runtime tests 拆出，保持核心文件低于 1000 行，并新增同源历史、失败模式摘要、无上下文保守停止测试。
+    *   `.gitignore`: 白名单追踪 `src/synthesis_agent/tests.rs`，避免 CI checkout 丢失被 Rust 模块引用的测试文件。
+*   **Verification So Far**:
+    *   `cargo fmt --check` -> PASS.
+    *   `cargo test --manifest-path Cargo.toml synthesis_agent --lib` -> PASS, 7 passed.
+    *   `cargo test --manifest-path Cargo.toml --lib` -> PASS, 315 passed.
+    *   `cargo test --test extract_quality_v2 --quiet` -> PASS, 21 passed / 1 ignored.
+    *   `cargo test --test golden_set_regression --quiet` -> PASS, 3 passed.
+    *   `cargo clippy -- -D warnings` -> PASS.
+    *   `bun run --cwd app verify-ui` -> PASS.
+    *   `bun test --cwd app ./src/utils/review-workbench.test.ts ./src/utils/kernel-plan.test.ts` -> PASS, 28 passed.
+    *   `bun run --cwd app build` -> PASS.
+    *   `cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture` -> PASS, 45 passed.
+    *   `git diff --check` -> PASS.

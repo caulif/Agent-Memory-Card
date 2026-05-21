@@ -51,3 +51,4 @@
 !/src/eval/tests.rs
 !/src/extract/induce/batch_tests.rs
 !/src/provider/tests.rs
+!/src/synthesis_agent/tests.rs

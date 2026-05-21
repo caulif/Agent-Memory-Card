@@ -427,6 +427,24 @@ This slice ports the pi-style shape into Rust instead of embedding the TypeScrip
 
 The slice deliberately does not add a full provider tool-call loop yet. The next replacement point is clear: swap the deterministic tool planner for a pi-style provider loop while keeping the same `SynthesisReview` output contract and read-only tool boundary.
 
+## Global Vision Runtime Slice: 2026-05-21
+
+The second runtime slice improves local global vision without adding write access or an autonomous provider loop.
+
+The context pack now separates:
+
+- direct evidence snippets: source observations or high-confidence local matches;
+- broader history snippets: same-source context and weaker related feedback from the project history;
+- workflow failure insights: compact signals derived from selected observations, such as review-iterate loops, quality corrections, scope boundaries, and pipeline breaks.
+
+This keeps the review trace explainable:
+
+- `search_observations` means the runtime read direct evidence.
+- `search_global_history` means it looked beyond the candidate's immediate evidence window.
+- `summarize_workflow_failures` means it found repeated failure patterns worth considering before writing or merging a Memory Card.
+
+The wider history layer is intentionally read-only and capped. It helps the agent answer "what existing workflow failed?" before generating a card, but it does not let weak history fabricate confidence. If neither direct evidence nor broader local context exists, the runtime returns `needs_human`.
+
 ## Testing Strategy
 
 - Unit tests for filtering decisions:

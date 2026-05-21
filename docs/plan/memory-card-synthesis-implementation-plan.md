@@ -141,3 +141,24 @@ Deferred but now bounded:
 - Provider-driven tool-call loop using the same `SynthesisReview` contract.
 - Web search/read tools with citations and privacy-safe abstract queries.
 - Embedding-backed observation search if lexical search misses real history patterns.
+
+### Phase 6: Global Vision Context Quality
+
+Tracking: GitHub issue #39 continuation
+
+Goal: make the read-only runtime explain broader project history before proposing, merging, or rejecting a Memory Card.
+
+Implemented scope:
+
+- Split observation retrieval into direct evidence and broader history context.
+- Add `search_global_history` events for same-source context and related historical feedback.
+- Add `summarize_workflow_failures` events that reuse the existing failure-flow detector.
+- Extend `SynthesisContextPack` with `related_observations` and `workflow_failures`.
+- Keep no-context proposals conservative: if no direct or broader local context exists, stop as `needs_human`.
+
+Acceptance:
+
+- Runtime trace can explain when it read broader history rather than only the current candidate.
+- Repeated workflow failure signals become structured review context.
+- Same-source historical observations are available even when they are not strong direct evidence.
+- No file writes, project config mutation, or web/provider loop is introduced in this slice.
