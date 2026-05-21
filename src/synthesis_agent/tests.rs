@@ -91,6 +91,15 @@ fn synthesis_recommends_merge_for_near_duplicate_project_card() {
     let review = run_memory_card_synthesis(root, &candidate, "procedure").expect("review");
 
     assert_eq!(review.proposal.card_function, "merge");
+    let matched_card = review
+        .context
+        .memory_cards
+        .iter()
+        .find(|matched| matched.id == "memory-card-existing")
+        .expect("matched memory card");
+    assert_eq!(matched_card.merge_hint, "merge_candidate");
+    assert!(matched_card.overlap_summary.contains("strongly overlaps"));
+    assert!(matched_card.gap_summary.contains("new trigger"));
     assert_eq!(
         review.proposal.merge_target_id.as_deref(),
         Some("memory-card-existing")
@@ -129,6 +138,13 @@ fn synthesis_marks_exact_existing_card_as_already_covered() {
     let review = run_memory_card_synthesis(root, &candidate, "procedure").expect("review");
 
     assert_eq!(review.proposal.action, "already_covered");
+    assert!(
+        review
+            .context
+            .memory_cards
+            .iter()
+            .any(|matched| matched.merge_hint == "already_covered_candidate")
+    );
     assert_eq!(
         review.proposal.target_context.target_id.as_deref(),
         Some("memory-card-existing")
@@ -259,6 +275,74 @@ fn synthesis_summarizes_repeated_workflow_failures_from_history() {
             .iter()
             .any(|event| event.tool == SynthesisToolName::SummarizeWorkflowFailures)
     );
+}
+
+#[test]
+fn synthesis_explains_project_skill_target_and_global_reference_roles() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    save_skill_index(
+        root,
+        &SkillIndex {
+            generated_at: "now".to_string(),
+            skills: vec![
+                SkillRecord {
+                    id: "project:skill-creator".to_string(),
+                    name: "skill-creator".to_string(),
+                    description: "Create project Skills with clear Use When and Boundaries."
+                        .to_string(),
+                    source_path: ".agents/skills/skill-creator".to_string(),
+                    source_kind: "project".to_string(),
+                    source_hash: "hash".to_string(),
+                    warnings: Vec::new(),
+                },
+                SkillRecord {
+                    id: "global:skill-creator".to_string(),
+                    name: "skill-creator".to_string(),
+                    description: "Create reusable global Skills.".to_string(),
+                    source_path: "C:/Users/example/.codex/skills/skill-creator".to_string(),
+                    source_kind: "referenced".to_string(),
+                    source_hash: "hash".to_string(),
+                    warnings: Vec::new(),
+                },
+            ],
+        },
+    )
+    .expect("skill index");
+    observation::import_observation_text(
+        root,
+        &root.join("skill-feedback.txt"),
+        "manual-note",
+        Some("codex"),
+        "用户反馈要补强 skill-creator，让它生成 Memory Card 时写清 Use When、Instructions 和 Boundaries。",
+    )
+    .expect("observation");
+    let candidate = candidate(
+        "skill-explain",
+        "补强 skill-creator 的 Memory Card 写法",
+        "优化 skill-creator skill：生成 Memory Card 时必须写清 Use When、Instructions 和 Boundaries。",
+    );
+
+    let review = run_memory_card_synthesis(root, &candidate, "procedure").expect("review");
+
+    let project_skill = review
+        .context
+        .skills
+        .iter()
+        .find(|skill| skill.id == "project:skill-creator")
+        .expect("project skill");
+    assert_eq!(project_skill.target_role, "project_target");
+    assert!(project_skill.coverage_summary.contains("Use When"));
+    assert!(project_skill.gap_summary.contains("missing trigger"));
+
+    let global_skill = review
+        .context
+        .skills
+        .iter()
+        .find(|skill| skill.id == "global:skill-creator")
+        .expect("global skill");
+    assert_eq!(global_skill.target_role, "global_reference");
+    assert!(global_skill.gap_summary.contains("inform wording"));
 }
 
 #[test]

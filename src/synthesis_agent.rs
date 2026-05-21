@@ -11,6 +11,8 @@ use crate::memory_card::{self, MemoryCardRecord};
 use crate::observation::{self, ObservationRecord};
 use crate::textutil;
 
+mod explain;
+
 const WRITING_GUIDE: &str = include_str!("../prompts/memory-card-writing-guide.md");
 const MAX_OBSERVATION_SNIPPETS: usize = 5;
 const MAX_RELATED_OBSERVATION_SNIPPETS: usize = 4;
@@ -106,6 +108,9 @@ pub struct MemoryCardMatch {
     pub scope: String,
     pub score: f32,
     pub duplicate: bool,
+    pub overlap_summary: String,
+    pub gap_summary: String,
+    pub merge_hint: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -116,6 +121,9 @@ pub struct SkillMatch {
     pub source_kind: String,
     pub score: f32,
     pub project_level: bool,
+    pub coverage_summary: String,
+    pub gap_summary: String,
+    pub target_role: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -180,8 +188,9 @@ pub fn run_memory_card_synthesis(
         .chain(related_observations.iter())
         .collect::<Vec<_>>();
     let workflow_failures = summarize_workflow_failures(&observations, &history_window);
-    let memory_matches = search_memory_cards(&memory_cards, &global_memory_cards, &query);
-    let skill_matches = search_skills(&skills, &query);
+    let memory_matches =
+        search_memory_cards(&memory_cards, &global_memory_cards, candidate, &query);
+    let skill_matches = search_skills(&skills, candidate, &query);
     let guide_summary = writing_guide_summary();
 
     let mut events = vec![
@@ -220,10 +229,7 @@ pub fn run_memory_card_synthesis(
         },
         SynthesisEvent {
             tool: SynthesisToolName::SearchMemoryCards,
-            summary: format!(
-                "Compared {} Memory Card match(es), including project cards before global references.",
-                memory_matches.len()
-            ),
+            summary: explain::memory_card_event_summary(&memory_matches),
             item_ids: memory_matches
                 .iter()
                 .map(|matched| matched.id.clone())
@@ -231,10 +237,7 @@ pub fn run_memory_card_synthesis(
         },
         SynthesisEvent {
             tool: SynthesisToolName::SearchSkills,
-            summary: format!(
-                "Checked {} Skill match(es); global Skills are reference-only targets.",
-                skill_matches.len()
-            ),
+            summary: explain::skill_event_summary(&skill_matches),
             item_ids: skill_matches
                 .iter()
                 .map(|matched| matched.id.clone())
@@ -580,15 +583,16 @@ fn summarize_workflow_failures(
 fn search_memory_cards(
     project_cards: &[MemoryCardRecord],
     global_cards: &[MemoryCardRecord],
+    candidate: &CandidateRecord,
     query: &str,
 ) -> Vec<MemoryCardMatch> {
     let mut scored = project_cards
         .iter()
-        .map(|card| memory_card_match(card, query, false))
+        .map(|card| memory_card_match(card, candidate, query, false))
         .chain(
             global_cards
                 .iter()
-                .map(|card| memory_card_match(card, query, true)),
+                .map(|card| memory_card_match(card, candidate, query, true)),
         )
         .filter(|matched| matched.score >= RELATED_THRESHOLD)
         .collect::<Vec<_>>();
@@ -602,7 +606,12 @@ fn search_memory_cards(
     scored
 }
 
-fn memory_card_match(card: &MemoryCardRecord, query: &str, global: bool) -> MemoryCardMatch {
+fn memory_card_match(
+    card: &MemoryCardRecord,
+    candidate: &CandidateRecord,
+    query: &str,
+    global: bool,
+) -> MemoryCardMatch {
     let text = format!(
         "{} {} {} {}",
         card.title,
@@ -611,34 +620,51 @@ fn memory_card_match(card: &MemoryCardRecord, query: &str, global: bool) -> Memo
         card.tags.join(" ")
     );
     let score = lexical_score(query, &text);
+    let duplicate = score >= DUPLICATE_THRESHOLD;
+    let scope = if global {
+        "global".to_string()
+    } else {
+        card.scope.clone()
+    };
     MemoryCardMatch {
         id: card.id.clone(),
         title: card.title.clone(),
         kind: card.kind.clone(),
-        scope: if global {
-            "global".to_string()
-        } else {
-            card.scope.clone()
-        },
+        scope: scope.clone(),
         score: cap_score(score),
-        duplicate: score >= DUPLICATE_THRESHOLD,
+        duplicate,
+        overlap_summary: explain::memory_overlap_summary(card, &scope, score, duplicate),
+        gap_summary: explain::memory_gap_summary(candidate, card, &scope, duplicate),
+        merge_hint: explain::memory_merge_hint(candidate, &scope, duplicate),
     }
 }
 
-fn search_skills(skills: &[SkillRecord], query: &str) -> Vec<SkillMatch> {
+fn search_skills(
+    skills: &[SkillRecord],
+    candidate: &CandidateRecord,
+    query: &str,
+) -> Vec<SkillMatch> {
     let mut scored = skills
         .iter()
         .filter_map(|skill| {
             let text = format!("{} {} {}", skill.name, skill.description, skill.source_kind);
             let score = lexical_score(query, &text);
             (score >= RELATED_THRESHOLD || query_mentions_name(query, &skill.name)).then(|| {
+                let project_level = skill.source_kind == "project";
                 SkillMatch {
                     id: skill.id.clone(),
                     name: skill.name.clone(),
                     description: skill.description.clone(),
                     source_kind: skill.source_kind.clone(),
                     score: cap_score(score),
-                    project_level: skill.source_kind == "project",
+                    project_level,
+                    coverage_summary: explain::skill_coverage_summary(skill, score),
+                    gap_summary: explain::skill_gap_summary(candidate, skill, project_level),
+                    target_role: if project_level {
+                        "project_target".to_string()
+                    } else {
+                        "global_reference".to_string()
+                    },
                 }
             })
         })

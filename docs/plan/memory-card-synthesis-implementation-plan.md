@@ -162,3 +162,24 @@ Acceptance:
 - Repeated workflow failure signals become structured review context.
 - Same-source historical observations are available even when they are not strong direct evidence.
 - No file writes, project config mutation, or web/provider loop is introduced in this slice.
+
+### Phase 7: Explainable Skill and Memory Card Comparison
+
+Tracking: GitHub issue #38 continuation
+
+Goal: make read-only comparison tools explain the reason for their matches, not only return ids and scores.
+
+Implemented scope:
+
+- Extend `MemoryCardMatch` with `overlap_summary`, `gap_summary`, and `merge_hint`.
+- Extend `SkillMatch` with `coverage_summary`, `gap_summary`, and `target_role`.
+- Update `search_memory_cards` trace summaries to name the top match and whether it is a merge, already-covered, related-reference, or reference-only result.
+- Update `search_skills` trace summaries to distinguish project Skill targets from global/referenced Skill context.
+- Move comparison wording helpers into `src/synthesis_agent/explain.rs` so the runtime file remains below the project file-size limit.
+
+Acceptance:
+
+- Provider-facing `synthesis_context` can explain why a Memory Card is a duplicate, merge candidate, related reference, or global-only reference.
+- Provider-facing `synthesis_context` can explain whether a Skill is a project-level target or only a global reference.
+- Runtime still cannot write files or mutate Skills/Memory Cards.
+- Focused synthesis tests cover the new explanation fields.

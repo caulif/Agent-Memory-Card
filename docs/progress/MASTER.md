@@ -300,3 +300,26 @@
     *   `bun run --cwd app build` -> PASS.
     *   `cargo test --manifest-path src-tauri/Cargo.toml -- --nocapture` -> PASS, 45 passed.
     *   `git diff --check` -> PASS.
+
+---
+
+## 15. 2026-05-21 Synthesis Runtime 对照解释补强
+*   **Issue**: GitHub #38 continuation.
+*   **Intent**: 让只读 synthesis runtime 对 Skills / Memory Cards 的对照不只返回 id 和 score，而能解释覆盖、缺口、合并建议和项目/全局边界。
+*   **Production Changes**:
+    *   `src/synthesis_agent.rs`: `MemoryCardMatch` 新增 `overlap_summary / gap_summary / merge_hint`，区分 merge candidate、already covered、related reference、reference only。
+    *   `src/synthesis_agent.rs`: `SkillMatch` 新增 `coverage_summary / gap_summary / target_role`，区分 project target 与 global reference。
+    *   `src/synthesis_agent.rs`: `search_memory_cards` / `search_skills` 的 trace 摘要改为包含最高匹配项及其解释结论。
+    *   `src/synthesis_agent/explain.rs`: 抽出对照解释 helper，保持 runtime 主文件低于 1000 行。
+    *   `src/synthesis_agent/tests.rs`: 新增/扩展测试覆盖 Memory Card merge/already-covered 解释、项目级 Skill 与全局 Skill 角色解释。
+*   **Verification So Far**:
+    *   `cargo fmt --check` -> PASS.
+    *   `cargo test --manifest-path Cargo.toml synthesis_agent --lib` -> PASS, 8 passed.
+    *   `cargo test --manifest-path Cargo.toml candidate::tests::visible_candidate_inbox --lib` -> PASS, 2 passed.
+    *   `cargo test --manifest-path Cargo.toml --lib` -> PASS, 316 passed.
+    *   `cargo clippy -- -D warnings` -> PASS.
+    *   `cargo test --test extract_quality_v2 --quiet` -> PASS, 21 passed / 1 ignored.
+    *   `cargo test --test golden_set_regression --quiet` -> PASS, 3 passed.
+    *   `bun run --cwd app verify-ui` -> PASS.
+    *   `bun run --cwd app build` -> PASS.
+    *   `git diff --check` -> PASS.

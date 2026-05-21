@@ -445,6 +445,24 @@ This keeps the review trace explainable:
 
 The wider history layer is intentionally read-only and capped. It helps the agent answer "what existing workflow failed?" before generating a card, but it does not let weak history fabricate confidence. If neither direct evidence nor broader local context exists, the runtime returns `needs_human`.
 
+## Explainable Comparison Runtime Slice: 2026-05-21
+
+The third runtime slice improves comparison quality for Skills and Memory Cards. The previous context pack could say which items matched, but it did not explain the comparison in a way a provider or reviewer could use.
+
+`search_memory_cards` now returns:
+
+- overlap summary: whether the existing card partially or strongly overlaps the candidate;
+- gap summary: whether a project card already covers the candidate, should be merged, or is only related wording to avoid repeating;
+- merge hint: `merge_candidate`, `already_covered_candidate`, `related_reference`, or `reference_only`.
+
+`search_skills` now returns:
+
+- coverage summary: what the Skill already says it covers;
+- gap summary: what would have to be missing before the Memory Card should target that Skill;
+- target role: `project_target` for project-level Skills and `global_reference` for global/referenced Skills.
+
+This is still a read-only context improvement. It does not mount cards, mutate Skills, or introduce provider-selected writes. Its job is to make the next proposal more value-directed: the runtime should be able to say not only "I found a matching Skill/card" but "this is a merge target, this is already covered, this is only a reference, or this project Skill lacks a concrete trigger/boundary."
+
 ## Testing Strategy
 
 - Unit tests for filtering decisions:
