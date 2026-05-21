@@ -14,6 +14,47 @@ use crate::fsutil;
 mod custom;
 pub use custom::{save_custom_openai_compatible_provider, save_custom_provider};
 
+#[cfg(test)]
+pub(crate) fn with_test_env_var<T>(key: &str, value: Option<&str>, f: impl FnOnce() -> T) -> T {
+    with_test_env_vars(&[(key, value)], f)
+}
+
+#[cfg(test)]
+pub(crate) fn with_test_env_vars<T>(vars: &[(&str, Option<&str>)], f: impl FnOnce() -> T) -> T {
+    use std::sync::{Mutex, OnceLock};
+
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let _guard = LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let previous = vars
+        .iter()
+        .map(|(key, _)| ((*key).to_string(), std::env::var(key).ok()))
+        .collect::<Vec<_>>();
+    for (key, value) in vars {
+        match value {
+            Some(value) => unsafe { std::env::set_var(key, value) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+    }
+    struct EnvRestore(Vec<(String, Option<String>)>);
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (key, value) in &self.0 {
+                match value.as_deref() {
+                    Some(value) => unsafe { std::env::set_var(key, value) },
+                    None => unsafe { std::env::remove_var(key) },
+                }
+            }
+        }
+    }
+    let restore = EnvRestore(previous);
+    let result = f();
+    drop(restore);
+    result
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfig {
     pub default: String,

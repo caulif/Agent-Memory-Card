@@ -259,7 +259,7 @@ fn trace_is_compact_and_reviewable() {
 }
 
 #[test]
-fn synthesis_reads_same_source_history_beyond_direct_evidence() {
+fn synthesis_reads_only_explicit_source_observations() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
     let session = root.join("session.txt");
@@ -291,63 +291,47 @@ fn synthesis_reads_same_source_history_beyond_direct_evidence() {
     assert!(
         review
             .context
-            .related_observations
+            .observations
             .iter()
-            .any(|snippet| snippet.relation == "same_source_context"),
+            .any(|snippet| snippet.relation == "direct_evidence"),
         "{:#?}",
-        review.context.related_observations
+        review.context.observations
     );
+    assert!(review.context.related_observations.is_empty());
+    assert!(review.context.workflow_failures.is_empty());
     assert!(
         review
             .events
             .iter()
-            .any(|event| event.tool == SynthesisToolName::SearchGlobalHistory)
+            .all(|event| event.tool != SynthesisToolName::SearchGlobalHistory)
     );
 }
 
 #[test]
-fn synthesis_summarizes_repeated_workflow_failures_from_history() {
+fn synthesis_does_not_lexically_retrieve_global_observations() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path();
     observation::import_observation_text(
         root,
-        &root.join("history-a.txt"),
+        &root.join("history.txt"),
         "manual-note",
         Some("codex"),
-        "测试的时候必须看看真实数据上生成了什么记忆卡片，然后结合目标审核，分析问题和解决方案，修改优化直到符合预期。",
+        "生成 Memory Card 后要结合真实历史和目标审核，持续修改优化直到符合预期。",
     )
     .expect("observation");
-    observation::import_observation_text(
-        root,
-        &root.join("history-b.txt"),
-        "manual-note",
-        Some("codex"),
-        "不能只看指标，要自己看最终卡片质量。",
-    )
-    .expect("observation");
-    let candidate = candidate(
+    let mut candidate = candidate(
         "workflow-failure-summary",
         "用真实历史复核 Memory Card 质量",
         "生成 Memory Card 后要结合真实历史和目标审核，持续修改优化直到符合预期。",
     );
+    candidate.evidence.clear();
 
     let review = run_memory_card_synthesis(root, &candidate, "procedure").expect("review");
 
-    assert!(
-        review
-            .context
-            .workflow_failures
-            .iter()
-            .any(|failure| failure.kind == "review_iterate_loop"),
-        "{:#?}",
-        review.context.workflow_failures
-    );
-    assert!(
-        review
-            .events
-            .iter()
-            .any(|event| event.tool == SynthesisToolName::SummarizeWorkflowFailures)
-    );
+    assert!(review.context.observations.is_empty());
+    assert!(review.context.related_observations.is_empty());
+    assert!(review.context.workflow_failures.is_empty());
+    assert_eq!(review.stop_reason, SynthesisStopReason::NeedsHuman);
 }
 
 #[test]

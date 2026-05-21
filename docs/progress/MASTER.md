@@ -337,7 +337,7 @@
 *   **Issue Hygiene**:
     *   #43 已调整为 `lane:ui`。
     *   #41/#44/#45 保持打开状态；后续实现时可按实际工作面补 `lane:eval` 或 `lane:ui`。
-    *   #42 已关闭：全局视野质量优先通过可解释只读 history window、workflow failure、Memory Card/Skill comparison 解决，不引入 FTS/Embedding。
+    *   #42 已关闭：当前不引入 FTS/Embedding，也不默认启用 lexical 全局 Observation 检索；全局视野优先通过直接证据、Memory Card/Skill comparison 和人工审阅解决。
 *   **CI Note**:
     *   PR #35 latest head `103bcdd` pull_request Windows run passed.
     *   PR #35 latest head `f67f7a1` pull_request Windows run passed.
@@ -349,12 +349,12 @@
 *   **Issue**: GitHub #43 tracks the Review Inbox trace presentation.
 *   **Planning Adjustment**:
     *   GitHub #42 已按用户反馈关闭：FTS / Embedding 全局 Observation 检索不是当前必要功能。
-    *   当前全局视野路线改为优先使用可解释只读工具：direct observations、broader lexical/history window、workflow failure summary、Memory Card comparison、Skill comparison。
+    *   当前路线收束为可解释只读工具：direct observations、Memory Card comparison、Skill comparison、writing guide；broader lexical/history window 与 workflow failure summary 不再作为默认路径。
 *   **Intent**: 让用户在 Review Inbox 中直接看懂 runtime 为什么推荐新增、合并、已覆盖或需要人工判断，同时不恢复诊断 cockpit。
 *   **Production Changes**:
     *   `src/candidate.rs` / `src/synthesis_agent.rs`: `SynthesisTraceEntry` 增加可选 `item_ids`，把只读工具引用的 observation / Memory Card / Skill id 传到 UI。
-    *   `app/src/components/pages/Drafts.tsx`: 新增紧凑 `SynthesisTracePanel`，按直接证据、更宽历史、失败模式、规则库对照、Skill 对照、审阅决策分组展示 trace summary 和引用 id。
-    *   `app/src/demo/demo-data.ts`: 演示候选增加 `search_global_history`、`summarize_workflow_failures` 和引用 id，首屏能展示真实解释链。
+    *   `app/src/components/pages/Drafts.tsx`: 新增紧凑 `SynthesisTracePanel`，按直接证据、规则库对照、Skill 对照、审阅决策分组展示 trace summary 和引用 id。
+    *   `app/src/demo/demo-data.ts`: 演示候选展示直接证据、Memory Card/Skill 对照和引用 id，首屏能展示真实解释链。
     *   `app/scripts/verify-ui-focus-contract.mjs`: 增加 trace 防回归检查，要求 Review Inbox 暴露 compact trace，并禁止 chain-of-thought。
     *   `app/src/styles/project-detail.css` / `Drafts.tsx`: 移除 Drafts 内联双栏宽度，恢复 CSS 移动端单列规则，移动端 trace 可读。
 *   **Verification So Far**:
@@ -368,7 +368,7 @@
     *   `cargo clippy -- -D warnings` -> PASS.
     *   `cargo test --test extract_quality_v2 --quiet` -> PASS, 21 passed / 1 ignored.
     *   `cargo test --test golden_set_regression --quiet` -> PASS, 3 passed.
-    *   Playwright trial on `http://127.0.0.1:1420`: desktop and mobile show Synthesis Trace, direct evidence, broader history, workflow failure, Memory Card comparison, Skill comparison, referenced ids; no horizontal overflow; no console errors; no chain-of-thought.
+    *   Playwright trial on `http://127.0.0.1:1420`: desktop and mobile show Synthesis Trace, direct evidence, Memory Card comparison, Skill comparison, referenced ids; no horizontal overflow; no console errors; no chain-of-thought.
 
 ---
 
@@ -391,3 +391,47 @@
     *   `cargo clippy -- -D warnings` -> PASS.
     *   `cargo test --test extract_quality_v2 --quiet` -> PASS, 21 passed / 1 ignored.
     *   `cargo test --test golden_set_regression --quiet` -> PASS, 3 passed.
+
+---
+
+## 19. 2026-05-21 关闭全局 Observation 检索默认路径
+*   **Trigger**: 用户明确反馈不喜欢 `FTS / Embedding 全局 Observation 检索`，认为不是必要功能，先关闭，未来按需再加。
+*   **Decision**:
+    *   不做 FTS/Embedding Observation 检索。
+    *   不默认做 lexical 全局 Observation 检索。
+    *   `search_observations` 仅读取候选显式绑定的 source observations；没有 source id 时只使用候选 evidence。
+    *   Provider tool plan 不再暴露 `search_global_history` / `summarize_workflow_failures`。
+    *   Review Inbox trace 不再展示“更宽历史 / 失败模式”默认分组。
+*   **Production Changes**:
+    *   `src/synthesis_agent.rs`: Observation evidence 收束为 direct evidence；无 evidence 时保持 `needs_human`。
+    *   `src/synthesis_agent/provider_loop.rs`: Provider allowed tools 收束为 direct evidence、Memory Cards、Skills、writing guide。
+    *   `app/src/components/pages/Drafts.tsx` / `app/src/demo/demo-data.ts`: UI 和 demo trace 移除全局历史/失败模式路径。
+    *   `app/scripts/verify-ui-focus-contract.mjs`: UI guardrail 改为禁止默认 trace/demo 重新引入全局 Observation 检索。
+    *   `docs/analysis/memory-card-synthesis-agent-design.md` / `docs/plan/memory-card-synthesis-implementation-plan.md`: 记录关闭边界与未来重开条件。
+*   **Verification**:
+    *   `cargo fmt --check` -> PASS.
+    *   `cargo test --manifest-path Cargo.toml synthesis_agent --lib` -> PASS, 12 passed.
+    *   `cargo test --manifest-path Cargo.toml --lib` -> PASS, 320 passed.
+    *   `cargo clippy -- -D warnings` -> PASS.
+    *   `bun run --cwd app verify-ui` -> PASS.
+    *   `bun run --cwd app build` -> PASS.
+    *   `git diff --check` -> PASS.
+
+---
+
+## 20. 2026-05-21 Provider Tool-Plan Loop 收束实现
+*   **Issue**: GitHub #41 tracks the provider-driven synthesis runtime loop.
+*   **Intent**: 让 Provider 参与“读哪些只读上下文”的规划，但仍输出同一个 `SynthesisReview`，不移动 Review Inbox 的人工批准写入边界。
+*   **Production Changes**:
+    *   `src/synthesis_agent/provider_loop.rs`: 新增 JSON tool-plan loop，允许 Provider 规划 direct evidence、Memory Cards、Skills、writing guide 四类只读工具。
+    *   `src/synthesis_agent/provider_loop.rs`: 拒绝未知工具、写入工具、post-proposal 工具，以及已暂停的 `search_global_history` / `summarize_workflow_failures`。
+    *   `src/synthesis_agent/metrics.rs`: 将 synthesis metrics 拆出，保持主 runtime 文件低于 1000 行。
+    *   `src/provider.rs` / `src/provider/tests.rs` / `src/provider/custom.rs`: 统一 provider env 测试锁，修复 Windows CI 并发 env 污染风险。
+*   **Verification**:
+    *   `cargo fmt --check` -> PASS.
+    *   `cargo test --manifest-path Cargo.toml synthesis_agent --lib` -> PASS, 12 passed.
+    *   `cargo test --manifest-path Cargo.toml --lib` -> PASS, 320 passed.
+    *   `cargo clippy -- -D warnings` -> PASS.
+    *   `bun run --cwd app verify-ui` -> PASS.
+    *   `bun run --cwd app build` -> PASS.
+    *   `git diff --check` -> PASS.

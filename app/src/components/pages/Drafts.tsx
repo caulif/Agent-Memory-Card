@@ -516,20 +516,8 @@ function groupTraceEntries(trace: SynthesisTraceEntry[]): TraceGroup[] {
     {
       key: "direct-evidence",
       title: "直接证据",
-      helper: "候选附近的历史片段",
+      helper: "候选绑定的历史片段",
       steps: ["search_observations", "filter"],
-    },
-    {
-      key: "global-history",
-      title: "更宽历史",
-      helper: "跨会话重复信号",
-      steps: ["search_global_history"],
-    },
-    {
-      key: "workflow-failure",
-      title: "失败模式",
-      helper: "重复返工或验收缺口",
-      steps: ["summarize_workflow_failures"],
     },
     {
       key: "memory-comparison",
@@ -585,8 +573,6 @@ function traceStepLabel(value: string) {
     duplicate_check: "已查重",
     rewrite: "已转写",
     search_observations: "已读直接证据",
-    search_global_history: "已读更宽历史",
-    summarize_workflow_failures: "已摘要失败模式",
     search_memory_cards: "已查规则库",
     search_skills: "已查 Skills",
     read_writing_guide: "已读写作规范",

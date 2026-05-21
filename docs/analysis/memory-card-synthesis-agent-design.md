@@ -224,8 +224,8 @@ Minimal tool set inspired by pi-style agent foundations:
 
 | Tool | Purpose | Boundary |
 |---|---|---|
-| `search_observations` | Find related conversation snippets by text, tag, session, or time range. | Read-only, returns snippets with IDs and quotes. |
-| `read_observations` | Load specific observation records selected by ID. | Read-only, capped result size. |
+| `search_observations` | Load only explicitly linked source observations, or the candidate's own evidence when no source ID is attached. | Read-only; no global lexical, FTS, or embedding retrieval. |
+| `read_observations` | Load specific observation records selected by ID. | Read-only, capped result size, requires explicit IDs. |
 | `search_memory_cards` | Find duplicate or related Memory Cards. | Read-only, includes similarity and merge hints. |
 | `read_memory_card` | Load a candidate existing card before recommending merge. | Read-only. |
 | `search_skills` | Find project and global Skills. | Read-only, marks source kind clearly. |
@@ -235,7 +235,6 @@ Minimal tool set inspired by pi-style agent foundations:
 | `web_read` | Read a selected external source. | Read-only, short summaries with URLs and retrieval dates. |
 | `compare_with_skill` | Compare a proposal or cluster against a project Skill and identify missing trigger, instruction, boundary, or acceptance criteria. | Read-only, returns structured overlap and gap analysis. |
 | `find_memory_duplicates` | Compare a proposal against existing Memory Cards and classify as duplicate, merge candidate, or distinct delta. | Read-only. |
-| `summarize_workflow_failures` | Summarize repeated failure modes from selected observations. | Read-only, evidence IDs required. |
 | `build_skill_target_context` | Build a concise target context for a Skill: purpose, existing Memory Cards, gaps, and recent failures. | Read-only. |
 
 The value-oriented tools should be preferred over forcing the agent to assemble all comparisons from low-level reads. Low-level grep/read remains available for inspection, but product-level tools encode the actual job.
@@ -437,23 +436,22 @@ This slice ports the pi-style shape into Rust instead of embedding the TypeScrip
 
 The slice deliberately does not add a full provider tool-call loop yet. The next replacement point is clear: swap the deterministic tool planner for a pi-style provider loop while keeping the same `SynthesisReview` output contract and read-only tool boundary.
 
-## Global Vision Runtime Slice: 2026-05-21
+## Observation Retrieval Boundary Update: 2026-05-21
 
-The second runtime slice improves local global vision without adding write access or an autonomous provider loop.
+The broader Observation retrieval slice is paused by user preference. The current synthesis path keeps Observation context narrow and explicit:
 
-The context pack now separates:
+- direct evidence snippets come only from candidate-linked source observations or the candidate's own evidence text;
+- `search_global_history` is not offered to providers and is not shown in Review Inbox;
+- `summarize_workflow_failures` is not part of the default synthesis path;
+- FTS/Embedding and lexical global Observation retrieval are all outside the active roadmap.
 
-- direct evidence snippets: source observations or high-confidence local matches;
-- broader history snippets: same-source context and weaker related feedback from the project history;
-- workflow failure insights: compact signals derived from selected observations, such as review-iterate loops, quality corrections, scope boundaries, and pipeline breaks.
-
-This keeps the review trace explainable:
+The review trace should therefore stay explainable and quiet:
 
 - `search_observations` means the runtime read direct evidence.
-- `search_global_history` means it looked beyond the candidate's immediate evidence window.
-- `summarize_workflow_failures` means it found repeated failure patterns worth considering before writing or merging a Memory Card.
+- `search_memory_cards` means it checked existing project/global Memory Cards for coverage or merge targets.
+- `search_skills` means it checked project Skills as possible improvement targets, with global Skills as reference only.
 
-The wider history layer is intentionally read-only and capped. It helps the agent answer "what existing workflow failed?" before generating a card, but it does not let weak history fabricate confidence. If neither direct evidence nor broader local context exists, the runtime returns `needs_human`.
+If neither explicit source evidence nor candidate evidence exists, the runtime returns `needs_human` rather than searching the full Observation store to manufacture confidence. This keeps Memory Card generation value-directed without turning the product into a hidden retrieval system.
 
 ## Explainable Comparison Runtime Slice: 2026-05-21
 

@@ -1,58 +1,18 @@
 use super::*;
-use std::sync::{Mutex, OnceLock};
-
-fn env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
-
-fn with_env_var<T>(key: &str, value: Option<&str>, f: impl FnOnce() -> T) -> T {
-    let _guard = env_lock().lock().expect("env lock");
-    let previous = std::env::var(key).ok();
-    match value {
-        Some(value) => unsafe { std::env::set_var(key, value) },
-        None => unsafe { std::env::remove_var(key) },
-    }
-    let result = f();
-    match previous.as_deref() {
-        Some(value) => unsafe { std::env::set_var(key, value) },
-        None => unsafe { std::env::remove_var(key) },
-    }
-    result
-}
-
-fn with_env_vars<T>(vars: &[(&str, Option<&str>)], f: impl FnOnce() -> T) -> T {
-    let _guard = env_lock().lock().expect("env lock");
-    let previous = vars
-        .iter()
-        .map(|(key, _)| (*key, std::env::var(key).ok()))
-        .collect::<Vec<_>>();
-    for (key, value) in vars {
-        match value {
-            Some(value) => unsafe { std::env::set_var(key, value) },
-            None => unsafe { std::env::remove_var(key) },
-        }
-    }
-    let result = f();
-    for (key, value) in previous {
-        match value.as_deref() {
-            Some(value) => unsafe { std::env::set_var(key, value) },
-            None => unsafe { std::env::remove_var(key) },
-        }
-    }
-    result
-}
 
 #[test]
 fn default_provider_is_claude_cli() {
-    with_env_var("ANTHROPIC_API_KEY", None, || {
-        let cfg = ProviderConfig::default();
-        assert_eq!(cfg.default, "claude-cli");
-        assert_eq!(cfg.extraction_provider, "claude-cli");
-        assert_eq!(extraction_provider_name(&cfg), "claude-cli");
-        assert!(cfg.providers.contains_key("claude-cli"));
-        assert!(cfg.providers.contains_key("local"));
-    });
+    with_test_env_vars(
+        &[("ANTHROPIC_AUTH_TOKEN", None), ("ANTHROPIC_API_KEY", None)],
+        || {
+            let cfg = ProviderConfig::default();
+            assert_eq!(cfg.default, "claude-cli");
+            assert_eq!(cfg.extraction_provider, "claude-cli");
+            assert_eq!(extraction_provider_name(&cfg), "claude-cli");
+            assert!(cfg.providers.contains_key("claude-cli"));
+            assert!(cfg.providers.contains_key("local"));
+        },
+    );
 }
 
 #[test]
@@ -74,65 +34,74 @@ fn redacts_common_secret_shapes() {
 
 #[test]
 fn default_extraction_config_fields() {
-    with_env_var("ANTHROPIC_API_KEY", None, || {
-        let cfg = ProviderConfig::default();
-        assert_eq!(cfg.extraction_provider, "claude-cli");
-        assert_eq!(
-            extraction_provider_name(&cfg),
-            "claude-cli",
-            "extract role should fall back to legacy extraction_provider"
-        );
-        assert_eq!(cfg.max_candidates_per_batch, 20);
-        assert_eq!(cfg.min_confidence, 0.7);
-    });
+    with_test_env_vars(
+        &[("ANTHROPIC_AUTH_TOKEN", None), ("ANTHROPIC_API_KEY", None)],
+        || {
+            let cfg = ProviderConfig::default();
+            assert_eq!(cfg.extraction_provider, "claude-cli");
+            assert_eq!(
+                extraction_provider_name(&cfg),
+                "claude-cli",
+                "extract role should fall back to legacy extraction_provider"
+            );
+            assert_eq!(cfg.max_candidates_per_batch, 20);
+            assert_eq!(cfg.min_confidence, 0.7);
+        },
+    );
 }
 
 #[test]
 fn http_provider_timeout_defaults_to_real_extraction_budget() {
-    with_env_var("AGENT_KERNEL_HTTP_TIMEOUT_SECS", None, || {
+    with_test_env_var("AGENT_KERNEL_HTTP_TIMEOUT_SECS", None, || {
         assert_eq!(http_timeout_duration(), std::time::Duration::from_secs(120));
     });
 }
 
 #[test]
 fn http_provider_timeout_can_be_overridden_for_real_provider_runs() {
-    with_env_var("AGENT_KERNEL_HTTP_TIMEOUT_SECS", Some("300"), || {
+    with_test_env_var("AGENT_KERNEL_HTTP_TIMEOUT_SECS", Some("300"), || {
         assert_eq!(http_timeout_duration(), std::time::Duration::from_secs(300));
     });
 }
 
 #[test]
 fn local_provider_refuses_remote_call() {
-    with_env_var("ANTHROPIC_API_KEY", None, || {
-        let mut cfg = ProviderConfig::default();
-        cfg.default = "local".to_string();
-        cfg.extraction_provider = "local".to_string();
-        let result = call_provider(
-            &cfg,
-            &ProviderRequest {
-                system_prompt: "system".to_string(),
-                user_prompt: "user".to_string(),
-                json_schema: None,
-            },
-            512,
-        );
-        assert!(result.is_err());
-        assert!(result.expect_err("must fail").to_string().contains("local"));
-    });
+    with_test_env_vars(
+        &[("ANTHROPIC_AUTH_TOKEN", None), ("ANTHROPIC_API_KEY", None)],
+        || {
+            let mut cfg = ProviderConfig::default();
+            cfg.default = "local".to_string();
+            cfg.extraction_provider = "local".to_string();
+            let result = call_provider(
+                &cfg,
+                &ProviderRequest {
+                    system_prompt: "system".to_string(),
+                    user_prompt: "user".to_string(),
+                    json_schema: None,
+                },
+                512,
+            );
+            assert!(result.is_err());
+            assert!(result.expect_err("must fail").to_string().contains("local"));
+        },
+    );
 }
 
 #[test]
 fn is_llm_extraction_enabled_by_default() {
-    with_env_var("ANTHROPIC_API_KEY", None, || {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let enabled = is_llm_extraction_enabled(temp.path()).expect("check");
-        assert!(enabled);
-    });
+    with_test_env_vars(
+        &[("ANTHROPIC_AUTH_TOKEN", None), ("ANTHROPIC_API_KEY", None)],
+        || {
+            let temp = tempfile::tempdir().expect("tempdir");
+            let enabled = is_llm_extraction_enabled(temp.path()).expect("check");
+            assert!(enabled);
+        },
+    );
 }
 
 #[test]
 fn auto_detect_keeps_claude_cli_default_when_anthropic_key_present() {
-    with_env_vars(
+    with_test_env_vars(
         &[
             ("ANTHROPIC_AUTH_TOKEN", None),
             ("ANTHROPIC_API_KEY", Some("test-key")),
@@ -154,7 +123,7 @@ fn auto_detect_keeps_claude_cli_default_when_anthropic_key_present() {
 
 #[test]
 fn auto_detect_supports_anthropic_compatible_env_names() {
-    with_env_vars(
+    with_test_env_vars(
         &[
             ("ANTHROPIC_AUTH_TOKEN", Some("test-token")),
             ("ANTHROPIC_API_KEY", None),
@@ -179,7 +148,7 @@ fn auto_detect_supports_anthropic_compatible_env_names() {
 
 #[test]
 fn existing_provider_config_is_augmented_from_anthropic_env() {
-    with_env_vars(
+    with_test_env_vars(
         &[
             ("ANTHROPIC_AUTH_TOKEN", Some("test-token")),
             ("ANTHROPIC_API_KEY", None),

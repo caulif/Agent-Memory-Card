@@ -119,16 +119,19 @@ if (!fs.existsSync(demoPath)) {
     'No Card Is A Success',
     'value_delta',
     'synthesis_trace',
-    'search_global_history',
-    'summarize_workflow_failures',
     'evaluate_skill_usefulness',
     'counterfactual_pass',
     'item_ids'
   ];
+  const pausedGlobalObservationTerms = ['search_global_history', 'summarize_workflow_failures'];
   const missingDemoTerms = demoRequiredTerms.filter(term => !demoContent.includes(term));
-  if (missingDemoTerms.length > 0) {
+  const pausedDemoTerms = pausedGlobalObservationTerms.filter(term => demoContent.includes(term));
+  if (missingDemoTerms.length > 0 || pausedDemoTerms.length > 0) {
     console.log('[FAIL] demo-data.ts: Browser preview must show synthesis decisions, not an empty inbox.');
     console.log(`       Missing required terms: ${missingDemoTerms.map(t => `'${t}'`).join(', ')}\n`);
+    if (pausedDemoTerms.length > 0) {
+      console.log(`       Found paused global Observation terms: ${pausedDemoTerms.map(t => `'${t}'`).join(', ')}\n`);
+    }
     hasFailure = true;
   } else {
     console.log('[PASS] demo-data.ts: Preview data demonstrates synthesis value decisions.\n');
@@ -162,20 +165,21 @@ if (!fs.existsSync(draftsPath)) {
     'Synthesis Trace',
     '只读证据链',
     '直接证据',
-    '更宽历史',
-    '失败模式',
     '规则库对照',
     'Skill 对照',
     'item_ids',
-    'search_global_history',
-    'summarize_workflow_failures',
     'evaluate_skill_usefulness'
   ];
   const missingTraceTerms = traceRequiredTerms.filter(term => !draftsContent.includes(term));
-  if (missingTraceTerms.length > 0 || draftsContent.toLowerCase().includes('chain-of-thought')) {
+  const pausedTraceTerms = ['更宽历史', '失败模式', 'search_global_history', 'summarize_workflow_failures']
+    .filter(term => draftsContent.includes(term));
+  if (missingTraceTerms.length > 0 || pausedTraceTerms.length > 0 || draftsContent.toLowerCase().includes('chain-of-thought')) {
     console.log('[FAIL] Drafts.tsx: Review Inbox must show an explainable synthesis trace without chain-of-thought.');
     if (missingTraceTerms.length > 0) {
       console.log(`       Missing required trace terms: ${missingTraceTerms.map(t => `'${t}'`).join(', ')}`);
+    }
+    if (pausedTraceTerms.length > 0) {
+      console.log(`       Found paused global Observation trace terms: ${pausedTraceTerms.map(t => `'${t}'`).join(', ')}`);
     }
     if (draftsContent.toLowerCase().includes('chain-of-thought')) {
       console.log("       Found banned wording: 'chain-of-thought'");

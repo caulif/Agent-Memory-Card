@@ -12,16 +12,15 @@ use crate::observation::{self, ObservationRecord};
 use crate::textutil;
 
 mod explain;
+mod metrics;
+mod provider_loop;
 mod skill_eval;
 
 const WRITING_GUIDE: &str = include_str!("../prompts/memory-card-writing-guide.md");
 const MAX_OBSERVATION_SNIPPETS: usize = 5;
-const MAX_RELATED_OBSERVATION_SNIPPETS: usize = 4;
-const MAX_WORKFLOW_FAILURE_INSIGHTS: usize = 4;
 const MAX_MEMORY_CARD_MATCHES: usize = 5;
 const MAX_SKILL_MATCHES: usize = 5;
 const DUPLICATE_THRESHOLD: f32 = 0.74;
-const DIRECT_OBSERVATION_THRESHOLD: f32 = 0.4;
 const RELATED_THRESHOLD: f32 = 0.18;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -200,6 +199,9 @@ pub fn run_memory_card_synthesis(
     approvable_kind: &str,
 ) -> Result<SynthesisReview> {
     let root = fsutil::normalize_project_root(project_root)?;
+    if let Ok(review) = provider_loop::run_with_provider(&root, candidate, approvable_kind) {
+        return Ok(review);
+    }
     let query = candidate_query(candidate, approvable_kind);
     let observations = observation::load_observations(&root)?;
     let memory_cards = memory_card::load_memory_cards(&root)?;
@@ -210,13 +212,6 @@ pub fn run_memory_card_synthesis(
     let skills = config::load_skill_index(&root)?.skills;
 
     let observation_snippets = search_observations(candidate, &observations, &query);
-    let related_observations =
-        search_global_history(candidate, &observations, &query, &observation_snippets);
-    let history_window = observation_snippets
-        .iter()
-        .chain(related_observations.iter())
-        .collect::<Vec<_>>();
-    let workflow_failures = summarize_workflow_failures(&observations, &history_window);
     let memory_matches =
         search_memory_cards(&memory_cards, &global_memory_cards, candidate, &query);
     let skill_matches = search_skills(&skills, candidate, &query);
@@ -232,28 +227,6 @@ pub fn run_memory_card_synthesis(
             item_ids: observation_snippets
                 .iter()
                 .map(|snippet| snippet.id.clone())
-                .collect(),
-        },
-        SynthesisEvent {
-            tool: SynthesisToolName::SearchGlobalHistory,
-            summary: format!(
-                "Read {} broader history snippet(s) beyond direct evidence for repeated workflow context.",
-                related_observations.len()
-            ),
-            item_ids: related_observations
-                .iter()
-                .map(|snippet| snippet.id.clone())
-                .collect(),
-        },
-        SynthesisEvent {
-            tool: SynthesisToolName::SummarizeWorkflowFailures,
-            summary: format!(
-                "Summarized {} workflow failure signal(s) from the selected history window.",
-                workflow_failures.len()
-            ),
-            item_ids: workflow_failures
-                .iter()
-                .map(|failure| failure.observation_id.clone())
                 .collect(),
         },
         SynthesisEvent {
@@ -325,21 +298,16 @@ pub fn run_memory_card_synthesis(
         });
     }
 
-    let stop_reason = stop_reason_for(
-        &proposal,
-        &observation_snippets,
-        &related_observations,
-        &workflow_failures,
-    );
-    let metrics = metrics_for(&proposal, &stop_reason);
+    let stop_reason = stop_reason_for(&proposal, &observation_snippets, &[], &[]);
+    let metrics = metrics::metrics_for(&proposal, &stop_reason);
     Ok(SynthesisReview {
         session_id: session_id(candidate, &query),
         candidate_id: candidate.id.clone(),
         stop_reason,
         context: SynthesisContextPack {
             observations: observation_snippets,
-            related_observations,
-            workflow_failures,
+            related_observations: Vec::new(),
+            workflow_failures: Vec::new(),
             memory_cards: memory_matches,
             skills: skill_matches,
             writing_guide_summary: guide_summary,
@@ -509,7 +477,7 @@ fn propose(
 fn search_observations(
     candidate: &CandidateRecord,
     observations: &[ObservationRecord],
-    query: &str,
+    _query: &str,
 ) -> Vec<ObservationSnippet> {
     let source_ids = candidate
         .source_observations
@@ -517,34 +485,20 @@ fn search_observations(
         .chain(candidate.extraction.source_observations.iter())
         .cloned()
         .collect::<BTreeSet<_>>();
-    let mut scored = observations
+    let mut snippets = observations
         .iter()
-        .filter_map(|observation| {
-            let source_boost = if source_ids.contains(&observation.id) {
-                0.65
-            } else {
-                0.0
-            };
-            let score = source_boost + lexical_score(query, &observation.body);
-            (score >= DIRECT_OBSERVATION_THRESHOLD || source_boost > 0.0).then(|| {
-                ObservationSnippet {
-                    id: observation.id.clone(),
-                    source_kind: observation.source_kind.clone(),
-                    quote: snippet(&observation.body, 280),
-                    score: cap_score(score),
-                    relation: if source_boost > 0.0 {
-                        "direct_evidence".to_string()
-                    } else {
-                        "lexical_evidence".to_string()
-                    },
-                }
-            })
+        .filter(|observation| source_ids.contains(&observation.id))
+        .take(MAX_OBSERVATION_SNIPPETS)
+        .map(|observation| ObservationSnippet {
+            id: observation.id.clone(),
+            source_kind: observation.source_kind.clone(),
+            quote: snippet(&observation.body, 280),
+            score: 1.0,
+            relation: "direct_evidence".to_string(),
         })
         .collect::<Vec<_>>();
-    scored.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.id.cmp(&b.id)));
-    scored.truncate(MAX_OBSERVATION_SNIPPETS);
-    if scored.is_empty() && !candidate.evidence.trim().is_empty() {
-        scored.push(ObservationSnippet {
+    if snippets.is_empty() && !candidate.evidence.trim().is_empty() {
+        snippets.push(ObservationSnippet {
             id: format!("candidate:{}", candidate.id),
             source_kind: "candidate_evidence".to_string(),
             quote: snippet(&candidate.evidence, 280),
@@ -552,85 +506,7 @@ fn search_observations(
             relation: "candidate_evidence".to_string(),
         });
     }
-    scored
-}
-
-fn search_global_history(
-    candidate: &CandidateRecord,
-    observations: &[ObservationRecord],
-    query: &str,
-    direct_snippets: &[ObservationSnippet],
-) -> Vec<ObservationSnippet> {
-    let direct_ids = direct_snippets
-        .iter()
-        .map(|snippet| snippet.id.as_str())
-        .collect::<BTreeSet<_>>();
-    let source_ids = candidate
-        .source_observations
-        .iter()
-        .chain(candidate.extraction.source_observations.iter())
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    let source_paths = observations
-        .iter()
-        .filter(|observation| source_ids.contains(&observation.id))
-        .map(|observation| observation.source_path.as_str())
-        .collect::<BTreeSet<_>>();
-    let mut scored = observations
-        .iter()
-        .filter(|observation| !direct_ids.contains(observation.id.as_str()))
-        .filter_map(|observation| {
-            let same_source = source_paths.contains(observation.source_path.as_str());
-            let failure_boost = if looks_like_synthesis_relevant_feedback(&observation.body) {
-                0.2
-            } else {
-                0.0
-            };
-            let source_boost = if same_source { 0.28 } else { 0.0 };
-            let score =
-                lexical_score(query, &observation.body) * 0.7 + source_boost + failure_boost;
-            (score >= RELATED_THRESHOLD).then(|| ObservationSnippet {
-                id: observation.id.clone(),
-                source_kind: observation.source_kind.clone(),
-                quote: snippet(&observation.body, 280),
-                score: cap_score(score),
-                relation: if same_source {
-                    "same_source_context".to_string()
-                } else {
-                    "related_history".to_string()
-                },
-            })
-        })
-        .collect::<Vec<_>>();
-    scored.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.id.cmp(&b.id)));
-    scored.truncate(MAX_RELATED_OBSERVATION_SNIPPETS);
-    scored
-}
-
-fn summarize_workflow_failures(
-    observations: &[ObservationRecord],
-    snippets: &[&ObservationSnippet],
-) -> Vec<WorkflowFailureInsight> {
-    let snippet_ids = snippets
-        .iter()
-        .map(|snippet| snippet.id.as_str())
-        .collect::<BTreeSet<_>>();
-    let selected = observations
-        .iter()
-        .filter(|observation| snippet_ids.contains(observation.id.as_str()))
-        .cloned()
-        .collect::<Vec<_>>();
-    let summary = observation::failure_flow::summarize_failure_flow(&selected);
-    summary
-        .signals
-        .into_iter()
-        .take(MAX_WORKFLOW_FAILURE_INSIGHTS)
-        .map(|signal| WorkflowFailureInsight {
-            kind: signal.kind.as_str().to_string(),
-            observation_id: signal.observation_id,
-            summary: signal.snippet,
-        })
-        .collect()
+    snippets
 }
 
 fn search_memory_cards(
@@ -872,12 +748,10 @@ fn confidence_for(
 fn stop_reason_for(
     proposal: &SynthesisProposal,
     observation_snippets: &[ObservationSnippet],
-    related_observations: &[ObservationSnippet],
-    workflow_failures: &[WorkflowFailureInsight],
+    _related_observations: &[ObservationSnippet],
+    _workflow_failures: &[WorkflowFailureInsight],
 ) -> SynthesisStopReason {
-    let has_local_context = !observation_snippets.is_empty()
-        || !related_observations.is_empty()
-        || !workflow_failures.is_empty();
+    let has_local_context = !observation_snippets.is_empty();
     if proposal.confidence < 0.38 || !has_local_context {
         return SynthesisStopReason::NeedsHuman;
     }
@@ -892,25 +766,6 @@ fn stop_reason_for(
         "skill_targeted" => SynthesisStopReason::SkillGapFound,
         "workflow" => SynthesisStopReason::WorkflowGapFound,
         _ => SynthesisStopReason::NewCardGrounded,
-    }
-}
-
-fn metrics_for(
-    proposal: &SynthesisProposal,
-    stop_reason: &SynthesisStopReason,
-) -> SynthesisReviewMetrics {
-    let no_card_decision = matches!(proposal.action.as_str(), "already_covered" | "ignore")
-        || *stop_reason == SynthesisStopReason::NeedsHuman;
-    SynthesisReviewMetrics {
-        no_card_decision,
-        merge_recommended: proposal.action == "merge_card",
-        approval_candidate: matches!(
-            proposal.action.as_str(),
-            "new_card" | "workflow_card" | "skill_targeted_card" | "merge_card"
-        ),
-        duplicate_suppressed: proposal.action == "already_covered",
-        counterfactual_pass: skill_eval::is_counterfactual_pass(proposal.skill_usefulness.as_ref()),
-        needs_human: *stop_reason == SynthesisStopReason::NeedsHuman,
     }
 }
 
@@ -993,21 +848,6 @@ fn mentions_update_intent(candidate: &CandidateRecord) -> bool {
     ]
     .iter()
     .any(|marker| text.contains(marker))
-}
-
-fn looks_like_synthesis_relevant_feedback(text: &str) -> bool {
-    let lower = text.to_lowercase();
-    contains_any(
-        &lower,
-        &[
-            "反馈", "问题", "不足", "缺少", "不要", "不能", "应该", "优化", "改进", "审核", "真实",
-            "测试", "failure", "missing", "should", "review", "quality",
-        ],
-    )
-}
-
-fn contains_any(text: &str, markers: &[&str]) -> bool {
-    markers.iter().any(|marker| text.contains(marker))
 }
 
 fn writing_guide_summary() -> String {

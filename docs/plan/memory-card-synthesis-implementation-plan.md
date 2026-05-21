@@ -140,27 +140,26 @@ Deferred but now bounded:
 
 - Provider-driven tool-call loop using the same `SynthesisReview` contract. Tracking: GitHub issue #41.
 - Web search/read tools with citations and privacy-safe abstract queries. Tracking: GitHub issue #45.
-- FTS/Embedding-backed global Observation retrieval is explicitly paused by user decision. Tracking issue #42 is closed; reopen only if lexical/read-only history windows prove insufficient in real use.
+- FTS/Embedding and lexical global Observation retrieval are explicitly paused by user decision. Tracking issue #42 is closed; reopen only if direct evidence plus Memory Card/Skill comparison proves insufficient in real use.
 
-### Phase 6: Global Vision Context Quality
+### Phase 6: Direct Evidence Observation Boundary
 
 Tracking: GitHub issue #39 continuation
 
-Goal: make the read-only runtime explain broader project history before proposing, merging, or rejecting a Memory Card.
+Goal: keep Observation use explainable and narrow before proposing, merging, or rejecting a Memory Card.
 
-Implemented scope:
+Current scope:
 
-- Split observation retrieval into direct evidence and broader history context.
-- Add `search_global_history` events for same-source context and related historical feedback.
-- Add `summarize_workflow_failures` events that reuse the existing failure-flow detector.
-- Extend `SynthesisContextPack` with `related_observations` and `workflow_failures`.
-- Keep no-context proposals conservative: if no direct or broader local context exists, stop as `needs_human`.
+- `search_observations` reads only candidate-linked source observations.
+- If no source observation is linked, the runtime uses the candidate's own evidence text as the direct evidence snippet.
+- `search_global_history` and `summarize_workflow_failures` remain in the compatibility enum/trace contract but are disabled in provider planning and default runtime behavior.
+- Keep no-context proposals conservative: if no explicit source or candidate evidence exists, stop as `needs_human`.
 
 Acceptance:
 
-- Runtime trace can explain when it read broader history rather than only the current candidate.
-- Repeated workflow failure signals become structured review context.
-- Same-source historical observations are available even when they are not strong direct evidence.
+- Runtime trace can explain direct evidence without implying full-history search.
+- Global Observation retrieval is not offered as a default provider tool.
+- Review Inbox does not show "broader history" or "workflow failure" groups unless a future opt-in feature reopens them.
 - No file writes, project config mutation, or web/provider loop is introduced in this slice.
 
 ### Phase 7: Explainable Skill and Memory Card Comparison
@@ -190,6 +189,14 @@ Tracking: GitHub issue #41
 
 Goal: replace the deterministic one-pass planner with an observable provider-driven read-only tool-call loop while preserving the `SynthesisReview` output contract.
 
+Implemented scope:
+
+- Add a provider JSON tool-plan loop that asks the configured refinement provider which read-only tools are needed.
+- Cap provider-planned tool calls and reject unknown, write, post-proposal, or paused global Observation tools.
+- Keep deterministic synthesis as fallback when no provider config exists or provider planning fails.
+- Preserve the same `SynthesisReview` contract and Review Inbox approval write boundary.
+- Keep allowed provider tools narrow: direct evidence, Memory Card comparison, Skill comparison, and writing guide.
+
 Acceptance:
 
 - Provider loop can produce the same review actions as the deterministic planner.
@@ -214,13 +221,13 @@ Acceptance:
 
 Tracking: GitHub issue #42, closed by user preference
 
-Decision: do not implement this now. The synthesis runtime should first rely on explainable read-only tools: direct observation evidence, broader lexical/history windows, workflow failure summaries, Memory Card comparison, and Skill comparison.
+Decision: do not implement this now. The synthesis runtime should rely on explainable read-only tools: direct observation evidence, Memory Card comparison, Skill comparison, and the built-in writing guide. Broader lexical/history windows and workflow-failure summaries are also disabled by default.
 
 Acceptance:
 
 - No FTS/Embedding retrieval work is included in the current roadmap.
-- No UI, provider prompt, or runtime behavior should imply this feature is required.
-- If future real usage shows lexical/read-only history context is insufficient, create a new Chinese GitHub issue with concrete missed-recall examples before implementation.
+- No UI, provider prompt, or runtime behavior should imply full-history Observation search is required.
+- If future real usage shows the direct-evidence path is insufficient, create a new Chinese GitHub issue with concrete missed-recall examples before implementation.
 
 ### Phase 11: Review Inbox Trace Presentation
 

@@ -310,11 +310,6 @@ function createDemoCandidateSynthesis(base: ProjectSnapshot["drafts"][number]["e
           item_ids: ["demo-observation-2"],
         },
         {
-          step: "search_global_history",
-          summary: "Checked broader demo history and found the same safety boundary repeated.",
-          item_ids: ["demo-observation-3"],
-        },
-        {
           step: "search_memory_cards",
           summary: "Compared 2 Memory Card matches; top `safe-actions` is `already_covered_candidate`.",
           item_ids: ["safe-actions"],
@@ -363,16 +358,6 @@ function createDemoCandidateSynthesis(base: ProjectSnapshot["drafts"][number]["e
         step: "search_observations",
         summary: "Read demo review evidence for the first-run preview gap.",
         item_ids: ["demo-observation-1"],
-      },
-      {
-        step: "search_global_history",
-        summary: "Read broader history to confirm this is a repeated onboarding gap, not a one-off note.",
-        item_ids: ["demo-observation-2", "demo-observation-3"],
-      },
-      {
-        step: "summarize_workflow_failures",
-        summary: "Found a repeated failure mode: users can see static cards but cannot tell which action is useful next.",
-        item_ids: ["demo-observation-3"],
       },
       {
         step: "search_memory_cards",
