@@ -279,6 +279,7 @@
 
 ## 14. 2026-05-21 Synthesis Runtime 全局视野质量补强
 *   **Issue**: GitHub #39 continuation.
+*   **GitHub Status**: #39 closed after PR #35 pull_request CI passed for commit `c726aa9`; provider loop, Web/read, and embedding search remain separate follow-up work.
 *   **Intent**: 让只读 synthesis runtime 不只看当前候选附近的局部文本，而能解释它读过哪些更宽的历史 observations，并识别重复工作流失败模式。
 *   **Production Changes**:
     *   `src/synthesis_agent.rs`: 将 observation context 分为 direct evidence 与 broader history；新增 `search_global_history` trace event。
