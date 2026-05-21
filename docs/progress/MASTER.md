@@ -323,3 +323,20 @@
     *   `bun run --cwd app verify-ui` -> PASS.
     *   `bun run --cwd app build` -> PASS.
     *   `git diff --check` -> PASS.
+
+---
+
+## 16. 2026-05-21 后续规划 GitHub Issue 化
+*   **Intent**: 按用户要求，每个后续规划都在 GitHub 上形成中文 issue，方便审查和后续接力。
+*   **Created Issues**:
+    *   #41 `【规划】Synthesis Runtime：Provider 工具调用循环`
+    *   #45 `【规划】Synthesis Runtime：隐私安全 Web search/read 工具`
+    *   #42 `【规划】Synthesis Runtime：FTS / Embedding 全局 Observation 检索`
+    *   #43 `【规划】Review Inbox：展示可解释 Synthesis Trace`
+    *   #44 `【规划】Skill-targeted Memory Card 反事实评估与有用性指标`
+*   **Issue Hygiene**:
+    *   #43 已调整为 `lane:ui`。
+    *   #41/#42/#44/#45 保持 `lane:core`；后续实现时可按实际工作面补 `lane:eval` 或 `lane:ui`。
+*   **CI Note**:
+    *   PR #35 latest head `103bcdd` pull_request Windows run passed.
+    *   同 head 的 push workflow cancelled 是 concurrency 行为，不代表代码失败。

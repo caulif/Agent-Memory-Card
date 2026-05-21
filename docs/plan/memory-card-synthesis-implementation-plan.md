@@ -138,9 +138,9 @@ Acceptance:
 
 Deferred but now bounded:
 
-- Provider-driven tool-call loop using the same `SynthesisReview` contract.
-- Web search/read tools with citations and privacy-safe abstract queries.
-- Embedding-backed observation search if lexical search misses real history patterns.
+- Provider-driven tool-call loop using the same `SynthesisReview` contract. Tracking: GitHub issue #41.
+- Web search/read tools with citations and privacy-safe abstract queries. Tracking: GitHub issue #45.
+- Embedding-backed observation search if lexical search misses real history patterns. Tracking: GitHub issue #42.
 
 ### Phase 6: Global Vision Context Quality
 
@@ -183,3 +183,66 @@ Acceptance:
 - Provider-facing `synthesis_context` can explain whether a Skill is a project-level target or only a global reference.
 - Runtime still cannot write files or mutate Skills/Memory Cards.
 - Focused synthesis tests cover the new explanation fields.
+
+### Phase 8: Provider Tool-Call Loop
+
+Tracking: GitHub issue #41
+
+Goal: replace the deterministic one-pass planner with an observable provider-driven read-only tool-call loop while preserving the `SynthesisReview` output contract.
+
+Acceptance:
+
+- Provider loop can produce the same review actions as the deterministic planner.
+- Tool calls are typed, capped, traceable, and read-only.
+- Deterministic fallback remains available.
+- No write boundary is moved out of Review Inbox approval.
+
+### Phase 9: Privacy-Safe Web Tools
+
+Tracking: GitHub issue #45
+
+Goal: add optional Web search/read tools for external grounding without leaking private conversation excerpts.
+
+Acceptance:
+
+- Web queries are abstracted, not raw user quotes.
+- Web citations include URL and retrieval date.
+- Web evidence cannot be the sole basis for a project preference Memory Card.
+- Web traces remain compact in Review Inbox/provider context.
+
+### Phase 10: FTS / Embedding Observation Search
+
+Tracking: GitHub issue #42
+
+Goal: improve global observation recall when lexical search misses real historical patterns.
+
+Acceptance:
+
+- Retrieval layer is replaceable and falls back to lexical search.
+- Tests prove at least one lexical miss that FTS/embedding can recover.
+- Returned context remains snippet-sized and local-only.
+- Review Inbox first paint is not blocked by expensive retrieval.
+
+### Phase 11: Review Inbox Trace Presentation
+
+Tracking: GitHub issue #43
+
+Goal: expose synthesis trace explanations in Review Inbox without turning the page back into a diagnostics cockpit.
+
+Acceptance:
+
+- Users can see value, evidence, duplicate/merge reasoning, and target context in one screen.
+- No chain-of-thought is displayed.
+- verify-ui prevents diagnostics-panel regressions and horizontal overflow.
+
+### Phase 12: Skill-Targeted Counterfactual Evaluation
+
+Tracking: GitHub issue #44
+
+Goal: verify that Skill-targeted Memory Cards improve a target Skill instead of restating it.
+
+Acceptance:
+
+- Before/after checks reject proposals without meaningful future behavior change.
+- Duplicate Skill content routes to `already_covered`, `merge`, `ignore`, or `needs_human`.
+- Metrics stay in advanced/eval surfaces, not the default review flow.
