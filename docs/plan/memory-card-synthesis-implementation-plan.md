@@ -33,7 +33,7 @@ Implement the first production slice of value-directed Memory Card synthesis:
 
 - Full autonomous ReAct runtime.
 - Arbitrary shell/web tool execution from the app.
-- SQLite FTS/embedding history index.
+- SQLite FTS/embedding history index for synthesis runtime global observation retrieval.
 - Direct Skill file mutation without Memory Card review.
 
 ## Agent Runtime Reuse Constraint
@@ -140,7 +140,7 @@ Deferred but now bounded:
 
 - Provider-driven tool-call loop using the same `SynthesisReview` contract. Tracking: GitHub issue #41.
 - Web search/read tools with citations and privacy-safe abstract queries. Tracking: GitHub issue #45.
-- Embedding-backed observation search if lexical search misses real history patterns. Tracking: GitHub issue #42.
+- FTS/Embedding-backed global Observation retrieval is explicitly paused by user decision. Tracking issue #42 is closed; reopen only if lexical/read-only history windows prove insufficient in real use.
 
 ### Phase 6: Global Vision Context Quality
 
@@ -210,18 +210,17 @@ Acceptance:
 - Web evidence cannot be the sole basis for a project preference Memory Card.
 - Web traces remain compact in Review Inbox/provider context.
 
-### Phase 10: FTS / Embedding Observation Search
+### Phase 10: Paused FTS / Embedding Observation Search
 
-Tracking: GitHub issue #42
+Tracking: GitHub issue #42, closed by user preference
 
-Goal: improve global observation recall when lexical search misses real historical patterns.
+Decision: do not implement this now. The synthesis runtime should first rely on explainable read-only tools: direct observation evidence, broader lexical/history windows, workflow failure summaries, Memory Card comparison, and Skill comparison.
 
 Acceptance:
 
-- Retrieval layer is replaceable and falls back to lexical search.
-- Tests prove at least one lexical miss that FTS/embedding can recover.
-- Returned context remains snippet-sized and local-only.
-- Review Inbox first paint is not blocked by expensive retrieval.
+- No FTS/Embedding retrieval work is included in the current roadmap.
+- No UI, provider prompt, or runtime behavior should imply this feature is required.
+- If future real usage shows lexical/read-only history context is insufficient, create a new Chinese GitHub issue with concrete missed-recall examples before implementation.
 
 ### Phase 11: Review Inbox Trace Presentation
 

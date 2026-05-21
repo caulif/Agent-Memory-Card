@@ -12,6 +12,7 @@ import {
   type ProjectMemoryCardLibrary,
   type ProjectReviewInbox,
   type ProjectSnapshot,
+  type SynthesisTraceEntry,
   type PanelPageProps,
 } from "../../ui-helpers";
 
@@ -98,7 +99,7 @@ export function Drafts({
       </Panel>
 
       {/* ===== 极致两栏 triage 工作区 ===== */}
-      <div className="drafts-grid" style={{ gridTemplateColumns: "310px minmax(0, 1fr)" }}>
+      <div className="drafts-grid">
         {/* 左栏：建议收件箱列表 */}
         <div className="drafts-column">
           <div className="drafts-column-head">
@@ -409,16 +410,87 @@ function ValueSynthesisPanel({ candidate }: { candidate: CandidateRecord }) {
           {extraction.target_context.target_id ? ` · ${extraction.target_context.target_id}` : ""} — {extraction.target_context.why_this_target}
         </p>
       )}
-      {trace.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "12px" }}>
-          {trace.map((entry) => (
-            <span key={`${entry.step}-${entry.summary}`} className="tag-quiet" title={entry.summary}>
-              {traceStepLabel(entry.step)}
-            </span>
-          ))}
-        </div>
-      )}
+      <SynthesisTracePanel trace={trace} />
     </section>
+  );
+}
+
+function SynthesisTracePanel({ trace }: { trace: SynthesisTraceEntry[] }) {
+  const groups = groupTraceEntries(trace);
+  if (groups.length === 0) return null;
+  return (
+    <div
+      aria-label="Synthesis Trace"
+      style={{
+        borderTop: "1px solid var(--color-border)",
+        marginTop: "14px",
+        paddingTop: "14px",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center", marginBottom: "10px" }}>
+        <strong style={{ fontSize: "12px", color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          Synthesis Trace
+        </strong>
+        <span className="tag-quiet">只读证据链</span>
+      </div>
+      <div style={{ display: "grid", gap: "8px" }}>
+        {groups.map((group) => (
+          <article
+            key={group.key}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(92px, 120px) minmax(0, 1fr)",
+              gap: "10px",
+              padding: "9px 10px",
+              border: "1px solid var(--color-border)",
+              borderRadius: "var(--radius-sm)",
+              background: "var(--color-canvas)",
+            }}
+          >
+            <div>
+              <strong style={{ display: "block", fontSize: "12px", color: "var(--color-text-primary)" }}>{group.title}</strong>
+              <span style={{ display: "block", marginTop: "3px", fontSize: "11px", lineHeight: 1.35, color: "var(--color-text-subtle)" }}>
+                {group.helper}
+              </span>
+            </div>
+            <div style={{ minWidth: 0 }}>
+              {group.entries.map((entry) => (
+                <div key={`${group.key}-${entry.step}-${entry.summary}`} style={{ marginBottom: "6px" }}>
+                  <p style={{ margin: 0, fontSize: "12px", lineHeight: 1.45, color: "var(--color-text-secondary)" }}>
+                    <span style={{ color: "var(--color-text-muted)", fontWeight: 700 }}>{traceStepLabel(entry.step)}：</span>
+                    {entry.summary}
+                  </p>
+                  {entry.item_ids && entry.item_ids.length > 0 ? (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "5px" }}>
+                      {entry.item_ids.slice(0, 4).map((itemId) => (
+                        <code
+                          key={itemId}
+                          style={{
+                            fontSize: "10.5px",
+                            color: "var(--color-text-muted)",
+                            background: "var(--color-surface)",
+                            border: "1px solid var(--color-border)",
+                            borderRadius: "var(--radius-sm)",
+                            padding: "1px 5px",
+                            maxWidth: "100%",
+                            overflowWrap: "anywhere",
+                          }}
+                        >
+                          {itemId}
+                        </code>
+                      ))}
+                      {entry.item_ids.length > 4 ? (
+                        <span className="tag-quiet">+{entry.item_ids.length - 4}</span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -429,6 +501,61 @@ function ValueDeltaRow({ label, value }: { label: string; value?: string }) {
       <strong>{label}：</strong>{value}
     </p>
   );
+}
+
+type TraceGroup = {
+  key: string;
+  title: string;
+  helper: string;
+  steps: string[];
+  entries: SynthesisTraceEntry[];
+};
+
+function groupTraceEntries(trace: SynthesisTraceEntry[]): TraceGroup[] {
+  const definitions: Array<Omit<TraceGroup, "entries">> = [
+    {
+      key: "direct-evidence",
+      title: "直接证据",
+      helper: "候选附近的历史片段",
+      steps: ["search_observations", "filter"],
+    },
+    {
+      key: "global-history",
+      title: "更宽历史",
+      helper: "跨会话重复信号",
+      steps: ["search_global_history"],
+    },
+    {
+      key: "workflow-failure",
+      title: "失败模式",
+      helper: "重复返工或验收缺口",
+      steps: ["summarize_workflow_failures"],
+    },
+    {
+      key: "memory-comparison",
+      title: "规则库对照",
+      helper: "查重、覆盖或合并",
+      steps: ["search_memory_cards", "find_memory_duplicates", "duplicate_check"],
+    },
+    {
+      key: "skill-comparison",
+      title: "Skill 对照",
+      helper: "目标 Skill 与缺口",
+      steps: ["search_skills", "compare_with_skill"],
+    },
+    {
+      key: "decision",
+      title: "审阅决策",
+      helper: "转写规范与停止原因",
+      steps: ["value_delta", "read_writing_guide", "rewrite", "stop"],
+    },
+  ];
+  return definitions
+    .map((definition) => ({
+      ...definition,
+      entries: trace.filter((entry) => definition.steps.includes(entry.step)).slice(0, 3),
+    }))
+    .filter((group) => group.entries.length > 0);
 }
 
 function memoryCardFunctionLabel(value?: string | null) {
@@ -457,7 +584,9 @@ function traceStepLabel(value: string) {
     value_delta: "已比较价值差异",
     duplicate_check: "已查重",
     rewrite: "已转写",
-    search_observations: "已读历史",
+    search_observations: "已读直接证据",
+    search_global_history: "已读更宽历史",
+    summarize_workflow_failures: "已摘要失败模式",
     search_memory_cards: "已查规则库",
     search_skills: "已查 Skills",
     read_writing_guide: "已读写作规范",

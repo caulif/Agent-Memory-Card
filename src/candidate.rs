@@ -110,6 +110,8 @@ pub struct TargetContext {
 pub struct SynthesisTraceEntry {
     pub step: String,
     pub summary: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub item_ids: Vec<String>,
 }
 
 /// 单层执行记录：层名 + 耗时 + 关键计数（如 cluster_size、kept_ratio）。
@@ -1268,10 +1270,12 @@ fn synthesis_trace_for_candidate(
         SynthesisTraceEntry {
             step: "filter".to_string(),
             summary: "Kept because the candidate passed durable-memory review and reached the user Review Inbox.".to_string(),
+            item_ids: Vec::new(),
         },
         SynthesisTraceEntry {
             step: "value_delta".to_string(),
             summary: "Compared against the candidate route and merge hints to require a concrete future behavior delta.".to_string(),
+            item_ids: Vec::new(),
         },
     ];
     if candidate
@@ -1283,6 +1287,7 @@ fn synthesis_trace_for_candidate(
         trace.push(SynthesisTraceEntry {
             step: "duplicate_check".to_string(),
             summary: "Existing Memory Card overlap found; approval should update the existing card instead of adding clutter.".to_string(),
+            item_ids: Vec::new(),
         });
     }
     trace.push(SynthesisTraceEntry {
@@ -1293,6 +1298,7 @@ fn synthesis_trace_for_candidate(
             "Deterministic fallback rendered a structured Memory Card proposal with value metadata."
                 .to_string()
         },
+        item_ids: Vec::new(),
     });
     if let Some(review) = synthesis {
         trace.extend(synthesis_agent::review_to_trace(review));

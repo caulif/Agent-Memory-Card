@@ -312,6 +312,7 @@ pub fn review_to_trace(review: &SynthesisReview) -> Vec<SynthesisTraceEntry> {
         .map(|event| SynthesisTraceEntry {
             step: event.tool.as_str().to_string(),
             summary: event.summary.clone(),
+            item_ids: event.item_ids.clone(),
         })
         .collect::<Vec<_>>();
     trace.push(SynthesisTraceEntry {
@@ -321,6 +322,7 @@ pub fn review_to_trace(review: &SynthesisReview) -> Vec<SynthesisTraceEntry> {
             review.stop_reason.as_str(),
             review.proposal.action
         ),
+        item_ids: Vec::new(),
     });
     trace
 }

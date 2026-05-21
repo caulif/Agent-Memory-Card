@@ -118,7 +118,10 @@ if (!fs.existsSync(demoPath)) {
     'already_covered',
     'No Card Is A Success',
     'value_delta',
-    'synthesis_trace'
+    'synthesis_trace',
+    'search_global_history',
+    'summarize_workflow_failures',
+    'item_ids'
   ];
   const missingDemoTerms = demoRequiredTerms.filter(term => !demoContent.includes(term));
   if (missingDemoTerms.length > 0) {
@@ -151,6 +154,33 @@ if (!fs.existsSync(draftsPath)) {
     hasFailure = true;
   } else {
     console.log('[PASS] Drafts.tsx: Candidate fallback preview uses mature Memory Card wording.\n');
+  }
+
+  const traceRequiredTerms = [
+    'Synthesis Trace',
+    '只读证据链',
+    '直接证据',
+    '更宽历史',
+    '失败模式',
+    '规则库对照',
+    'Skill 对照',
+    'item_ids',
+    'search_global_history',
+    'summarize_workflow_failures'
+  ];
+  const missingTraceTerms = traceRequiredTerms.filter(term => !draftsContent.includes(term));
+  if (missingTraceTerms.length > 0 || draftsContent.toLowerCase().includes('chain-of-thought')) {
+    console.log('[FAIL] Drafts.tsx: Review Inbox must show an explainable synthesis trace without chain-of-thought.');
+    if (missingTraceTerms.length > 0) {
+      console.log(`       Missing required trace terms: ${missingTraceTerms.map(t => `'${t}'`).join(', ')}`);
+    }
+    if (draftsContent.toLowerCase().includes('chain-of-thought')) {
+      console.log("       Found banned wording: 'chain-of-thought'");
+    }
+    console.log('');
+    hasFailure = true;
+  } else {
+    console.log('[PASS] Drafts.tsx: Review Inbox exposes compact synthesis trace evidence.\n');
   }
 }
 

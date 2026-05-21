@@ -44,9 +44,10 @@
 /* ===== Drafts 改为宽留白双栏卡片结构 ===== */
 .drafts-grid {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr) 310px;
+  grid-template-columns: 310px minmax(0, 1fr);
   gap: 24px;
   align-items: start;
+  min-width: 0;
 }
 
 .drafts-column {

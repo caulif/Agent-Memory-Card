@@ -153,7 +153,7 @@ Default context:
 
 - The selected candidate cluster and its evidence quotes.
 - Nearby observations from the same session or time window.
-- Existing Memory Cards with high lexical or embedding similarity.
+- Existing Memory Cards with high lexical or deterministic similarity.
 - Project-level Skills and their mounted Memory Cards.
 - Global Skills only as reference, not as default attachment targets.
 - The project-local Memory Card writing guide described below.
@@ -378,16 +378,16 @@ The user should not see raw chain-of-thought.
 To support global vision without overengineering:
 
 - Index observations with session ID, timestamp, source file, speaker, tags, and normalized text.
-- Add a simple grep-like search over observations first.
-- Add embedding search only if lexical search misses obvious historical patterns.
+- Use simple grep-like / lexical search over observations first.
+- Do not add FTS or embedding search to the current synthesis roadmap; reopen that direction only with concrete missed-recall evidence and a new Chinese GitHub issue.
 - Return short snippets, never entire long sessions by default.
 - Let the writer agent ask for specific neighboring context only when needed.
 - Let the agent search broadly when the value question requires it; broad search is acceptable when the trace explains why.
 
 The first version can use:
 
-- SQLite FTS or existing file-backed observation search.
-- A small Rust search service exposed to Tauri and provider flows.
+- Existing file-backed observation search and bounded local history windows.
+- A small Rust search service exposed to Tauri and provider flows only if it stays lexical/read-only.
 - Stable observation IDs for evidence validation.
 
 ## Implementation Sketch
@@ -504,7 +504,7 @@ This is still a read-only context improvement. It does not mount cards, mutate S
 ## Open Questions
 
 1. Should Skill fusion produce an editable preview before writing the mounted Memory Card context?
-2. Should the first implementation use only lexical observation search, or include embedding search immediately?
+2. Should FTS/Embedding observation retrieval be reopened later? Current decision: no, unless real usage shows lexical/read-only history context is insufficient.
 3. Should mature Memory Cards be stored as structured JSON internally and rendered as Markdown, or should Markdown remain the canonical body?
 4. How should the UI rank proposals: by confidence, target Skill importance, repeated pain, or expected future value?
 

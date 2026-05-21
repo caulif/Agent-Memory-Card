@@ -372,6 +372,7 @@ export type TargetContext = {
 export type SynthesisTraceEntry = {
   step: string;
   summary: string;
+  item_ids?: string[];
 };
 
 export type EvidenceBundle = {

@@ -122,8 +122,8 @@ export function createDemoProjectSnapshot(projectPath: string): ProjectSnapshot 
             why_this_target: "该 Skill 负责项目预览与文档路径，最需要这张 Memory Card 的验收边界。",
           },
           synthesis_trace: [
-            { step: "value_delta", summary: "Compared demo preview behavior against the Skill target." },
-            { step: "rewrite", summary: "Rendered as a Skill-targeted Memory Card." },
+            { step: "value_delta", summary: "Compared demo preview behavior against the Skill target.", item_ids: [] },
+            { step: "rewrite", summary: "Rendered as a Skill-targeted Memory Card.", item_ids: [] },
           ],
         },
       },
@@ -295,9 +295,31 @@ function createDemoCandidateSynthesis(base: ProjectSnapshot["drafts"][number]["e
         rationale: "No Card Is A Success: 保持规则库精简。",
       },
       synthesis_trace: [
-        { step: "search_memory_cards", summary: "Found existing Memory Card safe-actions." },
-        { step: "find_memory_duplicates", summary: "Classified the candidate as already covered." },
-        { step: "stop", summary: "Stopped with already_covered after producing no-new-card decision." },
+        {
+          step: "search_observations",
+          summary: "Read the direct evidence about preview write actions.",
+          item_ids: ["demo-observation-2"],
+        },
+        {
+          step: "search_global_history",
+          summary: "Checked broader demo history and found the same safety boundary repeated.",
+          item_ids: ["demo-observation-3"],
+        },
+        {
+          step: "search_memory_cards",
+          summary: "Compared 2 Memory Card matches; top `safe-actions` is `already_covered_candidate`.",
+          item_ids: ["safe-actions"],
+        },
+        {
+          step: "find_memory_duplicates",
+          summary: "Classified the candidate as already covered by the existing Memory Card.",
+          item_ids: ["safe-actions"],
+        },
+        {
+          step: "stop",
+          summary: "Stopped with already_covered after producing no-new-card decision.",
+          item_ids: [],
+        },
       ],
     };
   }
@@ -319,10 +341,41 @@ function createDemoCandidateSynthesis(base: ProjectSnapshot["drafts"][number]["e
       why_this_target: "这是一个 Skill-targeted Memory Card 示例，展示如何把提炼结果转成可挂载的 Skill 上下文。",
     },
     synthesis_trace: [
-      { step: "search_observations", summary: "Read demo review evidence." },
-      { step: "search_skills", summary: "Matched a project-level Skill target." },
-      { step: "compare_with_skill", summary: "Found a concrete Skill gap." },
-      { step: "stop", summary: "Stopped with skill_gap_found after producing a targeted card." },
+      {
+        step: "search_observations",
+        summary: "Read demo review evidence for the first-run preview gap.",
+        item_ids: ["demo-observation-1"],
+      },
+      {
+        step: "search_global_history",
+        summary: "Read broader history to confirm this is a repeated onboarding gap, not a one-off note.",
+        item_ids: ["demo-observation-2", "demo-observation-3"],
+      },
+      {
+        step: "summarize_workflow_failures",
+        summary: "Found a repeated failure mode: users can see static cards but cannot tell which action is useful next.",
+        item_ids: ["demo-observation-3"],
+      },
+      {
+        step: "search_memory_cards",
+        summary: "Compared existing Memory Cards; none fully covers the Skill acceptance boundary.",
+        item_ids: ["preview-mode", "safe-actions"],
+      },
+      {
+        step: "search_skills",
+        summary: "Matched a project-level Skill target for preview and documentation work.",
+        item_ids: ["project:obsidian-markdown"],
+      },
+      {
+        step: "compare_with_skill",
+        summary: "Found a concrete Skill gap: the Skill lacks first-run acceptance checks.",
+        item_ids: ["project:obsidian-markdown"],
+      },
+      {
+        step: "stop",
+        summary: "Stopped with skill_gap_found after producing a targeted card.",
+        item_ids: [],
+      },
     ],
   };
 }

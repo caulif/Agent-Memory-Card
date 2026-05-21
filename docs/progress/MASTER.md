@@ -279,7 +279,7 @@
 
 ## 14. 2026-05-21 Synthesis Runtime 全局视野质量补强
 *   **Issue**: GitHub #39 continuation.
-*   **GitHub Status**: #39 closed after PR #35 pull_request CI passed for commit `c726aa9`; provider loop, Web/read, and embedding search remain separate follow-up work.
+*   **GitHub Status**: #39 closed after PR #35 pull_request CI passed for commit `c726aa9`; provider loop and Web/read remain separate follow-up work. FTS/Embedding global observation retrieval was later paused by user decision.
 *   **Intent**: 让只读 synthesis runtime 不只看当前候选附近的局部文本，而能解释它读过哪些更宽的历史 observations，并识别重复工作流失败模式。
 *   **Production Changes**:
     *   `src/synthesis_agent.rs`: 将 observation context 分为 direct evidence 与 broader history；新增 `search_global_history` trace event。
@@ -331,12 +331,41 @@
 *   **Created Issues**:
     *   #41 `【规划】Synthesis Runtime：Provider 工具调用循环`
     *   #45 `【规划】Synthesis Runtime：隐私安全 Web search/read 工具`
-    *   #42 `【规划】Synthesis Runtime：FTS / Embedding 全局 Observation 检索`
+    *   #42 `【规划】Synthesis Runtime：FTS / Embedding 全局 Observation 检索` — closed / paused by user decision; not part of the active roadmap.
     *   #43 `【规划】Review Inbox：展示可解释 Synthesis Trace`
     *   #44 `【规划】Skill-targeted Memory Card 反事实评估与有用性指标`
 *   **Issue Hygiene**:
     *   #43 已调整为 `lane:ui`。
-    *   #41/#42/#44/#45 保持 `lane:core`；后续实现时可按实际工作面补 `lane:eval` 或 `lane:ui`。
+    *   #41/#44/#45 保持打开状态；后续实现时可按实际工作面补 `lane:eval` 或 `lane:ui`。
+    *   #42 已关闭：全局视野质量优先通过可解释只读 history window、workflow failure、Memory Card/Skill comparison 解决，不引入 FTS/Embedding。
 *   **CI Note**:
     *   PR #35 latest head `103bcdd` pull_request Windows run passed.
+    *   PR #35 latest head `f67f7a1` pull_request Windows run passed.
     *   同 head 的 push workflow cancelled 是 concurrency 行为，不代表代码失败。
+
+---
+
+## 17. 2026-05-21 Review Inbox 可解释 Synthesis Trace 与规划收束
+*   **Issue**: GitHub #43 tracks the Review Inbox trace presentation.
+*   **Planning Adjustment**:
+    *   GitHub #42 已按用户反馈关闭：FTS / Embedding 全局 Observation 检索不是当前必要功能。
+    *   当前全局视野路线改为优先使用可解释只读工具：direct observations、broader lexical/history window、workflow failure summary、Memory Card comparison、Skill comparison。
+*   **Intent**: 让用户在 Review Inbox 中直接看懂 runtime 为什么推荐新增、合并、已覆盖或需要人工判断，同时不恢复诊断 cockpit。
+*   **Production Changes**:
+    *   `src/candidate.rs` / `src/synthesis_agent.rs`: `SynthesisTraceEntry` 增加可选 `item_ids`，把只读工具引用的 observation / Memory Card / Skill id 传到 UI。
+    *   `app/src/components/pages/Drafts.tsx`: 新增紧凑 `SynthesisTracePanel`，按直接证据、更宽历史、失败模式、规则库对照、Skill 对照、审阅决策分组展示 trace summary 和引用 id。
+    *   `app/src/demo/demo-data.ts`: 演示候选增加 `search_global_history`、`summarize_workflow_failures` 和引用 id，首屏能展示真实解释链。
+    *   `app/scripts/verify-ui-focus-contract.mjs`: 增加 trace 防回归检查，要求 Review Inbox 暴露 compact trace，并禁止 chain-of-thought。
+    *   `app/src/styles/project-detail.css` / `Drafts.tsx`: 移除 Drafts 内联双栏宽度，恢复 CSS 移动端单列规则，移动端 trace 可读。
+*   **Verification So Far**:
+    *   `bun run --cwd app verify-ui` -> PASS.
+    *   `bun test --cwd app ./src/utils/review-workbench.test.ts ./src/utils/kernel-plan.test.ts` -> PASS, 28 passed.
+    *   `bun run --cwd app build` -> PASS.
+    *   `cargo fmt --check` -> PASS.
+    *   `cargo test --manifest-path Cargo.toml synthesis_agent --lib` -> PASS, 8 passed.
+    *   `cargo test --manifest-path Cargo.toml candidate::tests::visible_candidate_inbox --lib` -> PASS, 2 passed.
+    *   `cargo test --manifest-path Cargo.toml --lib` -> PASS, 316 passed.
+    *   `cargo clippy -- -D warnings` -> PASS.
+    *   `cargo test --test extract_quality_v2 --quiet` -> PASS, 21 passed / 1 ignored.
+    *   `cargo test --test golden_set_regression --quiet` -> PASS, 3 passed.
+    *   Playwright trial on `http://127.0.0.1:1420`: desktop and mobile show Synthesis Trace, direct evidence, broader history, workflow failure, Memory Card comparison, Skill comparison, referenced ids; no horizontal overflow; no console errors; no chain-of-thought.

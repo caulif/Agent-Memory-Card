@@ -258,6 +258,7 @@ fn visible_candidate_inbox_matures_existing_value_metadata_preview() {
     candidate.extraction.synthesis_trace = vec![SynthesisTraceEntry {
         step: "value_delta".to_string(),
         summary: "existing metadata".to_string(),
+        item_ids: Vec::new(),
     }];
     add_candidate(temp.path(), candidate).expect("candidate");
 
